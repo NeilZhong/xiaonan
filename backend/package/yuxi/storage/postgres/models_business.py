@@ -62,6 +62,10 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     role = Column(String, nullable=False, default="user")  # 角色: superadmin, admin, user
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # 部门ID
+    # ★ 公安业务扩展字段 (via ALTER TABLE migration)
+    real_name = Column(String(50), nullable=True)  # 真实姓名
+    police_id = Column(String(20), nullable=True, unique=True, index=True)  # 警号
+    police_rank = Column(String(20), nullable=True)  # 警衔
     created_at = Column(DateTime, default=utc_now_naive)
     last_login = Column(DateTime, nullable=True)
 
@@ -95,6 +99,9 @@ class User(Base):
             "avatar": normalize_public_minio_url(self.avatar),
             "role": self.role,
             "department_id": self.department_id,
+            "real_name": self.real_name,
+            "police_id": self.police_id,
+            "police_rank": self.police_rank,
             "created_at": format_utc_datetime(self.created_at),
             "last_login": format_utc_datetime(self.last_login),
             "login_failed_count": self.login_failed_count,

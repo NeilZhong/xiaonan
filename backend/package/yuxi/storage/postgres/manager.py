@@ -11,15 +11,16 @@ from sqlalchemy.orm import declarative_base
 from yuxi.storage.postgres.models_business import AGENT_RUN_TERMINAL_STATUSES
 from yuxi.storage.postgres.models_business import Base as BusinessBase
 from yuxi.storage.postgres.models_knowledge import Base as KnowledgeBase
+from yuxi.storage.postgres.models_police import Base as PoliceBase  # ★ 公安业务模型
 from yuxi.utils import logger
 from yuxi.utils.singleton import SingletonMeta
 
-# 合并两个 Base
+# 合并所有 Base (PoliceBase 复用 BusinessBase，此处仅为显式注册)
 CombinedBase = declarative_base()
 AGENT_RUN_TERMINAL_STATUS_SQL = ", ".join(f"'{status}'" for status in AGENT_RUN_TERMINAL_STATUSES)
 
 # 继承所有表
-for module in [KnowledgeBase, BusinessBase]:
+for module in [KnowledgeBase, BusinessBase, PoliceBase]:
     for table_name in dir(module):
         table = getattr(module, table_name)
         if isinstance(table, type) and hasattr(table, "__tablename__"):
@@ -853,6 +854,228 @@ class PostgresManager(metaclass=SingletonMeta):
             ON agent_run_requests(uid, agent_slug, conversation_thread_id, status, created_at, id)
             """,
             "CREATE INDEX IF NOT EXISTS ix_agent_run_requests_dispatched_run_id ON agent_run_requests(dispatched_run_id)",  # noqa: E501
+            # ── ★ 公安业务表迁移 ──────────────────────────────────────────
+            # 用户表扩展: 警号、警衔、真实姓名 (POLICE_REQUIREMENTS §5.2.1)
+            "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS real_name VARCHAR(50)",
+            "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS police_id VARCHAR(20)",
+            "ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS police_rank VARCHAR(20)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_police_id ON users(police_id) WHERE police_id IS NOT NULL",
+            # 案件表
+            """
+            CREATE TABLE IF NOT EXISTS police_cases (
+                id SERIAL PRIMARY KEY,
+                case_number VARCHAR(50) NOT NULL UNIQUE,
+                title VARCHAR(200) NOT NULL,
+                case_type VARCHAR(50),
+                description TEXT,
+                status VARCHAR(20) DEFAULT 'draft',
+                phase VARCHAR(30) DEFAULT 'research',
+                priority VARCHAR(10) DEFAULT 'medium',
+                incident_date TIMESTAMPTZ,
+                incident_location TEXT,
+                total_amount DOUBLE PRECISION,
+                victim_info JSON DEFAULT '{}',
+                suspect_info JSON DEFAULT '[]',
+                extra JSON DEFAULT '{}',
+                knowledge_base_id VARCHAR(100),
+                graph_id VARCHAR(100),
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_cases_type ON police_cases(case_type)",
+            "CREATE INDEX IF NOT EXISTS ix_police_cases_status ON police_cases(status)",
+            "CREATE INDEX IF NOT EXISTS ix_police_cases_phase ON police_cases(phase)",
+            # 案件成员表
+            """
+            CREATE TABLE IF NOT EXISTS police_case_members (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role VARCHAR(20) NOT NULL,
+                joined_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_case_members_case ON police_case_members(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_case_members_user ON police_case_members(user_id)",
+            # 案件阶段记录
+            """
+            CREATE TABLE IF NOT EXISTS police_case_phases (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+                phase VARCHAR(30) NOT NULL,
+                status VARCHAR(20) DEFAULT 'active',
+                started_at TIMESTAMPTZ DEFAULT NOW(),
+                completed_at TIMESTAMPTZ,
+                summary TEXT,
+                extra JSON DEFAULT '{}'
+            )
+            """,
+            # 任务表
+            """
+            CREATE TABLE IF NOT EXISTS police_tasks (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+                title VARCHAR(200) NOT NULL,
+                description TEXT,
+                type VARCHAR(50) NOT NULL,
+                status VARCHAR(20) DEFAULT 'pending',
+                assignee_type VARCHAR(10) NOT NULL,
+                assignee_id INTEGER,
+                assignee_name VARCHAR(100),
+                creator_id INTEGER,
+                creator_type VARCHAR(10) DEFAULT 'human',
+                priority VARCHAR(10) DEFAULT 'medium',
+                phase VARCHAR(30),
+                parent_task_id INTEGER REFERENCES police_tasks(id),
+                dependencies JSON DEFAULT '[]',
+                attachments JSON DEFAULT '[]',
+                result JSON,
+                instructions TEXT,
+                due_date TIMESTAMPTZ,
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                reviewed_by INTEGER REFERENCES users(id),
+                reviewed_at TIMESTAMPTZ,
+                signed_hash VARCHAR(128),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_tasks_case ON police_tasks(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_tasks_type ON police_tasks(type)",
+            "CREATE INDEX IF NOT EXISTS ix_police_tasks_status ON police_tasks(status)",
+            "CREATE INDEX IF NOT EXISTS ix_police_tasks_assignee ON police_tasks(assignee_type, assignee_id)",
+            # 任务流转规则表
+            """
+            CREATE TABLE IF NOT EXISTS police_task_flow_rules (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER REFERENCES police_cases(id) ON DELETE CASCADE,
+                name VARCHAR(100) NOT NULL,
+                trigger_event VARCHAR(50) NOT NULL,
+                condition JSON NOT NULL,
+                action VARCHAR(50) NOT NULL,
+                target_task_type VARCHAR(50),
+                target_assignee_type VARCHAR(10),
+                target_assignee_id INTEGER,
+                enabled INTEGER DEFAULT 1,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            # 任务事件日志
+            """
+            CREATE TABLE IF NOT EXISTS police_task_events (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+                task_id INTEGER NOT NULL REFERENCES police_tasks(id) ON DELETE CASCADE,
+                event_type VARCHAR(50) NOT NULL,
+                event_data JSON DEFAULT '{}',
+                created_by INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_task_events_case ON police_task_events(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_task_events_task ON police_task_events(task_id)",
+            # 证据材料表
+            """
+            CREATE TABLE IF NOT EXISTS police_evidence (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+                task_id INTEGER REFERENCES police_tasks(id),
+                name VARCHAR(200) NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                file_path VARCHAR(500) NOT NULL,
+                file_hash VARCHAR(64),
+                file_size INTEGER,
+                mime_type VARCHAR(100),
+                ocr_text TEXT,
+                parsed_content JSON,
+                extra JSON DEFAULT '{}',
+                uploaded_by INTEGER REFERENCES users(id),
+                version INTEGER DEFAULT 1,
+                parent_id INTEGER REFERENCES police_evidence(id),
+                reviewed_by INTEGER REFERENCES users(id),
+                reviewed_at TIMESTAMPTZ,
+                signed_hash VARCHAR(128),
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_evidence_case ON police_evidence(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_evidence_type ON police_evidence(type)",
+            "CREATE INDEX IF NOT EXISTS ix_police_evidence_task ON police_evidence(task_id)",
+            # 证据关联关系
+            """
+            CREATE TABLE IF NOT EXISTS police_evidence_links (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+                source_evidence_id INTEGER NOT NULL REFERENCES police_evidence(id) ON DELETE CASCADE,
+                target_evidence_id INTEGER NOT NULL REFERENCES police_evidence(id) ON DELETE CASCADE,
+                relation_type VARCHAR(50),
+                description TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            # 公安智能体定义
+            """
+            CREATE TABLE IF NOT EXISTS police_agents (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                description TEXT,
+                type VARCHAR(50) NOT NULL,
+                system_prompt TEXT NOT NULL,
+                model_config JSON NOT NULL,
+                tools JSON DEFAULT '[]',
+                skills JSON DEFAULT '[]',
+                knowledge_base_ids JSON DEFAULT '[]',
+                capabilities JSON DEFAULT '[]',
+                icon VARCHAR(50),
+                status VARCHAR(20) DEFAULT 'active',
+                is_template INTEGER DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_agents_type ON police_agents(type)",
+            # 智能体运行记录
+            """
+            CREATE TABLE IF NOT EXISTS police_agent_runs (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER REFERENCES police_agents(id),
+                task_id INTEGER REFERENCES police_tasks(id),
+                case_id INTEGER REFERENCES police_cases(id) ON DELETE CASCADE,
+                status VARCHAR(20) DEFAULT 'queued',
+                input JSON,
+                output JSON,
+                artifacts JSON DEFAULT '[]',
+                error TEXT,
+                tokens_used INTEGER DEFAULT 0,
+                duration_ms INTEGER,
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_runs_case ON police_agent_runs(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_runs_status ON police_agent_runs(status)",
+            # 审计日志
+            """
+            CREATE TABLE IF NOT EXISTS police_audit_logs (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER,
+                user_name VARCHAR(100),
+                action VARCHAR(50) NOT NULL,
+                resource_type VARCHAR(50),
+                resource_id INTEGER,
+                case_id INTEGER,
+                details JSON,
+                ip_address VARCHAR(45),
+                user_agent TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_audit_logs_case ON police_audit_logs(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_audit_logs_user ON police_audit_logs(user_id)",
         ]
         async with self.async_engine.begin() as conn:
             # 历史未绑定用户的 API Key 会在下方迁移语句里被静默删除，先计数告警

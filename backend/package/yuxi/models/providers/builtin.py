@@ -3,6 +3,18 @@
 from typing import Any
 
 BUILTIN_PROVIDERS: list[dict[str, Any]] = [
+    # ★ 智案协: 仅保留 OpenAI 兼容 API 接口方案
+    # 支持任何 OpenAI 兼容端点 (通义千问/DeepSeek/智谱/vLLM/Ollama/本地部署)
+    {
+        "provider_id": "custom-openai",
+        "display_name": "OpenAI 兼容接口 (自定义)",
+        "base_url": "",  # 从 OPENAI_API_BASE 环境变量读取
+        "api_key_env": "OPENAI_API_KEY",
+        "models_endpoint": "",  # 动态拼接
+        "capabilities": ["chat", "embedding", "rerank"],
+        "is_custom": True,
+    },
+    # ── 以下为语析原有供应商,保留代码兼容但不在 .env.template 中推荐 ──
     {
         "provider_id": "openai",
         "display_name": "OpenAI",

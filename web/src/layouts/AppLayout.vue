@@ -11,7 +11,10 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   MessageCirclePlus,
-  Search
+  Search,
+  Shield,
+  Briefcase,
+  ListChecks
 } from 'lucide-vue-next'
 
 import { useConfigStore } from '@/stores/config'
@@ -133,6 +136,31 @@ const mainList = computed(() => {
       exactActive: true
     }
   ]
+
+  // ★ 公安业务导航
+  items.push({
+    name: '工作台',
+    path: '/police',
+    icon: Shield,
+    activeIcon: Shield,
+    exactActive: true
+  })
+
+  items.push({
+    name: '案件管理',
+    path: '/police/cases',
+    icon: Briefcase,
+    activeIcon: Briefcase,
+    activePaths: ['/police/cases']
+  })
+
+  items.push({
+    name: '任务管理',
+    path: '/police/tasks',
+    icon: ListChecks,
+    activeIcon: ListChecks,
+    activePaths: ['/police/tasks']
+  })
 
   items.push({
     name: '智能体',

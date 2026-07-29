@@ -145,6 +145,43 @@ const router = createRouter({
       ]
     },
     {
+      path: '/police',
+      name: 'police',
+      component: AppLayout,
+      children: [
+        {
+          path: '',
+          name: 'PoliceDashboard',
+          component: () => import('../views/police/PoliceDashboardView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: 'cases',
+          name: 'PoliceCaseList',
+          component: () => import('../views/police/CaseListView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: 'cases/:caseId',
+          name: 'PoliceCaseDetail',
+          component: () => import('../views/police/CaseDetailView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: 'tasks',
+          name: 'PoliceTaskBoard',
+          component: () => import('../views/police/TaskBoardView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: 'tasks/:taskId',
+          name: 'PoliceTaskDetail',
+          component: () => import('../views/police/TaskDetailView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        }
+      ]
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'NotFound',
       component: () => import('../views/EmptyView.vue'),
