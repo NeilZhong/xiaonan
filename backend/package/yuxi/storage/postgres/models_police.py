@@ -547,3 +547,41 @@ class PoliceAuditLog(Base):
             "user_agent": self.user_agent,
             "created_at": format_utc_datetime(self.created_at),
         }
+
+
+class PoliceCaseWorkspace(Base):
+    """★ 案件独立工作区 — 每个案件拥有独立的证据/材料/产物存储命名空间
+
+    所有案件素材（证据、材料、研判报告等生成产物）统一以
+    storage_prefix = cases/{case_number}/ 为根路径存于 MinIO，
+    下分 evidence/ materials/ reports/ 三个子目录，形成专属工作区。
+    """
+
+    __tablename__ = "police_case_workspaces"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("police_cases.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    case_number = Column(String(50), nullable=False, index=True)  # 冗余案件编号，用于构造存储路径
+    storage_bucket = Column(String(64), nullable=False, default="police-workspace")  # MinIO 桶
+    storage_prefix = Column(String(255), nullable=False)  # cases/{case_number}/
+    knowledge_base_id = Column(String(100), nullable=True)  # 案件专属知识库 (Milvus collection)
+    graph_id = Column(String(100), nullable=True)  # 案件专属图谱 (Neo4j)
+    status = Column(String(20), default="ready")  # ready / initializing
+    stats = Column(JSON, default=dict)  # {evidence_count, material_count, report_count, total_size}
+    created_at = Column(DateTime, default=utc_now_naive)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "case_id": self.case_id,
+            "case_number": self.case_number,
+            "storage_bucket": self.storage_bucket,
+            "storage_prefix": self.storage_prefix,
+            "knowledge_base_id": self.knowledge_base_id,
+            "graph_id": self.graph_id,
+            "status": self.status,
+            "stats": self.stats or {},
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
+        }

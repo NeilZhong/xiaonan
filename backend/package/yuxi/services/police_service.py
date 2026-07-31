@@ -1,12 +1,15 @@
 """★ 公安业务服务层 — 案件 + 任务流转引擎 + 数字警员"""
 
+import asyncio
 import hashlib
 from typing import Any
 
 from yuxi.repositories.police_agent_repository import police_agent_repository
+from yuxi.repositories.police_workspace_repository import police_workspace_repository
 from yuxi.repositories.case_repository import case_repository
 from yuxi.repositories.evidence_repository import evidence_repository
 from yuxi.repositories.task_repository import task_repository
+from yuxi.storage.minio.client import get_minio_client
 from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils import logger
 
@@ -22,6 +25,11 @@ class PoliceCaseService:
         # 创建初始阶段记录
         initial_phase = case.phase or "research"
         await case_repository.update_phase(case.id, initial_phase)
+        # ★ 自动创建案件独立工作区 (证据/材料/产物统一存储命名空间)
+        try:
+            await police_workspace_service.get_or_create(case.id, case_number=case.case_number)
+        except Exception as e:
+            logger.warning(f"Auto-create workspace failed for case {case.id}: {e}")
         # 记录审计日志
         await self._audit(action="create", resource_type="case", resource_id=case.id, case_id=case.id, user_id=creator_id, details={"title": case.title})
         return case.to_dict()
@@ -498,7 +506,144 @@ class PoliceDashboardService:
         return {"items": [t.to_dict() for t in tasks], "total": total}
 
 
+class PoliceWorkspaceService:
+    """★ 案件独立工作区服务
+
+    为每个案件维护一个 MinIO 存储命名空间 (cases/{case_number}/)，
+    证据 / 材料 / 研判报告等产物统一落盘到对应子目录，并提供
+    文件浏览、上传、下载、删除能力。
+    """
+
+    WORKSPACE_BUCKET = "police-workspace"
+    CATEGORY_LABELS = {"evidence": "证据", "materials": "材料", "reports": "研判报告"}
+    VALID_CATEGORIES = ("evidence", "materials", "reports")
+
+    async def get_or_create(self, case_id: int, case_number: str | None = None) -> dict[str, Any]:
+        """获取或创建案件工作区；返回工作区 dict"""
+        if case_number is None:
+            case = await case_repository.get_by_id(case_id)
+            if not case:
+                raise ValueError(f"案件 {case_id} 不存在")
+            case_number = case.case_number
+        prefix = f"cases/{case_number}/"
+        workspace = await police_workspace_repository.upsert({
+            "case_id": case_id,
+            "case_number": case_number,
+            "storage_bucket": self.WORKSPACE_BUCKET,
+            "storage_prefix": prefix,
+            "status": "ready",
+        })
+        return workspace.to_dict()
+
+    async def get_workspace(self, case_id: int) -> dict[str, Any] | None:
+        """返回工作区信息 + 文件清单 + 统计"""
+        workspace = await police_workspace_repository.get_by_case_id(case_id)
+        if not workspace:
+            return None
+        files, stats = await self._list_files(workspace.storage_bucket, workspace.storage_prefix)
+        return {"workspace": workspace.to_dict(), "files": files, "stats": stats}
+
+    async def _list_files(self, bucket: str, prefix: str) -> tuple[list[dict], dict]:
+        """列出工作区下所有对象，按分类聚合"""
+        def _list():
+            client = get_minio_client().client
+            return list(client.list_objects(bucket, prefix=prefix, recursive=True))
+
+        try:
+            objects = await asyncio.to_thread(_list)
+        except Exception as e:
+            logger.warning(f"List workspace files failed: {e}")
+            return [], {"evidence_count": 0, "material_count": 0, "report_count": 0, "total_size": 0}
+
+        files: list[dict] = []
+        counts = {"evidence": 0, "materials": 0, "reports": 0}
+        total_size = 0
+        for obj in objects:
+            rel = obj.object_name[len(prefix):] if obj.object_name.startswith(prefix) else obj.object_name
+            parts = [p for p in rel.split("/") if p]
+            category = parts[0] if parts and parts[0] in self.VALID_CATEGORIES else "other"
+            name = parts[-1] if parts else ""
+            if not name:
+                continue
+            size = int(getattr(obj, "size", 0) or 0)
+            total_size += size
+            if category in counts:
+                counts[category] += 1
+            files.append({
+                "object_name": obj.object_name,
+                "category": category,
+                "category_label": self.CATEGORY_LABELS.get(category, category),
+                "name": name,
+                "size": size,
+                "last_modified": obj.last_modified.isoformat() if getattr(obj, "last_modified", None) else None,
+            })
+        files.sort(key=lambda x: (x["category"], x["name"]))
+        return files, {
+            "evidence_count": counts["evidence"],
+            "material_count": counts["materials"],
+            "report_count": counts["reports"],
+            "total_size": total_size,
+        }
+
+    async def upload(self, case_id: int, category: str, file, uploaded_by: int | None = None) -> dict[str, Any]:
+        """上传文件到工作区指定分类目录"""
+        if category not in self.VALID_CATEGORIES:
+            raise ValueError("非法的文件分类")
+        ws = await self.get_or_create(case_id)
+        content = await file.read()
+        if not content:
+            raise ValueError("空文件")
+        filename = file.filename or "unnamed"
+        object_name = f"{ws['storage_prefix']}{category}/{filename}"
+        client = get_minio_client()
+        await client.aupload_file(
+            ws["storage_bucket"], object_name, content,
+            file.content_type or "application/octet-stream",
+        )
+        return {
+            "object_name": object_name,
+            "bucket": ws["storage_bucket"],
+            "category": category,
+            "category_label": self.CATEGORY_LABELS.get(category, category),
+            "name": filename,
+            "size": len(content),
+            "uploaded_by": uploaded_by,
+        }
+
+    async def download(self, case_id: int, object_name: str) -> tuple[bytes, str, str]:
+        """下载工作区文件，返回 (bytes, content_type, filename)"""
+        ws = await police_workspace_repository.get_by_case_id(case_id)
+        if not ws:
+            raise ValueError("工作区不存在")
+        if not object_name.startswith(ws.storage_prefix):
+            raise ValueError("非法的工作区文件路径")
+        bucket = ws.storage_bucket
+
+        def _stat():
+            return get_minio_client().client.stat_object(bucket, object_name)
+
+        try:
+            stat = await asyncio.to_thread(_stat)
+            content_type = stat.content_type or "application/octet-stream"
+        except Exception:
+            content_type = "application/octet-stream"
+
+        data = await get_minio_client().adownload_file(bucket, object_name)
+        filename = object_name.split("/")[-1]
+        return data, content_type, filename
+
+    async def delete_file(self, case_id: int, object_name: str) -> bool:
+        """删除工作区文件"""
+        ws = await police_workspace_repository.get_by_case_id(case_id)
+        if not ws:
+            raise ValueError("工作区不存在")
+        if not object_name.startswith(ws.storage_prefix):
+            raise ValueError("非法的工作区文件路径")
+        return await get_minio_client().adelete_file(ws.storage_bucket, object_name)
+
+
 police_case_service = PoliceCaseService()
 police_task_service = PoliceTaskService()
 police_dashboard_service = PoliceDashboardService()
 police_agent_service = PoliceAgentService()
+police_workspace_service = PoliceWorkspaceService()

@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.utils.auth_middleware import get_db, get_required_user
 from yuxi.repositories.evidence_repository import evidence_repository
+from yuxi.services.police_service import police_workspace_service
+from yuxi.storage.minio.client import get_minio_client
 from yuxi.storage.postgres.models_business import User
+from yuxi.utils import logger
 
 evidence_router = APIRouter(prefix="/police/evidence", tags=["police-evidence"])
 
@@ -48,19 +51,22 @@ async def upload_evidence(
     current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """上传证据材料 — 自动计算 SHA-256 file_hash"""
+    """上传证据材料 — 自动计算 SHA-256 file_hash，并统一落入案件工作区"""
     content = await file.read()
     file_hash = hashlib.sha256(content).hexdigest()
 
-    # 存储到 MinIO (使用现有 minio client)
-    from yuxi.storage.minio.client import minio_client
-
-    object_name = f"police-evidence/{case_id}/{file.filename}"
+    # 存储到 MinIO — 统一落入案件工作区 cases/{case_number}/evidence/
+    object_name = f"local://police-evidence/{case_id}/{file.filename}"
     try:
-        minio_client.upload_bytes(object_name, content, file.content_type or "application/octet-stream")
+        ws = await police_workspace_service.get_or_create(case_id)
+        object_name = f"{ws['storage_prefix']}evidence/{file.filename}"
+        await get_minio_client().aupload_file(
+            ws["storage_bucket"], object_name, content,
+            file.content_type or "application/octet-stream",
+        )
     except Exception as e:
-        # 如果 MinIO 不可用,回退到本地路径
-        object_name = f"local://police-evidence/{case_id}/{file.filename}"
+        # 如果 MinIO 不可用,回退到本地路径 (best-effort)
+        logger.warning(f"Evidence upload to MinIO failed, fallback local: {e}")
 
     evidence = await evidence_repository.create({
         "case_id": case_id,

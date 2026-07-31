@@ -3,7 +3,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { policeDashboardApi, policeCaseApi, policeTaskApi, policeAgentApi } from '@/apis/police_api'
+import { policeDashboardApi, policeCaseApi, policeTaskApi, policeAgentApi, policeWorkspaceApi } from '@/apis/police_api'
 
 export const usePoliceStore = defineStore('police', () => {
   // ── 工作台统计 ──────────────────────────────────────────
@@ -167,13 +167,25 @@ export const usePoliceStore = defineStore('police', () => {
     } catch (e) { console.error('加载SOP失败', e) }
   }
 
+  // ── 案件工作区 ──────────────────────────────────────────
+  const workspace = ref(null)
+
+  async function loadWorkspace(caseId) {
+    try {
+      const res = await policeWorkspaceApi.get(caseId)
+      workspace.value = res.data
+    } catch (e) { console.error('加载工作区失败', e) }
+    return workspace.value
+  }
+
   return {
     stats, myTasks, reviewTasks, myTasksTotal, reviewTasksTotal,
     cases, casesTotal, currentCase, tasks, tasksTotal, currentTask,
-    agents, agentsTotal, currentAgent, sops,
+    agents, agentsTotal, currentAgent, sops, workspace,
     loadStats, loadMyTasks, loadReviewTasks,
     loadCases, loadCase, createCase, updateCase, updatePhase,
     loadTasks, loadTask, createTask, assignTask, startTask, completeTask, reviewTask,
     loadAgents, loadAgent, createAgent, updateAgent, deleteAgent, seedAgents, loadSops,
+    loadWorkspace,
   }
 })

@@ -276,6 +276,11 @@ watch(caseId, loadCase)
         <EvidenceTab :case-id="caseId" />
       </a-tab-pane>
 
+      <!-- 工作区 -->
+      <a-tab-pane key="workspace" tab="工作区">
+        <WorkspaceTab :case-id="caseId" />
+      </a-tab-pane>
+
       <!-- 动态 -->
       <a-tab-pane key="timeline" tab="动态">
         <CaseTimeline :case-id="caseId" />
@@ -374,7 +379,8 @@ watch(caseId, loadCase)
 // 子组件内联 (避免额外文件)
 import EvidenceTab from './EvidenceTab.vue'
 import CaseTimeline from './CaseTimeline.vue'
-export default { components: { EvidenceTab, CaseTimeline } }
+import WorkspaceTab from './WorkspaceTab.vue'
+export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
 </script>
 
 <style scoped>

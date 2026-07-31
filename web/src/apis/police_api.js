@@ -103,3 +103,16 @@ export const policeAgentApi = {
   updateSop: (sopId, data) => apiPut(`/api/police/agents/sops/${sopId}`, data),
   seed: () => apiPost('/api/police/agents/seed'),
 }
+
+// ── 案件独立工作区 ──────────────────────────────────────────
+export const policeWorkspaceApi = {
+  get: (caseId) => apiGet(`/api/police/workspaces/${caseId}`),
+  init: (caseId) => apiPost(`/api/police/workspaces/${caseId}/init`),
+  upload: (caseId, category, file) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return apiPost(`/api/police/workspaces/${caseId}/upload?category=${category}`, formData)
+  },
+  remove: (caseId, objectName) =>
+    apiDelete(`/api/police/workspaces/${caseId}/files`, { body: JSON.stringify({ object_name: objectName }) }),
+}
