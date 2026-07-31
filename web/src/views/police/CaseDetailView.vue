@@ -77,9 +77,39 @@ async function loadCase() {
   try {
     await policeStore.loadCase(caseId.value)
     await policeStore.loadTasks({ case_id: caseId.value, page_size: 100 })
+    await policeStore.loadAgents({ status: 'active', page_size: 100 })
   } finally {
     loading.value = false
   }
+}
+
+// 可选的分配对象
+const humanOptions = computed(() => {
+  const members = caseData.value?.members || []
+  return members.map(m => ({
+    label: `${m.username || m.user_name || '未命名'} (${{ commander: '指挥员', handler: '办案人', reviewer: '审核员', observer: '观察员' }[m.role] || m.role})`,
+    value: m.user_id,
+    name: m.username || m.user_name || '',
+  }))
+})
+
+const agentOptions = computed(() => {
+  return (policeStore.agents.value || []).map(a => ({
+    label: `${a.name} · ${a.badge_number || a.type}`,
+    value: a.id,
+    name: a.name,
+  }))
+})
+
+function handleAssigneeTypeChange(type) {
+  taskForm.value.assignee_type = type
+  taskForm.value.assignee_id = null
+  taskForm.value.assignee_name = ''
+}
+
+function handleAssigneeChange(value, option) {
+  taskForm.value.assignee_id = value
+  taskForm.value.assignee_name = option?.name || option?.label || ''
 }
 
 async function handleCreateTask() {
@@ -292,15 +322,24 @@ watch(caseId, loadCase)
         <a-row :gutter="16">
           <a-col :span="12">
             <a-form-item label="分配对象类型">
-              <a-radio-group v-model:value="taskForm.assignee_type">
+              <a-radio-group v-model:value="taskForm.assignee_type" @change="e => handleAssigneeTypeChange(e.target.value)">
                 <a-radio value="human">民警</a-radio>
-                <a-radio value="agent">智能体</a-radio>
+                <a-radio value="agent">数字警员</a-radio>
               </a-radio-group>
             </a-form-item>
           </a-col>
           <a-col :span="12">
             <a-form-item label="分配给">
-              <a-input v-model:value="taskForm.assignee_name" placeholder="姓名或智能体名称" />
+              <a-select
+                v-model:value="taskForm.assignee_id"
+                :options="taskForm.assignee_type === 'human' ? humanOptions : agentOptions"
+                :placeholder="taskForm.assignee_type === 'human' ? '选择办案民警' : '选择数字警员'"
+                :loading="loading"
+                allow-clear
+                show-search
+                option-filter-prop="label"
+                @change="handleAssigneeChange"
+              />
             </a-form-item>
           </a-col>
         </a-row>
