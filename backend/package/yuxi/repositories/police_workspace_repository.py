@@ -1,13 +1,13 @@
-"""★ 案件工作区仓储 — 案件独立存储命名空间的 CRUD
+"""★ 案件工作区仓储 — 案件独立存储命名空间 + 树状节点 CRUD
 
 遵循 yuxi 仓储规范：自管理 session（pg_manager.get_async_session_context）。
 """
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from yuxi.storage.postgres.models_police import PoliceCaseWorkspace
+from yuxi.storage.postgres.models_police import PoliceCaseWorkspace, PoliceWorkspaceNode
 
 
 class PoliceWorkspaceRepository:
@@ -77,6 +77,102 @@ class PoliceWorkspaceRepository:
             await session.commit()
             await session.refresh(workspace)
             return workspace
+
+    # ── 树状节点 ────────────────────────────────────────────────
+
+    async def list_nodes(self, workspace_id: int, parent_id: int | None = None) -> list[PoliceWorkspaceNode]:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = select(PoliceWorkspaceNode).where(PoliceWorkspaceNode.workspace_id == workspace_id)
+            if parent_id is not None:
+                stmt = stmt.where(PoliceWorkspaceNode.parent_id == parent_id)
+            else:
+                stmt = stmt.where(PoliceWorkspaceNode.parent_id.is_(None))
+            stmt = stmt.order_by(PoliceWorkspaceNode.node_type.desc(), PoliceWorkspaceNode.name.asc())
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def list_nodes_by_workspace(self, workspace_id: int) -> list[PoliceWorkspaceNode]:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = (
+                select(PoliceWorkspaceNode)
+                .where(PoliceWorkspaceNode.workspace_id == workspace_id)
+                .order_by(PoliceWorkspaceNode.node_type.desc(), PoliceWorkspaceNode.name.asc())
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def get_node(self, node_id: int) -> PoliceWorkspaceNode | None:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = select(PoliceWorkspaceNode).where(PoliceWorkspaceNode.id == node_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    async def get_node_by_name(
+        self, workspace_id: int, name: str, parent_id: int | None = None
+    ) -> PoliceWorkspaceNode | None:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = (
+                select(PoliceWorkspaceNode)
+                .where(PoliceWorkspaceNode.workspace_id == workspace_id)
+                .where(PoliceWorkspaceNode.name == name)
+            )
+            if parent_id is not None:
+                stmt = stmt.where(PoliceWorkspaceNode.parent_id == parent_id)
+            else:
+                stmt = stmt.where(PoliceWorkspaceNode.parent_id.is_(None))
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    async def create_node(self, data: dict[str, Any]) -> PoliceWorkspaceNode:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            node = PoliceWorkspaceNode(**data)
+            session.add(node)
+            await session.commit()
+            await session.refresh(node)
+            return node
+
+    async def update_node(self, node_id: int, data: dict[str, Any]) -> PoliceWorkspaceNode | None:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = select(PoliceWorkspaceNode).where(PoliceWorkspaceNode.id == node_id)
+            result = await session.execute(stmt)
+            node = result.scalar_one_or_none()
+            if not node:
+                return None
+            for k, v in data.items():
+                if hasattr(node, k) and v is not None:
+                    setattr(node, k, v)
+            await session.commit()
+            await session.refresh(node)
+            return node
+
+    async def delete_node(self, node_id: int) -> bool:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = delete(PoliceWorkspaceNode).where(PoliceWorkspaceNode.id == node_id)
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount > 0
+
+    async def delete_nodes_by_workspace(self, workspace_id: int) -> None:
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = delete(PoliceWorkspaceNode).where(PoliceWorkspaceNode.workspace_id == workspace_id)
+            await session.execute(stmt)
+            await session.commit()
 
 
 police_workspace_repository = PoliceWorkspaceRepository()

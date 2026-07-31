@@ -104,15 +104,24 @@ export const policeAgentApi = {
   seed: () => apiPost('/api/police/agents/seed'),
 }
 
-// ── 案件独立工作区 ──────────────────────────────────────────
+// ── 案件独立工作区（树状节点）────────────────────────────────
 export const policeWorkspaceApi = {
   get: (caseId) => apiGet(`/api/police/workspaces/${caseId}`),
   init: (caseId) => apiPost(`/api/police/workspaces/${caseId}/init`),
-  upload: (caseId, category, file) => {
+  createFolder: (caseId, { name, parent_id }) =>
+    apiPost(`/api/police/workspaces/${caseId}/folders`, { name, parent_id }),
+  upload: (caseId, parentId, file) => {
     const formData = new FormData()
     formData.append('file', file)
-    return apiPost(`/api/police/workspaces/${caseId}/upload?category=${category}`, formData)
+    const qs = parentId ? `?parent_id=${parentId}` : ''
+    return apiPost(`/api/police/workspaces/${caseId}/upload${qs}`, formData)
   },
-  remove: (caseId, objectName) =>
-    apiDelete(`/api/police/workspaces/${caseId}/files`, { body: JSON.stringify({ object_name: objectName }) }),
+  download: (caseId, nodeId) =>
+    `/api/police/workspaces/${caseId}/download?node_id=${nodeId}`,
+  move: (caseId, { node_id, target_parent_id }) =>
+    apiPost(`/api/police/workspaces/${caseId}/move`, { node_id, target_parent_id }),
+  rename: (caseId, { node_id, name }) =>
+    apiPost(`/api/police/workspaces/${caseId}/rename`, { node_id, name }),
+  remove: (caseId, nodeId) =>
+    apiDelete(`/api/police/workspaces/${caseId}/nodes`, { body: JSON.stringify({ node_id: nodeId }) }),
 }

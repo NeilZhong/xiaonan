@@ -1,5 +1,7 @@
 """★ 公安业务服务层 — 案件 + 任务流转引擎 + 数字警员"""
 
+from __future__ import annotations
+
 import asyncio
 import hashlib
 from typing import Any
@@ -10,6 +12,7 @@ from yuxi.repositories.case_repository import case_repository
 from yuxi.repositories.evidence_repository import evidence_repository
 from yuxi.repositories.task_repository import task_repository
 from yuxi.storage.minio.client import get_minio_client
+from yuxi.storage.postgres.models_police import Evidence
 from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils import logger
 
@@ -180,9 +183,30 @@ class PoliceTaskService:
                 "case_id": task.case_id, "task_id": task_id, "event_type": "completed",
                 "event_data": {"result": result}, "created_by": user_id,
             })
+            # ★ 把任务阶段性成果写入案件工作区
+            await self._write_task_artifact(task, result, user_id)
             # ★ 触发任务流转规则
             await self._trigger_flow_rules(task)
         return task.to_dict() if task else None
+
+    async def _write_task_artifact(self, task, result: dict | None, user_id: int) -> None:
+        """任务完成后将结果写入工作区「03-阶段性成果」"""
+        if not result:
+            return
+        try:
+            import json
+            content = json.dumps(result, ensure_ascii=False, indent=2).encode("utf-8")
+            filename = f"{task.type}-{task.id}-result.json"
+            await police_workspace_service.upload_task_artifact(
+                case_id=task.case_id,
+                task_id=task.id,
+                filename=filename,
+                content=content,
+                mime_type="application/json",
+                created_by=user_id,
+            )
+        except Exception as e:
+            logger.warning(f"Write task artifact to workspace failed: {e}")
 
     async def review_task(self, task_id: int, approved: bool, reviewer_id: int, reviewer_police_id: str) -> dict[str, Any] | None:
         """审核任务 — 通过时计算 signed_hash"""
@@ -507,19 +531,30 @@ class PoliceDashboardService:
 
 
 class PoliceWorkspaceService:
-    """★ 案件独立工作区服务
+    """★ 案件独立工作区服务（树状节点版）
 
     为每个案件维护一个 MinIO 存储命名空间 (cases/{case_number}/)，
-    证据 / 材料 / 研判报告等产物统一落盘到对应子目录，并提供
-    文件浏览、上传、下载、删除能力。
+    并以 PoliceWorkspaceNode 树状节点组织文件/文件夹：
+      - 01-证据     证据材料（与 evidence 表同步）
+      - 02-材料     民警手动上传的办案材料
+      - 03-阶段性成果 任务完成后自动生成的产物
+    支持文件夹嵌套、文件上传/下载/删除/移动。
     """
 
     WORKSPACE_BUCKET = "police-workspace"
-    CATEGORY_LABELS = {"evidence": "证据", "materials": "材料", "reports": "研判报告"}
-    VALID_CATEGORIES = ("evidence", "materials", "reports")
+    DEFAULT_FOLDERS = [
+        ("01-证据", "evidence"),
+        ("02-材料", "materials"),
+        ("03-阶段性成果", "artifacts"),
+    ]
+    FOLDER_CATEGORY = {
+        "evidence": "证据",
+        "materials": "材料",
+        "artifacts": "阶段性成果",
+    }
 
     async def get_or_create(self, case_id: int, case_number: str | None = None) -> dict[str, Any]:
-        """获取或创建案件工作区；返回工作区 dict"""
+        """获取或创建案件工作区；自动初始化默认文件夹"""
         if case_number is None:
             case = await case_repository.get_by_id(case_id)
             if not case:
@@ -533,113 +568,390 @@ class PoliceWorkspaceService:
             "storage_prefix": prefix,
             "status": "ready",
         })
+        await self._ensure_default_folders(workspace)
         return workspace.to_dict()
 
+    async def _ensure_default_folders(self, workspace: PoliceCaseWorkspace) -> None:
+        """幂等初始化默认根文件夹"""
+        for name, category in self.DEFAULT_FOLDERS:
+            existing = await police_workspace_repository.get_node_by_name(workspace.id, name, parent_id=None)
+            if existing:
+                continue
+            await police_workspace_repository.create_node({
+                "workspace_id": workspace.id,
+                "parent_id": None,
+                "node_type": "folder",
+                "name": name,
+                "storage_path": None,
+                "source_type": "system",
+                "extra": {"category": category},
+            })
+
     async def get_workspace(self, case_id: int) -> dict[str, Any] | None:
-        """返回工作区信息 + 文件清单 + 统计"""
+        """返回工作区信息 + 树状节点 + 统计"""
         workspace = await police_workspace_repository.get_by_case_id(case_id)
         if not workspace:
             return None
-        files, stats = await self._list_files(workspace.storage_bucket, workspace.storage_prefix)
-        return {"workspace": workspace.to_dict(), "files": files, "stats": stats}
+        await self._ensure_default_folders(workspace)
+        nodes = await police_workspace_repository.list_nodes_by_workspace(workspace.id)
+        tree = self._build_tree(nodes)
+        stats = self._calc_stats(nodes)
+        return {
+            "workspace": workspace.to_dict(),
+            "tree": tree,
+            "nodes": [n.to_dict() for n in nodes],
+            "stats": stats,
+        }
 
-    async def _list_files(self, bucket: str, prefix: str) -> tuple[list[dict], dict]:
-        """列出工作区下所有对象，按分类聚合"""
-        def _list():
-            client = get_minio_client().client
-            return list(client.list_objects(bucket, prefix=prefix, recursive=True))
+    def _build_tree(self, nodes: list[PoliceWorkspaceNode]) -> list[dict[str, Any]]:
+        """把扁平节点列表构建成嵌套树"""
+        by_id: dict[int, dict] = {}
+        roots: list[dict] = []
+        for n in nodes:
+            d = {**n.to_dict(), "children": []}
+            by_id[n.id] = d
+        for n in nodes:
+            d = by_id[n.id]
+            if n.parent_id is not None and n.parent_id in by_id:
+                by_id[n.parent_id]["children"].append(d)
+            else:
+                roots.append(d)
+        # 文件夹在前，按名称排序
+        roots.sort(key=lambda x: (0 if x["node_type"] == "folder" else 1, x["name"]))
+        return roots
 
-        try:
-            objects = await asyncio.to_thread(_list)
-        except Exception as e:
-            logger.warning(f"List workspace files failed: {e}")
-            return [], {"evidence_count": 0, "material_count": 0, "report_count": 0, "total_size": 0}
-
-        files: list[dict] = []
-        counts = {"evidence": 0, "materials": 0, "reports": 0}
-        total_size = 0
-        for obj in objects:
-            rel = obj.object_name[len(prefix):] if obj.object_name.startswith(prefix) else obj.object_name
-            parts = [p for p in rel.split("/") if p]
-            category = parts[0] if parts and parts[0] in self.VALID_CATEGORIES else "other"
-            name = parts[-1] if parts else ""
-            if not name:
+    def _calc_stats(self, nodes: list[PoliceWorkspaceNode]) -> dict[str, Any]:
+        evidence_count = material_count = artifact_count = file_count = total_size = 0
+        for n in nodes:
+            if n.node_type != "file":
                 continue
-            size = int(getattr(obj, "size", 0) or 0)
-            total_size += size
-            if category in counts:
-                counts[category] += 1
-            files.append({
-                "object_name": obj.object_name,
-                "category": category,
-                "category_label": self.CATEGORY_LABELS.get(category, category),
-                "name": name,
-                "size": size,
-                "last_modified": obj.last_modified.isoformat() if getattr(obj, "last_modified", None) else None,
-            })
-        files.sort(key=lambda x: (x["category"], x["name"]))
-        return files, {
-            "evidence_count": counts["evidence"],
-            "material_count": counts["materials"],
-            "report_count": counts["reports"],
+            file_count += 1
+            total_size += n.size or 0
+            cat = (n.extra or {}).get("category")
+            if cat == "evidence":
+                evidence_count += 1
+            elif cat == "materials":
+                material_count += 1
+            elif cat == "artifacts":
+                artifact_count += 1
+        return {
+            "evidence_count": evidence_count,
+            "material_count": material_count,
+            "artifact_count": artifact_count,
+            "file_count": file_count,
             "total_size": total_size,
         }
 
-    async def upload(self, case_id: int, category: str, file, uploaded_by: int | None = None) -> dict[str, Any]:
-        """上传文件到工作区指定分类目录"""
-        if category not in self.VALID_CATEGORIES:
-            raise ValueError("非法的文件分类")
+    async def create_folder(
+        self, case_id: int, name: str, parent_id: int | None = None, created_by: int | None = None
+    ) -> dict[str, Any]:
+        """在工作区创建文件夹"""
         ws = await self.get_or_create(case_id)
+        parent = await self._require_folder(ws["id"], parent_id)
+        existing = await police_workspace_repository.get_node_by_name(ws["id"], name, parent_id=parent.id if parent else None)
+        if existing:
+            raise ValueError("同目录下已存在同名文件夹")
+        folder = await police_workspace_repository.create_node({
+            "workspace_id": ws["id"],
+            "parent_id": parent.id if parent else None,
+            "node_type": "folder",
+            "name": name,
+            "source_type": "manual",
+            "created_by": created_by,
+            "extra": {"category": (parent.extra or {}).get("category") if parent else None},
+        })
+        return folder.to_dict()
+
+    async def upload(
+        self, case_id: int, parent_id: int | None, file, uploaded_by: int | None = None
+    ) -> dict[str, Any]:
+        """上传文件到工作区指定文件夹下"""
+        ws = await self.get_or_create(case_id)
+        parent = await self._require_folder(ws["id"], parent_id)
         content = await file.read()
         if not content:
             raise ValueError("空文件")
         filename = file.filename or "unnamed"
-        object_name = f"{ws['storage_prefix']}{category}/{filename}"
+
+        # 构造 MinIO 路径：cases/{case_number}/{category}/{parent_path?}/filename
+        category = (parent.extra or {}).get("category") or "materials"
+        folder_path = await self._folder_storage_path(parent)
+        object_name = f"{ws['storage_prefix']}{category}/{folder_path}{filename}".replace("//", "/")
+
+        existing = await police_workspace_repository.get_node_by_name(
+            ws["id"], filename, parent_id=parent.id if parent else None
+        )
+        if existing and existing.node_type == "file":
+            raise ValueError("同目录下已存在同名文件")
+
         client = get_minio_client()
         await client.aupload_file(
             ws["storage_bucket"], object_name, content,
             file.content_type or "application/octet-stream",
         )
-        return {
-            "object_name": object_name,
-            "bucket": ws["storage_bucket"],
-            "category": category,
-            "category_label": self.CATEGORY_LABELS.get(category, category),
-            "name": filename,
-            "size": len(content),
-            "uploaded_by": uploaded_by,
-        }
 
-    async def download(self, case_id: int, object_name: str) -> tuple[bytes, str, str]:
-        """下载工作区文件，返回 (bytes, content_type, filename)"""
-        ws = await police_workspace_repository.get_by_case_id(case_id)
-        if not ws:
-            raise ValueError("工作区不存在")
-        if not object_name.startswith(ws.storage_prefix):
-            raise ValueError("非法的工作区文件路径")
-        bucket = ws.storage_bucket
+        node = await police_workspace_repository.create_node({
+            "workspace_id": ws["id"],
+            "parent_id": parent.id if parent else None,
+            "node_type": "file",
+            "name": filename,
+            "storage_path": object_name,
+            "mime_type": file.content_type or "application/octet-stream",
+            "size": len(content),
+            "source_type": "manual",
+            "created_by": uploaded_by,
+            "extra": {"category": category},
+        })
+        await self._update_stats(ws["id"])
+        return node.to_dict()
+
+    async def upload_task_artifact(
+        self, case_id: int, task_id: int, filename: str, content: bytes,
+        mime_type: str = "text/plain", created_by: int | None = None,
+    ) -> dict[str, Any]:
+        """任务完成后把产物写入工作区（放入 03-阶段性成果）"""
+        ws = await self.get_or_create(case_id)
+        # 找到「03-阶段性成果」文件夹
+        root_nodes = await police_workspace_repository.list_nodes(ws["id"], parent_id=None)
+        artifact_folder = next(
+            (n for n in root_nodes if n.node_type == "folder" and (n.extra or {}).get("category") == "artifacts"),
+            None,
+        )
+        if not artifact_folder:
+            artifact_folder = await police_workspace_repository.create_node({
+                "workspace_id": ws["id"],
+                "parent_id": None,
+                "node_type": "folder",
+                "name": "03-阶段性成果",
+                "source_type": "system",
+                "extra": {"category": "artifacts"},
+            })
+        # 在成果文件夹下按任务 ID 再建一个子文件夹
+        task_folder_name = f"task-{task_id}"
+        task_folder = await police_workspace_repository.get_node_by_name(
+            ws["id"], task_folder_name, parent_id=artifact_folder.id
+        )
+        if not task_folder:
+            task_folder = await police_workspace_repository.create_node({
+                "workspace_id": ws["id"],
+                "parent_id": artifact_folder.id,
+                "node_type": "folder",
+                "name": task_folder_name,
+                "source_type": "task",
+                "source_task_id": task_id,
+                "extra": {"category": "artifacts", "task_id": task_id},
+            })
+
+        object_name = f"{ws['storage_prefix']}artifacts/task-{task_id}/{filename}".replace("//", "/")
+        client = get_minio_client()
+        await client.aupload_file(ws["storage_bucket"], object_name, content, mime_type)
+
+        existing = await police_workspace_repository.get_node_by_name(
+            ws["id"], filename, parent_id=task_folder.id
+        )
+        if existing:
+            await police_workspace_repository.update_node(existing.id, {
+                "storage_path": object_name,
+                "mime_type": mime_type,
+                "size": len(content),
+                "source_task_id": task_id,
+            })
+            node = existing
+        else:
+            node = await police_workspace_repository.create_node({
+                "workspace_id": ws["id"],
+                "parent_id": task_folder.id,
+                "node_type": "file",
+                "name": filename,
+                "storage_path": object_name,
+                "mime_type": mime_type,
+                "size": len(content),
+                "source_type": "task",
+                "source_task_id": task_id,
+                "created_by": created_by,
+                "extra": {"category": "artifacts", "task_id": task_id},
+            })
+        await self._update_stats(ws["id"])
+        return node.to_dict()
+
+    async def sync_evidence_node(self, case_id: int, evidence: Evidence) -> dict[str, Any]:
+        """证据上传后同步到工作区「01-证据」文件夹"""
+        ws = await self.get_or_create(case_id)
+        root_nodes = await police_workspace_repository.list_nodes(ws["id"], parent_id=None)
+        evidence_folder = next(
+            (n for n in root_nodes if n.node_type == "folder" and (n.extra or {}).get("category") == "evidence"),
+            None,
+        )
+        if not evidence_folder:
+            evidence_folder = await police_workspace_repository.create_node({
+                "workspace_id": ws["id"],
+                "parent_id": None,
+                "node_type": "folder",
+                "name": "01-证据",
+                "source_type": "system",
+                "extra": {"category": "evidence"},
+            })
+        filename = evidence.name or evidence.file_path.split("/")[-1] or f"evidence-{evidence.id}"
+        existing = await police_workspace_repository.get_node_by_name(
+            ws["id"], filename, parent_id=evidence_folder.id
+        )
+        data = {
+            "workspace_id": ws["id"],
+            "parent_id": evidence_folder.id,
+            "node_type": "file",
+            "name": filename,
+            "storage_path": evidence.file_path,
+            "mime_type": evidence.mime_type,
+            "size": evidence.file_size,
+            "source_type": "evidence",
+            "source_task_id": evidence.task_id,
+            "created_by": evidence.uploaded_by,
+            "extra": {"category": "evidence", "evidence_id": evidence.id, "evidence_type": evidence.type},
+        }
+        if existing:
+            node = await police_workspace_repository.update_node(existing.id, data)
+        else:
+            node = await police_workspace_repository.create_node(data)
+        await self._update_stats(ws["id"])
+        return node.to_dict()
+
+    async def move_node(self, case_id: int, node_id: int, target_parent_id: int | None) -> dict[str, Any]:
+        """移动节点到目标文件夹"""
+        ws = await self.get_or_create(case_id)
+        node = await police_workspace_repository.get_node(node_id)
+        if not node or node.workspace_id != ws["id"]:
+            raise ValueError("节点不存在")
+        if target_parent_id is not None:
+            target = await police_workspace_repository.get_node(target_parent_id)
+            if not target or target.workspace_id != ws["id"] or target.node_type != "folder":
+                raise ValueError("目标文件夹不存在")
+            # 禁止把自己移入自己的后代
+            if await self._is_descendant(node_id, target_parent_id):
+                raise ValueError("不能将文件夹移入自己的子文件夹")
+        # 重名校验
+        sibling = await police_workspace_repository.get_node_by_name(
+            ws["id"], node.name, parent_id=target_parent_id
+        )
+        if sibling and sibling.id != node_id:
+            raise ValueError("目标目录下已存在同名节点")
+        updated = await police_workspace_repository.update_node(node_id, {"parent_id": target_parent_id})
+        return updated.to_dict()
+
+    async def rename_node(self, case_id: int, node_id: int, new_name: str) -> dict[str, Any]:
+        """重命名节点"""
+        ws = await self.get_or_create(case_id)
+        node = await police_workspace_repository.get_node(node_id)
+        if not node or node.workspace_id != ws["id"]:
+            raise ValueError("节点不存在")
+        sibling = await police_workspace_repository.get_node_by_name(
+            ws["id"], new_name, parent_id=node.parent_id
+        )
+        if sibling and sibling.id != node_id:
+            raise ValueError("同目录下已存在同名节点")
+        updated = await police_workspace_repository.update_node(node_id, {"name": new_name})
+        return updated.to_dict()
+
+    async def delete_node(self, case_id: int, node_id: int) -> bool:
+        """删除节点：文件同步删 MinIO；文件夹递归删除"""
+        ws = await self.get_or_create(case_id)
+        node = await police_workspace_repository.get_node(node_id)
+        if not node or node.workspace_id != ws["id"]:
+            raise ValueError("节点不存在")
+        # 先删子节点
+        children = await police_workspace_repository.list_nodes(ws["id"], parent_id=node_id)
+        for child in children:
+            await self.delete_node(case_id, child.id)
+        # 再删 MinIO 对象
+        if node.node_type == "file" and node.storage_path:
+            try:
+                await get_minio_client().adelete_file(ws["storage_bucket"], node.storage_path)
+            except Exception as e:
+                logger.warning(f"Delete minio object failed: {e}")
+        ok = await police_workspace_repository.delete_node(node_id)
+        await self._update_stats(ws["id"])
+        return ok
+
+    async def download(self, case_id: int, node_id: int) -> tuple[bytes, str, str]:
+        """根据节点 ID 下载文件"""
+        ws = await self.get_or_create(case_id)
+        node = await police_workspace_repository.get_node(node_id)
+        if not node or node.workspace_id != ws["id"]:
+            raise ValueError("节点不存在")
+        if node.node_type != "file" or not node.storage_path:
+            raise ValueError("该节点不是可下载文件")
+        bucket = ws["storage_bucket"]
 
         def _stat():
-            return get_minio_client().client.stat_object(bucket, object_name)
+            return get_minio_client().client.stat_object(bucket, node.storage_path)
 
         try:
             stat = await asyncio.to_thread(_stat)
-            content_type = stat.content_type or "application/octet-stream"
+            content_type = stat.content_type or node.mime_type or "application/octet-stream"
         except Exception:
-            content_type = "application/octet-stream"
+            content_type = node.mime_type or "application/octet-stream"
 
-        data = await get_minio_client().adownload_file(bucket, object_name)
-        filename = object_name.split("/")[-1]
-        return data, content_type, filename
+        data = await get_minio_client().adownload_file(bucket, node.storage_path)
+        return data, content_type, node.name
 
-    async def delete_file(self, case_id: int, object_name: str) -> bool:
-        """删除工作区文件"""
-        ws = await police_workspace_repository.get_by_case_id(case_id)
-        if not ws:
-            raise ValueError("工作区不存在")
-        if not object_name.startswith(ws.storage_prefix):
-            raise ValueError("非法的工作区文件路径")
-        return await get_minio_client().adelete_file(ws.storage_bucket, object_name)
+    async def _require_folder(
+        self, workspace_id: int, parent_id: int | None
+    ) -> PoliceWorkspaceNode | None:
+        """校验 parent_id 是有效的文件夹；None 表示根目录"""
+        if parent_id is None:
+            return None
+        parent = await police_workspace_repository.get_node(parent_id)
+        if not parent or parent.workspace_id != workspace_id or parent.node_type != "folder":
+            raise ValueError("目标文件夹不存在")
+        return parent
+
+    async def _folder_storage_path(self, folder: PoliceWorkspaceNode | None) -> str:
+        """从 folder 向上回溯构造相对存储路径"""
+        if folder is None:
+            return ""
+        parts = []
+        current = folder
+        # 避免循环，最多 20 层
+        for _ in range(20):
+            parts.append(current.name)
+            if current.parent_id is None:
+                break
+            parent = await police_workspace_repository.get_node(current.parent_id)
+            if not parent:
+                break
+            current = parent
+        # 排除根分类文件夹名，因为它已经体现在 category 中
+        if parts and any(parts[-1].startswith(prefix) for prefix in ("01-", "02-", "03-")):
+            parts.pop()
+        return "/".join(reversed(parts)) + "/" if parts else ""
+
+    async def _is_descendant(self, ancestor_id: int, node_id: int) -> bool:
+        """判断 node_id 是否是 ancestor_id 的后代"""
+        current = await police_workspace_repository.get_node(node_id)
+        visited = set()
+        while current and current.parent_id is not None:
+            if current.parent_id in visited:
+                break
+            visited.add(current.parent_id)
+            if current.parent_id == ancestor_id:
+                return True
+            current = await police_workspace_repository.get_node(current.parent_id)
+        return False
+
+    async def _update_stats(self, workspace_id: int) -> None:
+        """重新计算并缓存工作区统计"""
+        try:
+            nodes = await police_workspace_repository.list_nodes_by_workspace(workspace_id)
+            stats = self._calc_stats(nodes)
+            await police_workspace_repository.update(workspace_id, {"stats": stats})
+        except Exception as e:
+            logger.warning(f"Update workspace stats failed: {e}")
+
+
+police_case_service = PoliceCaseService()
+police_task_service = PoliceTaskService()
+police_dashboard_service = PoliceDashboardService()
+police_agent_service = PoliceAgentService()
+police_workspace_service = PoliceWorkspaceService()
 
 
 police_case_service = PoliceCaseService()

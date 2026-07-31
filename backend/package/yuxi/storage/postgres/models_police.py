@@ -585,3 +585,48 @@ class PoliceCaseWorkspace(Base):
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
         }
+
+
+class PoliceWorkspaceNode(Base):
+    """★ 案件工作区节点 — 树状文件/文件夹结构
+
+    每个节点挂靠在 PoliceCaseWorkspace 下，形成可嵌套的树状列表：
+      - folder: 文件夹，可包含子文件夹和文件
+      - file:   文件，storage_path 对应 MinIO 对象路径
+    来源 source_type 标记是民警手动上传、任务产出还是证据同步。
+    """
+
+    __tablename__ = "police_workspace_nodes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    workspace_id = Column(Integer, ForeignKey("police_case_workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    parent_id = Column(Integer, ForeignKey("police_workspace_nodes.id", ondelete="CASCADE"), nullable=True, index=True)
+    node_type = Column(String(20), nullable=False, default="file")  # folder / file
+    name = Column(String(255), nullable=False)
+    storage_path = Column(String(1024), nullable=True)  # MinIO 对象路径（文件夹为空）
+    mime_type = Column(String(100), nullable=True)
+    size = Column(Integer, nullable=True)  # 字节
+    source_type = Column(String(20), nullable=True)  # manual / task / evidence / system
+    source_task_id = Column(Integer, ForeignKey("police_tasks.id"), nullable=True, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    extra = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=utc_now_naive)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "workspace_id": self.workspace_id,
+            "parent_id": self.parent_id,
+            "node_type": self.node_type,
+            "name": self.name,
+            "storage_path": self.storage_path,
+            "mime_type": self.mime_type,
+            "size": self.size,
+            "source_type": self.source_type,
+            "source_task_id": self.source_task_id,
+            "created_by": self.created_by,
+            "extra": self.extra or {},
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
+        }

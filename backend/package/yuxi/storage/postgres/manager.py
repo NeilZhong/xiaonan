@@ -1131,6 +1131,28 @@ class PostgresManager(metaclass=SingletonMeta):
             """,
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_police_case_workspaces_case ON police_case_workspaces(case_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_case_workspaces_number ON police_case_workspaces(case_number)",
+            # 案件工作区树状节点
+            """
+            CREATE TABLE IF NOT EXISTS police_workspace_nodes (
+                id SERIAL PRIMARY KEY,
+                workspace_id INTEGER NOT NULL REFERENCES police_case_workspaces(id) ON DELETE CASCADE,
+                parent_id INTEGER REFERENCES police_workspace_nodes(id) ON DELETE CASCADE,
+                node_type VARCHAR(20) NOT NULL DEFAULT 'file',
+                name VARCHAR(255) NOT NULL,
+                storage_path VARCHAR(1024),
+                mime_type VARCHAR(100),
+                size INTEGER,
+                source_type VARCHAR(20),
+                source_task_id INTEGER REFERENCES police_tasks(id),
+                created_by INTEGER REFERENCES users(id),
+                extra JSON,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_workspace_nodes_workspace ON police_workspace_nodes(workspace_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_workspace_nodes_parent ON police_workspace_nodes(parent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_workspace_nodes_task ON police_workspace_nodes(source_task_id)",
         ]
         async with self.async_engine.begin() as conn:
             # 历史未绑定用户的 API Key 会在下方迁移语句里被静默删除，先计数告警

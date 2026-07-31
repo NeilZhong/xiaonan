@@ -79,6 +79,11 @@ async def upload_evidence(
         "mime_type": file.content_type,
         "uploaded_by": current_user.id,
     })
+    # 同步到案件工作区「证据」文件夹
+    try:
+        await police_workspace_service.sync_evidence_node(case_id, evidence)
+    except Exception as e:
+        logger.warning(f"Sync evidence to workspace failed: {e}")
     return {"code": 0, "message": "success", "data": evidence.to_dict()}
 
 
