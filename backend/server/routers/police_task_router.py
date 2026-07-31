@@ -52,7 +52,7 @@ class TaskReview(BaseModel):
 @task_router.get("")
 async def list_tasks(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=500),
     case_id: int | None = None,
     status: str | None = None,
     assignee_type: str | None = None,
