@@ -103,6 +103,23 @@ class TaskRepository:
             await session.refresh(task)
             return task
 
+    async def upsert(self, task_id: int, data: dict[str, Any]) -> PoliceTask:
+        """按 id 更新或插入任务（task_service 持久化 LangGraph 状态时调用）。"""
+        async with pg_manager.get_async_session_context() as session:
+            task = await session.get(PoliceTask, task_id)
+            if task:
+                for key, value in data.items():
+                    if hasattr(task, key) and value is not None:
+                        setattr(task, key, value)
+            else:
+                payload = {k: v for k, v in data.items() if v is not None}
+                payload["id"] = task_id
+                task = PoliceTask(**payload)
+                session.add(task)
+            await session.commit()
+            await session.refresh(task)
+            return task
+
     async def assign(self, task_id: int, assignee_type: str, assignee_id: int, assignee_name: str) -> PoliceTask | None:
         async with pg_manager.get_async_session_context() as session:
             task = await session.get(PoliceTask, task_id)

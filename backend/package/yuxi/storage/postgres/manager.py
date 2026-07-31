@@ -1049,6 +1049,11 @@ class PostgresManager(metaclass=SingletonMeta):
             "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS work_stats JSON DEFAULT '{}'",
             "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS growth_log JSON DEFAULT '[]'",
             "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS experience_level INTEGER DEFAULT 1",
+            # 与 yuxi 原生智能体体系融合: 数字警员 <-> agents 表双向关联
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS backend_id VARCHAR(64)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agents_backend ON police_agents(backend_id)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS agent_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_police_agents_agent ON police_agents(agent_id)",
             # SOP 流程技能定义表 (StaffDeck 状态机驱动 SOP 概念)
             """
             CREATE TABLE IF NOT EXISTS police_sops (

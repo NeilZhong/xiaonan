@@ -379,20 +379,81 @@ class PoliceAgentService:
         return sop.to_dict() if sop else None
 
     async def seed_preset_agents(self) -> dict[str, Any]:
-        """初始化预设数字警员（幂等，已存在则跳过）"""
+        """初始化预设数字警员，并与 yuxi 原生智能体体系打通（幂等）
+
+        - 按 badge_number（警号）去重，已存在的数字警员跳过创建
+        - 每个数字警员在 yuxi.agents 表同步创建一条子智能体记录 (backend=SubAgentBackend)
+        - 回填 PoliceAgent.agent_id，建立双向关联，使其可被 yuxi 工作流调度
+        """
         created = []
+        synced = []
         for preset in self.PRESET_AGENTS:
-            existing, total = await police_agent_repository.list_agents(
-                type=preset["type"], page=1, page_size=1,
+            # 查找已存在的同警号数字警员
+            existing_list, _ = await police_agent_repository.list_agents(
+                type=preset["type"], page=1, page_size=20,
             )
-            if total > 0:
-                continue
-            agent = await police_agent_repository.create(preset)
-            await police_agent_repository.add_growth_event(
-                agent.id, "created", f"数字警员 {agent.name} 初始化完成"
+            agent = next(
+                (a for a in existing_list if a.badge_number == preset["badge_number"]), None
             )
-            created.append(agent.to_dict())
-        return {"created": len(created), "agents": created}
+            if not agent:
+                agent = await police_agent_repository.create(
+                    {**preset, "backend_id": "SubAgentBackend"}
+                )
+                await police_agent_repository.add_growth_event(
+                    agent.id, "created", f"数字警员 {agent.name} 初始化完成"
+                )
+                created.append(agent.to_dict())
+            # 若尚未关联 yuxi 智能体（agent_id 或 backend_id 缺失），则创建并回填
+            if not agent.agent_id or not agent.backend_id:
+                yuxi_agent = await self._ensure_yuxi_agent(agent)
+                if yuxi_agent:
+                    await police_agent_repository.update(
+                        agent.id, {"agent_id": yuxi_agent.id, "backend_id": "SubAgentBackend"}
+                    )
+                    synced.append(agent.id)
+        return {"created": len(created), "synced": len(synced), "agents": created}
+
+    async def _ensure_yuxi_agent(self, agent: "PoliceAgent"):
+        """在 yuxi.agents 表为数字警员创建对应子智能体记录，返回该 Agent。
+
+        数字警员本质上是 yuxi 的专业子智能体：用 SubAgentBackend 后端，
+        slug 直接使用数字警员工号（全局唯一），权限默认为 global（所有民警可见）。
+        """
+        from yuxi.repositories.agent_repository import AgentRepository
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            repo = AgentRepository(session)
+            # 已通过 agent_id 关联则直接取回，避免按 slug 大小写差异重复创建
+            if agent.agent_id:
+                from yuxi.storage.postgres.models_business import Agent
+                existing_by_id = await session.get(Agent, agent.agent_id)
+                if existing_by_id:
+                    return existing_by_id
+            # 已存在相同 slug (工号) 的智能体则直接复用
+            existing = await repo.get_by_slug(agent.badge_number)
+            if existing:
+                return existing
+            model_cfg = agent.model_config or {}
+            config_json = {
+                "context": {
+                    "system_prompt": agent.system_prompt,
+                    "model": model_cfg.get("model", "gpt-4o"),
+                    "temperature": model_cfg.get("temperature", 0.3),
+                }
+            }
+            return await repo.create(
+                name=agent.name,
+                backend_id="SubAgentBackend",
+                slug=agent.badge_number,
+                description=agent.description or agent.specialty or "",
+                icon=agent.avatar,
+                pics=[],
+                config_json=config_json,
+                share_config=None,  # 默认 global，所有民警可见
+                is_subagent=True,
+                created_by="system-police",
+            )
 
     async def _audit_agent(self, agent_id: int, action: str, details: dict):
         try:

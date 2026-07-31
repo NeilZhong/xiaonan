@@ -195,6 +195,12 @@ onMounted(() => {
           <span :class="['sketch-tag', getTagClass(agent)]" style="font-size: 11px;">
             {{ agent.status === 'active' ? '在线' : '离线' }}
           </span>
+          <span v-if="agent.agent_id" class="sketch-tag sketch-tag-purple" style="font-size: 11px;" title="已对接 Yuxi 原生智能体体系">
+            Yuxi
+          </span>
+          <span v-else class="sketch-tag" style="font-size: 11px; opacity: 0.5;" title="尚未对接 Yuxi 智能体">
+            未对接
+          </span>
         </div>
 
         <!-- Specialty -->

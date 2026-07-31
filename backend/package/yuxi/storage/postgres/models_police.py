@@ -369,6 +369,13 @@ class PoliceAgent(Base):
     department = Column(String(100), nullable=True)  # 所属部门
     color_theme = Column(String(20), nullable=True)  # 主题色: blue/green/coral/purple/amber
 
+    # ── 与 yuxi 原生智能体体系融合 ────────────────────────────
+    # 数字警员本质上是 yuxi 的专业智能体(子智能体)，在此建立双向关联：
+    #   backend_id  -> yuxi agents 表的 backend_id (如 "SubAgentBackend")
+    #   agent_id    -> yuxi agents 表的主键 id (种子初始化时同步创建)
+    backend_id = Column(String(64), nullable=True, index=True)
+    agent_id = Column(Integer, nullable=True, index=True)
+
     # ── 能力矩阵 ──────────────────────────────────────────────
     tools = Column(JSON, default=list)
     skills = Column(JSON, default=list)
@@ -405,6 +412,8 @@ class PoliceAgent(Base):
             "avatar": self.avatar,
             "department": self.department,
             "color_theme": self.color_theme,
+            "backend_id": self.backend_id,
+            "agent_id": self.agent_id,
             "tools": self.tools or [],
             "skills": self.skills or [],
             "knowledge_base_ids": self.knowledge_base_ids or [],
