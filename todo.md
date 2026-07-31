@@ -1,7 +1,7 @@
 # 智案协 — 项目进度与待办
 
-> **最后更新**: 2026-07-30
-> **当前里程碑**: M0 ✅ → M1 ✅ (待联调) → M2 ⏳
+> **最后更新**: 2026-07-31
+> **当前里程碑**: M0 ✅ → M1 ✅ (待联调) → M1.5 ✅ (数字警员) → M2 ⏳
 > **开发文档**: [POLICE_REQUIREMENTS.md](./POLICE_REQUIREMENTS.md) v1.2
 
 ---
@@ -78,6 +78,47 @@
 - [ ] **任务流转规则引擎验证**: 配置 TaskFlowRule 后测试自动创建后续任务
 - [ ] **审计日志全量覆盖**: 验证所有操作均写入 audit_logs
 
+### Phase 1.5: 数字警员平台 (融合 StaffDeck) ✅
+
+融合 StaffDeck 数字员工概念 + 手绘风格 UI，将公安智能体升级为"数字警员"。
+
+#### 后端
+
+| 任务 | 状态 | 文件 | 说明 |
+|------|------|------|------|
+| 扩展 PoliceAgent 模型为数字警员 | ✅ | `models_police.py` | 新增档案(工号/警衔/专长/头像/部门)、能力矩阵、工作统计、成长记录、SOP 关联 |
+| 新增 PoliceSOP 模型 (状态机驱动 SOP) | ✅ | `models_police.py` | SOP 流程技能定义(状态节点/转移规则/输入输出) |
+| SQL 迁移 (新列 + 新表) | ✅ | `manager.py` | police_agents 扩展列 + police_sops 建表 |
+| 数字警员仓储 | ✅ | `agent_repository.py` | CRUD + 工作统计 + 成长记录 + 运行记录 + SOP 管理 |
+| 数字警员服务层 | ✅ | `police_service.py` | PoliceAgentService + 5 名预设数字警员 + seed 接口 |
+| 数字警员 API 路由 (13 endpoints) | ✅ | `police_agent_router.py` | 列表/详情/CRUD/运行记录/SOP/初始化 |
+
+#### 前端
+
+| 任务 | 状态 | 文件 | 说明 |
+|------|------|------|------|
+| 手绘线条美术风格 CSS 主题 | ✅ | `police-sketch-theme.css` | 纸质感卡片/手绘边框/暖色调/不规则圆角/手绘标签/时间线 |
+| 数字警员 API 扩展 | ✅ | `police_api.js` | policeAgentApi (list/get/create/update/delete/runs/sops/seed) |
+| Pinia Store 扩展 | ✅ | `police.js` | agents/currentAgent/sops 状态 + loadAgents/loadAgent/seedAgents |
+| 数字警员列表页 (画廊式卡片) | ✅ | `DigitalOfficerListView.vue` | StaffDeck 风格画廊 + 搜索/筛选/初始化预设 |
+| 数字警员详情页 (档案/能力/记录/SOP/成长) | ✅ | `DigitalOfficerDetailView.vue` | 4 Tab(档案/工作记录/SOP/成长) + 侧边栏统计 |
+| 路由 + 导航 | ✅ | `router/index.js` + `AppLayout.vue` | /police/agents + /police/agents/:agentId + 侧边栏菜单 |
+
+#### 5 名预设数字警员
+
+| 工号 | 名称 | 类型 | 专长 | 色系 |
+|------|------|------|------|------|
+| DA-001 | 笔录分析师 | transcript_analyst | 笔录解析 · 实体识别 · 信息提取 | blue |
+| DA-002 | 资金追踪师 | fund_analyst | 银行流水解析 · 资金追踪 · 异常检测 | green |
+| DA-003 | 调证生成师 | evidence_collector | 法律依据检索 · 调取通知书生成 | amber |
+| DA-004 | 法制审核官 | legal_reviewer | 程序审核 · 证据审核 · 定性审核 | coral |
+| DA-005 | 案件编排官 | case_orchestrator | 案件编排 · 子智能体调度 · 任务流转 | purple |
+
+#### 构建验证
+
+- ✅ Python AST 语法检查全部通过
+- ✅ 前端 `vite build` 成功 (0 errors, 51.20s)
+
 ### Phase 2: 笔录分析智能体 + 案件智能创建 (3周)
 
 - [ ] 开发 `transcript_analysis` Skill (基于 Yuxi Skills 系统)
@@ -142,6 +183,7 @@
 |--------|----------|------|------|
 | M0: 语析底座跑通 | 第 2 周 | ✅ 完成 | Fork 运行 + 用户模型扩展 + LLM 配置 |
 | M1: 案件管理可用 | 第 6 周 | ✅ 代码完成 / ⏳ 待联调 | 案件-任务-证据 + 工作台，需 Docker 联调 |
+| M1.5: 数字警员 | 第 7 周 | ✅ 完成 | StaffDeck 融合 + 数字警员 + SOP + 手绘风格 UI |
 | M2: 智能创建上线 | 第 9 周 | ⬜ 未开始 | 笔录分析智能体 + 案件智能创建 |
 | M3: 多智能体协作 | 第 13 周 | ⬜ 未开始 | 资金分析+调证+法制+编排，任务自动流转 |
 | M4: 知识图谱上线 | 第 16 周 | ⬜ 未开始 | 知识库+知识图谱+可视化+图谱分析 |
@@ -185,5 +227,8 @@
 2. **运行时 SQL 迁移**: 无 Alembic，通过 `manager.py` 的 `ensure_business_schema()` 幂等建表
 3. **证据双哈希**: `file_hash` (SHA-256 文件内容) + `signed_hash` (SHA-256 of police_id + reviewed_at + file_hash)
 4. **单一 LLM Provider**: 仅保留 `custom-openai`，支持任何 OpenAI 兼容端点
-5. **前端 Ant Design Vue**: 使用 Yuxi 原生 UI 库 (非 Naive UI)，Plane 视觉风格
+5. **前端 Ant Design Vue**: 使用 Yuxi 原生 UI 库，手绘风格 CSS 主题叠加
 6. **任务流转引擎**: `TaskFlowRule` 条件触发自动创建后续任务 (如资金分析完成 → 自动创建调证任务)
+7. **数字警员概念** (融合 StaffDeck): 每位 AI 智能体有完整身份档案(工号/警衔/专长)、能力矩阵、工作统计和成长记录
+8. **SOP 状态机** (融合 StaffDeck): 将公安办案流程定义为结构化 SOP，状态机保证复杂流程精确执行
+9. **手绘风格 UI** (融合 StaffDeck): 纸质感卡片 + 草图线条 + 暖色调 + 不规则圆角

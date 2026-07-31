@@ -14,7 +14,8 @@ import {
   Search,
   Shield,
   Briefcase,
-  ListChecks
+  ListChecks,
+  Bot
 } from 'lucide-vue-next'
 
 import { useConfigStore } from '@/stores/config'
@@ -160,6 +161,14 @@ const mainList = computed(() => {
     icon: ListChecks,
     activeIcon: ListChecks,
     activePaths: ['/police/tasks']
+  })
+
+  items.push({
+    name: '数字警员',
+    path: '/police/agents',
+    icon: Bot,
+    activeIcon: Bot,
+    activePaths: ['/police/agents']
   })
 
   items.push({

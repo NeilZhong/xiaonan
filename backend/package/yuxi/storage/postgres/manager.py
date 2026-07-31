@@ -1016,7 +1016,7 @@ class PostgresManager(metaclass=SingletonMeta):
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
             """,
-            # 公安智能体定义
+            # 公安智能体定义 (数字警员)
             """
             CREATE TABLE IF NOT EXISTS police_agents (
                 id SERIAL PRIMARY KEY,
@@ -1037,6 +1037,38 @@ class PostgresManager(metaclass=SingletonMeta):
             )
             """,
             "CREATE INDEX IF NOT EXISTS ix_police_agents_type ON police_agents(type)",
+            # 数字警员扩展列 (StaffDeck 数字员工概念)
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS badge_number VARCHAR(20)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agents_badge ON police_agents(badge_number)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS rank VARCHAR(30)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS specialty VARCHAR(100)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS avatar VARCHAR(200)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS department VARCHAR(100)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS color_theme VARCHAR(20)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS sop_ids JSON DEFAULT '[]'",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS work_stats JSON DEFAULT '{}'",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS growth_log JSON DEFAULT '[]'",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS experience_level INTEGER DEFAULT 1",
+            # SOP 流程技能定义表 (StaffDeck 状态机驱动 SOP 概念)
+            """
+            CREATE TABLE IF NOT EXISTS police_sops (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(100) NOT NULL,
+                description TEXT,
+                agent_type VARCHAR(50),
+                category VARCHAR(50),
+                version INTEGER DEFAULT 1,
+                states JSON NOT NULL,
+                initial_state VARCHAR(50) NOT NULL,
+                terminal_states JSON DEFAULT '[]',
+                input_schema JSON DEFAULT '{}',
+                output_template TEXT,
+                is_published INTEGER DEFAULT 0,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_sops_agent_type ON police_sops(agent_type)",
             # 智能体运行记录
             """
             CREATE TABLE IF NOT EXISTS police_agent_runs (

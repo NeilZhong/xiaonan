@@ -1,8 +1,9 @@
-"""★ 公安业务服务层 — 案件 + 任务流转引擎"""
+"""★ 公安业务服务层 — 案件 + 任务流转引擎 + 数字警员"""
 
 import hashlib
 from typing import Any
 
+from yuxi.repositories.agent_repository import agent_repository
 from yuxi.repositories.case_repository import case_repository
 from yuxi.repositories.evidence_repository import evidence_repository
 from yuxi.repositories.task_repository import task_repository
@@ -235,6 +236,182 @@ class PoliceTaskService:
             logger.warning(f"Flow rule trigger failed: {e}")
 
 
+class PoliceAgentService:
+    """数字警员服务 — 管理数字警员档案、能力、工作记录、SOP
+
+    融合 StaffDeck 数字员工概念：每位数字警员有完整身份档案、
+    能力矩阵、工作统计和成长记录，像管理真实员工一样管理 AI。
+    """
+
+    PRESET_AGENTS = [
+        {
+            "name": "笔录分析师",
+            "type": "transcript_analyst",
+            "badge_number": "DA-001",
+            "rank": "一级警员",
+            "specialty": "笔录解析 · 实体识别 · 信息提取",
+            "avatar": "pencil",
+            "department": "情报分析科",
+            "color_theme": "blue",
+            "capabilities": ["笔录解析", "OCR", "实体识别", "信息提取", "结构化输出"],
+            "system_prompt": "你是一位专业的公安笔录分析师。你的任务是解析报案笔录，提取关键信息（涉案银行卡、微信号、嫌疑人信息等），并生成结构化的案件信息。",
+            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.3},
+        },
+        {
+            "name": "资金追踪师",
+            "type": "fund_analyst",
+            "badge_number": "DA-002",
+            "rank": "一级警员",
+            "specialty": "银行流水解析 · 资金追踪 · 异常检测",
+            "avatar": "chart",
+            "department": "经侦科",
+            "color_theme": "green",
+            "capabilities": ["银行流水解析", "资金链路追踪", "异常交易检测", "可视化报告", "NetworkX"],
+            "system_prompt": "你是一位专业的资金分析智能体。你的任务是解析银行流水数据，追踪资金链路，发现异常交易模式，生成资金流向报告。记住：你只负责读摘要写报告，不做算数字。",
+            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.2},
+        },
+        {
+            "name": "调证生成师",
+            "type": "evidence_collector",
+            "badge_number": "DA-003",
+            "rank": "二级警员",
+            "specialty": "法律依据检索 · 调取通知书生成",
+            "avatar": "file",
+            "department": "法制科",
+            "color_theme": "amber",
+            "capabilities": ["法律检索", "RAG", "文书生成", "调取通知书", "模板填充"],
+            "system_prompt": "你是一位专业的调证智能体。你的任务是根据案件信息检索法律依据，生成调取证据通知书。确保文书格式规范、法律引用准确。",
+            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.2},
+        },
+        {
+            "name": "法制审核官",
+            "type": "legal_reviewer",
+            "badge_number": "DA-004",
+            "rank": "三级警员",
+            "specialty": "程序审核 · 证据审核 · 定性审核",
+            "avatar": "shield",
+            "department": "法制科",
+            "color_theme": "coral",
+            "capabilities": ["程序审核", "证据审核", "定性审核", "法律适用", "审批流程"],
+            "system_prompt": "你是一位专业的法制审核智能体。你的任务是从程序、证据、定性三个维度审核案件，确保办案程序合法、证据链完整、定性准确。",
+            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.1},
+        },
+        {
+            "name": "案件编排官",
+            "type": "case_orchestrator",
+            "badge_number": "DA-005",
+            "rank": "三级警员",
+            "specialty": "案件编排 · 子智能体调度 · 任务流转",
+            "avatar": "network",
+            "department": "指挥中心",
+            "color_theme": "purple",
+            "capabilities": ["案件编排", "子智能体调度", "任务流转", "事件监听", "自动决策"],
+            "system_prompt": "你是案件编排智能体。你的任务是监听案件事件，根据案件进展调度专业子智能体，自动创建后续任务。你是整个多智能体协作的大脑。",
+            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.3},
+        },
+    ]
+
+    async def list_agents(
+        self, *, type: str | None = None, status: str | None = None,
+        keyword: str | None = None, page: int = 1, page_size: int = 50,
+    ) -> dict[str, Any]:
+        agents, total = await agent_repository.list_agents(
+            type=type, status=status, keyword=keyword,
+            page=page, page_size=page_size,
+        )
+        return {"items": [a.to_dict() for a in agents], "total": total}
+
+    async def get_agent(self, agent_id: int) -> dict[str, Any] | None:
+        agent = await agent_repository.get_by_id(agent_id)
+        if not agent:
+            return None
+        d = agent.to_dict()
+        # 聚合运行记录
+        runs, run_total = await agent_repository.list_runs(agent_id=agent_id, page=1, page_size=5)
+        d["recent_runs"] = [r.to_dict() for r in runs]
+        d["run_total"] = run_total
+        # 获取关联 SOP
+        sops = await agent_repository.list_sops(agent_type=agent.type)
+        d["sops"] = [s.to_dict() for s in sops]
+        return d
+
+    async def create_agent(self, data: dict[str, Any]) -> dict[str, Any]:
+        agent = await agent_repository.create(data)
+        await self._audit_agent(agent.id, "create", data)
+        return agent.to_dict()
+
+    async def update_agent(self, agent_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
+        agent = await agent_repository.update(agent_id, data)
+        if not agent:
+            return None
+        await self._audit_agent(agent_id, "update", data)
+        return agent.to_dict()
+
+    async def delete_agent(self, agent_id: int) -> bool:
+        ok = await agent_repository.delete(agent_id)
+        if ok:
+            await self._audit_agent(agent_id, "delete", {})
+        return ok
+
+    async def get_agent_runs(
+        self, *, agent_id: int | None = None, case_id: int | None = None,
+        page: int = 1, page_size: int = 20,
+    ) -> dict[str, Any]:
+        runs, total = await agent_repository.list_runs(
+            agent_id=agent_id, case_id=case_id, page=page, page_size=page_size,
+        )
+        return {"items": [r.to_dict() for r in runs], "total": total}
+
+    async def list_sops(self, *, agent_type: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
+        sops = await agent_repository.list_sops(agent_type=agent_type, category=category)
+        return [s.to_dict() for s in sops]
+
+    async def get_sop(self, sop_id: int) -> dict[str, Any] | None:
+        sop = await agent_repository.get_sop(sop_id)
+        return sop.to_dict() if sop else None
+
+    async def create_sop(self, data: dict[str, Any]) -> dict[str, Any]:
+        sop = await agent_repository.create_sop(data)
+        return sop.to_dict()
+
+    async def update_sop(self, sop_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
+        sop = await agent_repository.update_sop(sop_id, data)
+        return sop.to_dict() if sop else None
+
+    async def seed_preset_agents(self) -> dict[str, Any]:
+        """初始化预设数字警员（幂等，已存在则跳过）"""
+        created = []
+        for preset in self.PRESET_AGENTS:
+            existing, total = await agent_repository.list_agents(
+                type=preset["type"], page=1, page_size=1,
+            )
+            if total > 0:
+                continue
+            agent = await agent_repository.create(preset)
+            await agent_repository.add_growth_event(
+                agent.id, "created", f"数字警员 {agent.name} 初始化完成"
+            )
+            created.append(agent.to_dict())
+        return {"created": len(created), "agents": created}
+
+    async def _audit_agent(self, agent_id: int, action: str, details: dict):
+        try:
+            from yuxi.storage.postgres.models_police import PoliceAuditLog
+            from yuxi.storage.postgres.pg_manager import get_async_session_context
+
+            async with get_async_session_context() as session:
+                log = PoliceAuditLog(
+                    action=action,
+                    resource_type="agent",
+                    resource_id=agent_id,
+                    details=details,
+                )
+                session.add(log)
+                await session.commit()
+        except Exception as e:
+            logger.error(f"Failed to write audit log: {e}")
+
+
 class PoliceDashboardService:
     """工作台统计服务"""
 
@@ -263,3 +440,4 @@ class PoliceDashboardService:
 police_case_service = PoliceCaseService()
 police_task_service = PoliceTaskService()
 police_dashboard_service = PoliceDashboardService()
+police_agent_service = PoliceAgentService()

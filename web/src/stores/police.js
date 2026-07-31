@@ -3,7 +3,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { policeDashboardApi, policeCaseApi, policeTaskApi } from '@/apis/police_api'
+import { policeDashboardApi, policeCaseApi, policeTaskApi, policeAgentApi } from '@/apis/police_api'
 
 export const usePoliceStore = defineStore('police', () => {
   // ── 工作台统计 ──────────────────────────────────────────
@@ -119,11 +119,61 @@ export const usePoliceStore = defineStore('police', () => {
     return res.data
   }
 
+  // ── 数字警员 ──────────────────────────────────────────
+  const agents = ref([])
+  const agentsTotal = ref(0)
+  const currentAgent = ref(null)
+  const sops = ref([])
+
+  async function loadAgents(params = {}) {
+    try {
+      const res = await policeAgentApi.list(params)
+      agents.value = res.data?.items || []
+      agentsTotal.value = res.data?.total || 0
+    } catch (e) { console.error('加载数字警员失败', e) }
+  }
+
+  async function loadAgent(agentId) {
+    try {
+      const res = await policeAgentApi.get(agentId)
+      currentAgent.value = res.data
+    } catch (e) { console.error('加载数字警员详情失败', e) }
+  }
+
+  async function createAgent(data) {
+    const res = await policeAgentApi.create(data)
+    return res.data
+  }
+
+  async function updateAgent(agentId, data) {
+    const res = await policeAgentApi.update(agentId, data)
+    return res.data
+  }
+
+  async function deleteAgent(agentId) {
+    const res = await policeAgentApi.delete(agentId)
+    return res.data
+  }
+
+  async function seedAgents() {
+    const res = await policeAgentApi.seed()
+    return res.data
+  }
+
+  async function loadSops(params = {}) {
+    try {
+      const res = await policeAgentApi.listSops(params)
+      sops.value = res.data || []
+    } catch (e) { console.error('加载SOP失败', e) }
+  }
+
   return {
     stats, myTasks, reviewTasks, myTasksTotal, reviewTasksTotal,
     cases, casesTotal, currentCase, tasks, tasksTotal, currentTask,
+    agents, agentsTotal, currentAgent, sops,
     loadStats, loadMyTasks, loadReviewTasks,
     loadCases, loadCase, createCase, updateCase, updatePhase,
     loadTasks, loadTask, createTask, assignTask, startTask, completeTask, reviewTask,
+    loadAgents, loadAgent, createAgent, updateAgent, deleteAgent, seedAgents, loadSops,
   }
 })

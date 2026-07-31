@@ -14,7 +14,7 @@
 
 ## 项目简介
 
-**智案协（Xiaonan）** 是在 [语析 Yuxi](https://github.com/xerrors/Yuxi) 基础上二次开发的公安多智能体协作平台。它将 Yuxi 的 RAG 知识库、LangGraph 多智能体编排能力与公安办案业务深度融合，提供 **案件管理 → 任务流转 → 证据链管理 → 审计溯源** 的全链路数字化协同工作台。
+**智案协（Xiaonan）** 是在 [语析 Yuxi](https://github.com/xerrors/Yuxi) 基础上二次开发的公安多智能体协作平台。它融合了 [StaffDeck](https://github.com/OpenBMB/StaffDeck) 的数字员工概念、Yuxi 的 RAG 知识库与 LangGraph 多智能体编排能力、[Plane](https://github.com/makeplane/plane) 的项目管理交互设计，以及公安办案业务规范，提供 **案件管理 → 任务流转 → 证据链管理 → 数字警员协作 → 审计溯源** 的全链路数字化协同工作台。
 
 ### 核心能力
 
@@ -23,10 +23,12 @@
 | 案件管理 | 案件创建/归档、多阶段流转（受理 → 侦查 → 结案）、成员权限管理、案件时间线 |
 | 任务引擎 | 任务分配/领取/完成/审核闭环、任务流规则引擎（自动派生后续任务）、事件追踪 |
 | 证据链管理 | 证据上传 + SHA-256 文件哈希 + 签名哈希（police_id + reviewed_at + file_hash）、证据关联链 |
-| 智能体 | 复用 Yuxi LangGraph 智能体框架，支持资金分析、笔录审查等公安业务智能体 |
+| 数字警员 | 融合 StaffDeck 数字员工概念 — 每位 AI 有档案(工号/警衔/专长)、能力矩阵、工作统计、成长记录 |
+| SOP 流程技能 | 状态机驱动的流程技能，将公安办案流程定义为可执行的结构化步骤 |
 | 仪表盘 | 案件/任务/证据统计、个人待办、待审核任务一览 |
 | 审计日志 | 全操作审计溯源，符合公安信息化规范 |
 | LLM 接入 | 仅保留 OpenAI 兼容 API 接口，支持 vLLM / Ollama 等离线部署方案 |
+| 手绘风格 UI | 融合 StaffDeck 手绘风格 — 纸质感卡片、草稿线条、暖色调 |
 
 ---
 
@@ -208,7 +210,7 @@ uv run python main.py    # 启动后端
 
 ## 致谢
 
-本项目基于 [语析 Yuxi](https://github.com/xerrors/Yuxi) 二次开发，感谢原作者及所有 Yuxi 贡献者。
+本项目基于 [语析 Yuxi](https://github.com/xerrors/Yuxi) 二次开发，融合 [StaffDeck](https://github.com/OpenBMB/StaffDeck) 数字员工概念与 [Plane](https://github.com/makeplane/plane) 项目管理交互设计。感谢原作者及所有开源贡献者。
 
 Yuxi 参考引用的优秀项目：
 - [LangGraph](https://github.com/langchain-ai/langgraph) — 多智能体编排框架
@@ -216,6 +218,11 @@ Yuxi 参考引用的优秀项目：
 - [DeerFlow](https://github.com/bytedance/deer-flow) — Sandbox 智能体架构
 - [RAGflow](https://github.com/infiniflow/ragflow) — 文档分块策略
 - [LightRAG](https://github.com/HKUDS/LightRAG) — 图谱构建与检索思路
+
+StaffDeck 参考引用的概念：
+- 数字员工身份档案、能力矩阵、工作统计、成长记录
+- SOP 状态机驱动的流程型技能
+- 文档结构感知的知识检索
 
 ---
 

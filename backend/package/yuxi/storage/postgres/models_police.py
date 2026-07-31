@@ -343,10 +343,13 @@ class EvidenceLink(Base):
 
 
 class PoliceAgent(Base):
-    """★ 公安智能体定义表
+    """★ 数字警员定义表 (融合 StaffDeck 数字员工概念)
 
-    与 yuxi 原生的 agents 表互补：此表存储公安专用智能体的业务配置
-    (类型、能力标签、关联知识库等)，运行时仍走 yuxi 的 LangGraph 引擎。
+    将公安智能体升级为"数字警员"——每位数字警员拥有完整身份档案、
+    能力矩阵、工作统计和成长记录，像管理真实员工一样管理 AI。
+
+    与 yuxi 原生的 agents 表互补：此表存储公安专用智能体的业务配置，
+    运行时仍走 yuxi 的 LangGraph 引擎。
     """
 
     __tablename__ = "police_agents"
@@ -354,18 +357,39 @@ class PoliceAgent(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
-    type = Column(String(50), nullable=False, index=True)  # transcript_analyst/fund_analyst/etc
+    type = Column(String(50), nullable=False, index=True)  # transcript_analyst/fund_analyst/legal_reviewer/case_orchestrator
     system_prompt = Column(Text, nullable=False)
     model_config = Column(JSON, nullable=False)  # {provider, model, temperature}
+
+    # ── 数字警员档案 (StaffDeck 数字员工概念) ──────────────────
+    badge_number = Column(String(20), nullable=True, index=True)  # 数字警员工号 (如 DA-001)
+    rank = Column(String(30), nullable=True)  # 警衔: 一级/二级/三级警员
+    specialty = Column(String(100), nullable=True)  # 专业领域: 资金追踪/笔录分析/法制审核
+    avatar = Column(String(200), nullable=True)  # 头像 URL 或 emoji
+    department = Column(String(100), nullable=True)  # 所属部门
+    color_theme = Column(String(20), nullable=True)  # 主题色: blue/green/coral/purple/amber
+
+    # ── 能力矩阵 ──────────────────────────────────────────────
     tools = Column(JSON, default=list)
     skills = Column(JSON, default=list)
     knowledge_base_ids = Column(JSON, default=list)
-    capabilities = Column(JSON, default=list)
+    capabilities = Column(JSON, default=list)  # 能力标签: ["笔录解析","实体识别","OCR"]
+    sop_ids = Column(JSON, default=list)  # 关联的 SOP 流程技能 ID
+
+    # ── 工作统计 (由系统聚合，非手动维护) ─────────────────────
+    work_stats = Column(JSON, default=dict)  # {tasks_completed, tasks_total, success_rate, cases_handled, feedback_positive, feedback_negative}
+
+    # ── 成长记录 ──────────────────────────────────────────────
+    growth_log = Column(JSON, default=list)  # [{date, event, description}] 能力成长事件
+    experience_level = Column(Integer, default=1)  # 经验等级 1-5
+
     icon = Column(String(50), nullable=True)
-    status = Column(String(20), default="active")
+    status = Column(String(20), default="active")  # active/offline/training
     is_template = Column(Integer, default=0)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    runs = relationship("PoliceAgentRun", back_populates="agent")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -375,10 +399,20 @@ class PoliceAgent(Base):
             "type": self.type,
             "system_prompt": self.system_prompt,
             "model_config": self.model_config,
+            "badge_number": self.badge_number,
+            "rank": self.rank,
+            "specialty": self.specialty,
+            "avatar": self.avatar,
+            "department": self.department,
+            "color_theme": self.color_theme,
             "tools": self.tools or [],
             "skills": self.skills or [],
             "knowledge_base_ids": self.knowledge_base_ids or [],
             "capabilities": self.capabilities or [],
+            "sop_ids": self.sop_ids or [],
+            "work_stats": self.work_stats or {},
+            "growth_log": self.growth_log or [],
+            "experience_level": self.experience_level,
             "icon": self.icon,
             "status": self.status,
             "is_template": self.is_template,
@@ -388,7 +422,7 @@ class PoliceAgent(Base):
 
 
 class PoliceAgentRun(Base):
-    """★ 智能体运行记录 (公安专用)"""
+    """★ 数字警员运行记录 (公安专用)"""
 
     __tablename__ = "police_agent_runs"
 
@@ -407,6 +441,8 @@ class PoliceAgentRun(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
 
+    agent = relationship("PoliceAgent", back_populates="runs")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -423,6 +459,51 @@ class PoliceAgentRun(Base):
             "started_at": format_utc_datetime(self.started_at),
             "completed_at": format_utc_datetime(self.completed_at),
             "created_at": format_utc_datetime(self.created_at),
+        }
+
+
+class PoliceSOP(Base):
+    """★ SOP 流程技能定义表 (融合 StaffDeck 状态机驱动 SOP 概念)
+
+    将公安办案流程定义为结构化 SOP（Standard Operating Procedure），
+    使用状态机保证复杂流程精确执行。每个 SOP 包含多个步骤节点，
+    步骤间有条件转移规则，支持中途插问、上下文恢复。
+    """
+
+    __tablename__ = "police_sops"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    agent_type = Column(String(50), nullable=True, index=True)  # 关联的数字警员类型
+    category = Column(String(50), nullable=True)  # transcript/fund_analysis/legal_review/evidence_collection
+    version = Column(Integer, default=1)  # 版本管理
+    # 状态机定义: [{id, name, description, actions, transitions: [{to, condition}]}]
+    states = Column(JSON, nullable=False)  # 状态机节点列表
+    initial_state = Column(String(50), nullable=False)  # 初始状态ID
+    terminal_states = Column(JSON, default=list)  # 终止状态ID列表
+    input_schema = Column(JSON, default=dict)  # 输入参数定义
+    output_template = Column(Text, nullable=True)  # 产出模板
+    is_published = Column(Integer, default=0)  # 0=草稿 1=已发布
+    created_at = Column(DateTime, default=utc_now_naive)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "agent_type": self.agent_type,
+            "category": self.category,
+            "version": self.version,
+            "states": self.states or [],
+            "initial_state": self.initial_state,
+            "terminal_states": self.terminal_states or [],
+            "input_schema": self.input_schema or {},
+            "output_template": self.output_template,
+            "is_published": self.is_published,
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
         }
 
 

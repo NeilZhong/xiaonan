@@ -24,6 +24,7 @@ from server.routers.police_case_router import case_router as police_case_router
 from server.routers.police_task_router import task_router as police_task_router
 from server.routers.police_evidence_router import evidence_router as police_evidence_router
 from server.routers.police_dashboard_router import dashboard_router as police_dashboard_router
+from server.routers.police_agent_router import agent_router as police_agent_router
 
 _LITE_MODE = os.environ.get("LITE_MODE", "").lower() in ("true", "1")
 
@@ -55,6 +56,7 @@ router.include_router(police_case_router)       # /api/police/cases/*
 router.include_router(police_task_router)       # /api/police/tasks/*
 router.include_router(police_evidence_router)   # /api/police/evidence/*
 router.include_router(police_dashboard_router)  # /api/police/dashboard/*
+router.include_router(police_agent_router)      # /api/police/agents/* 数字警员 + SOP
 
 if not _LITE_MODE:
     from server.routers.external_kb_router import external_kb

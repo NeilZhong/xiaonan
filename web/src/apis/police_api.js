@@ -76,3 +76,30 @@ export const policeEvidenceApi = {
   review: (evidenceId) => apiPost(`/api/police/evidence/${evidenceId}/review`, { approved: true }),
   chain: (caseId) => apiGet(`/api/police/evidence/case/${caseId}/chain`),
 }
+
+// ── 数字警员 (融合 StaffDeck 数字员工概念) ──────────────────
+export const policeAgentApi = {
+  list: ({ type, status, keyword, page = 1, page_size = 50 } = {}) => {
+    const params = new URLSearchParams({ page, page_size })
+    if (type) params.set('type', type)
+    if (status) params.set('status', status)
+    if (keyword) params.set('keyword', keyword)
+    return apiGet(`/api/police/agents?${params}`)
+  },
+  get: (agentId) => apiGet(`/api/police/agents/${agentId}`),
+  create: (data) => apiPost('/api/police/agents', data),
+  update: (agentId, data) => apiPut(`/api/police/agents/${agentId}`, data),
+  delete: (agentId) => apiDelete(`/api/police/agents/${agentId}`),
+  runs: (agentId, { page = 1, page_size = 20 } = {}) =>
+    apiGet(`/api/police/agents/${agentId}/runs?page=${page}&page_size=${page_size}`),
+  listSops: ({ agent_type, category } = {}) => {
+    const params = new URLSearchParams()
+    if (agent_type) params.set('agent_type', agent_type)
+    if (category) params.set('category', category)
+    return apiGet(`/api/police/agents/sops/list?${params}`)
+  },
+  getSop: (sopId) => apiGet(`/api/police/agents/sops/${sopId}`),
+  createSop: (data) => apiPost('/api/police/agents/sops', data),
+  updateSop: (sopId, data) => apiPut(`/api/police/agents/sops/${sopId}`, data),
+  seed: () => apiPost('/api/police/agents/seed'),
+}

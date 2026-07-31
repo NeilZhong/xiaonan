@@ -1,0 +1,290 @@
+/* ════════════════════════════════════════════════════════════
+   智案协 — 手绘线条美术风格 CSS 主题
+   融合 StaffDeck 手绘风格 + 暖色纸质感
+   ════════════════════════════════════════════════════════════ */
+
+:root {
+  /* 手绘风格色板 — 暖色调纸质感 */
+  --sketch-bg: #fdfcf7;          /* 纸张背景 */
+  --sketch-card: #fffcf0;        /* 卡片背景 */
+  --sketch-card-hover: #fff8e8;  /* 卡片悬停 */
+  --sketch-border: #d4c5a9;      /* 手绘边框色 */
+  --sketch-border-dark: #b8a684; /* 深手绘边框 */
+  --sketch-text: #4a4034;        /* 主文字色 */
+  --sketch-text-secondary: #8a7e6b; /* 次要文字 */
+  --sketch-text-muted: #b5a88f;  /* 静默文字 */
+  --sketch-accent: #e89537;      /* 强调色 — 暖橙 */
+  --sketch-accent-light: #fce4b8;/* 强调浅色 */
+  --sketch-blue: #4a90d4;        /* 信息蓝 */
+  --sketch-green: #5ba872;      /* 成功绿 */
+  --sketch-coral: #e8725d;       /* 警示珊瑚 */
+  --sketch-purple: #9b7bc4;      /* 紫色 */
+  --sketch-shadow: rgba(180, 160, 130, 0.15); /* 手绘阴影 */
+
+  /* 手绘圆角 — 不规则 */
+  --sketch-radius: 12px 8px 14px 6px;
+  --sketch-radius-sm: 8px 6px 10px 4px;
+  --sketch-radius-lg: 16px 12px 18px 10px;
+}
+
+/* ── 手绘卡片 ──────────────────────────────────────────── */
+.sketch-card {
+  background: var(--sketch-card);
+  border: 2px solid var(--sketch-border);
+  border-radius: var(--sketch-radius);
+  box-shadow: 3px 3px 0 var(--sketch-shadow);
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.sketch-card:hover {
+  box-shadow: 5px 5px 0 var(--sketch-shadow);
+  transform: translate(-1px, -1px);
+  border-color: var(--sketch-border-dark);
+}
+
+.sketch-card-flat {
+  background: var(--sketch-card);
+  border: 1.5px solid var(--sketch-border);
+  border-radius: var(--sketch-radius-sm);
+}
+
+/* ── 手绘标签 ──────────────────────────────────────────── */
+.sketch-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border: 1.5px solid var(--sketch-border-dark);
+  border-radius: 20px 16px 22px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--sketch-card);
+  color: var(--sketch-text);
+  white-space: nowrap;
+}
+
+.sketch-tag-blue {
+  border-color: var(--sketch-blue);
+  color: var(--sketch-blue);
+  background: rgba(74, 144, 212, 0.08);
+}
+
+.sketch-tag-green {
+  border-color: var(--sketch-green);
+  color: var(--sketch-green);
+  background: rgba(91, 168, 114, 0.08);
+}
+
+.sketch-tag-coral {
+  border-color: var(--sketch-coral);
+  color: var(--sketch-coral);
+  background: rgba(232, 114, 93, 0.08);
+}
+
+.sketch-tag-amber {
+  border-color: var(--sketch-accent);
+  color: #b8722a;
+  background: var(--sketch-accent-light);
+}
+
+.sketch-tag-purple {
+  border-color: var(--sketch-purple);
+  color: var(--sketch-purple);
+  background: rgba(155, 123, 196, 0.08);
+}
+
+/* ── 手绘头像 ──────────────────────────────────────────── */
+.sketch-avatar {
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--sketch-border-dark);
+  border-radius: 50% 48% 52% 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  background: var(--sketch-card);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.sketch-avatar-lg {
+  width: 80px;
+  height: 80px;
+  font-size: 36px;
+  border-radius: 48% 52% 50% 48%;
+}
+
+.sketch-avatar-blue { background: rgba(74, 144, 212, 0.12); border-color: var(--sketch-blue); }
+.sketch-avatar-green { background: rgba(91, 168, 114, 0.12); border-color: var(--sketch-green); }
+.sketch-avatar-coral { background: rgba(232, 114, 93, 0.12); border-color: var(--sketch-coral); }
+.sketch-avatar-amber { background: var(--sketch-accent-light); border-color: var(--sketch-accent); }
+.sketch-avatar-purple { background: rgba(155, 123, 196, 0.12); border-color: var(--sketch-purple); }
+
+/* ── 手绘按钮 ──────────────────────────────────────────── */
+.sketch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: 2px solid var(--sketch-border-dark);
+  border-radius: var(--sketch-radius-sm);
+  background: var(--sketch-card);
+  color: var(--sketch-text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 2px 2px 0 var(--sketch-shadow);
+}
+
+.sketch-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0 var(--sketch-shadow);
+  background: var(--sketch-card-hover);
+}
+
+.sketch-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 var(--sketch-shadow);
+}
+
+.sketch-btn-primary {
+  background: var(--sketch-accent);
+  color: #fff;
+  border-color: #c47a20;
+}
+
+.sketch-btn-primary:hover {
+  background: #d4852e;
+}
+
+/* ── 手绘分割线 ────────────────────────────────────────── */
+.sketch-divider {
+  border: none;
+  border-top: 2px dashed var(--sketch-border);
+  margin: 16px 0;
+}
+
+.sketch-divider-solid {
+  border: none;
+  border-top: 1.5px solid var(--sketch-border);
+  margin: 12px 0;
+}
+
+/* ── 手绘统计数字 ──────────────────────────────────────── */
+.sketch-stat {
+  text-align: center;
+  padding: 8px 4px;
+}
+
+.sketch-stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--sketch-text);
+  font-family: 'Georgia', serif;
+  line-height: 1.2;
+}
+
+.sketch-stat-label {
+  font-size: 12px;
+  color: var(--sketch-text-secondary);
+  margin-top: 4px;
+}
+
+/* ── 手绘进度条 ────────────────────────────────────────── */
+.sketch-progress {
+  width: 100%;
+  height: 8px;
+  background: var(--sketch-card);
+  border: 1.5px solid var(--sketch-border);
+  border-radius: 4px 6px 4px 6px;
+  overflow: hidden;
+}
+
+.sketch-progress-fill {
+  height: 100%;
+  background: var(--sketch-accent);
+  border-radius: 3px 5px 3px 5px;
+  transition: width 0.3s ease;
+}
+
+/* ── 手绘容器 ──────────────────────────────────────────── */
+.sketch-panel {
+  background: var(--sketch-bg);
+  border: 1.5px solid var(--sketch-border);
+  border-radius: var(--sketch-radius);
+  padding: 20px;
+}
+
+.sketch-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--sketch-text);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sketch-section-title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 16px;
+  background: var(--sketch-accent);
+  border-radius: 2px;
+}
+
+/* ── 手绘列表项 ────────────────────────────────────────── */
+.sketch-list-item {
+  padding: 10px 12px;
+  border-bottom: 1px dashed var(--sketch-border);
+  transition: background 0.15s ease;
+}
+
+.sketch-list-item:hover {
+  background: var(--sketch-card-hover);
+}
+
+.sketch-list-item:last-child {
+  border-bottom: none;
+}
+
+/* ── 手绘空状态 ────────────────────────────────────────── */
+.sketch-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--sketch-text-muted);
+}
+
+.sketch-empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  opacity: 0.5;
+}
+
+/* ── 手绘时间线 ────────────────────────────────────────── */
+.sketch-timeline-item {
+  position: relative;
+  padding-left: 24px;
+  padding-bottom: 16px;
+  border-left: 2px dashed var(--sketch-border);
+}
+
+.sketch-timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  background: var(--sketch-accent);
+  border: 2px solid var(--sketch-card);
+  border-radius: 50% 48% 52% 50%;
+}
+
+.sketch-timeline-item:last-child {
+  border-left-color: transparent;
+}
