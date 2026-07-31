@@ -126,7 +126,7 @@ onMounted(() => {
               {{ agent.badge_number }} · {{ agent.rank || '数字警员' }} · {{ agent.department || '' }}
             </p>
             <p style="font-size: 12px; color: var(--sketch-text-muted); margin: 6px 0 0; display: flex; align-items: center; gap: 6px;">
-              <span class="sketch-tag sketch-tag-purple" style="font-size: 11px;">Yuxi 智能体</span>
+              <span class="sketch-tag sketch-tag-purple" style="font-size: 11px;">小南智能体</span>
               <span v-if="agent.backend_id">{{ agent.backend_id }}</span>
               <span v-if="agent.agent_id" style="opacity: 0.7;">· ID {{ agent.agent_id }}</span>
               <span v-else style="color: var(--sketch-amber);">· 未对接</span>
