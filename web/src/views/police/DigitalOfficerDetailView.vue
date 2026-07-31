@@ -40,7 +40,7 @@ const tagColorMap = {
   purple: 'sketch-tag-purple',
 }
 
-const agent = computed(() => store.currentAgent)
+const agent = computed(() => store.currentAgent.value || null)
 
 const stats = computed(() => {
   const s = agent.value?.work_stats || {}

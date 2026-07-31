@@ -47,7 +47,7 @@ const tagColorMap = {
   purple: 'sketch-tag-purple',
 }
 
-const filteredAgents = computed(() => store.agents)
+const filteredAgents = computed(() => store.agents.value || [])
 
 async function loadData() {
   loading.value = true
