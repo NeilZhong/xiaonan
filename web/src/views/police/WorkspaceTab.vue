@@ -20,7 +20,7 @@ const data = ref(null) // { workspace, files, stats }
 const categoryMeta = {
   evidence: { label: '证据', icon: FileTextOutlined, uploadable: false, hint: '请使用「证据」标签页上传并审核签名' },
   materials: { label: '材料', icon: FileOutlined, uploadable: true, hint: '调证文书、笔录原件等办案材料' },
-  reports: { label: '研判报告', icon: FileTextOutlined, uploadable: true, hint: '数字警员或民警生成的研判/分析产物' },
+  reports: { label: '研判报告', icon: FileTextOutlined, uploadable: true, hint: '民警生成的研判/分析产物' },
 }
 const categoryOrder = ['evidence', 'materials', 'reports']
 

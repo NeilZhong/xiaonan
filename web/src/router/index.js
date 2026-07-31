@@ -178,18 +178,6 @@ const router = createRouter({
           name: 'PoliceTaskDetail',
           component: () => import('../views/police/TaskDetailView.vue'),
           meta: { keepAlive: false, requiresAuth: true }
-        },
-        {
-          path: 'agents',
-          name: 'PoliceAgentList',
-          component: () => import('../views/police/DigitalOfficerListView.vue'),
-          meta: { keepAlive: false, requiresAuth: true }
-        },
-        {
-          path: 'agents/:agentId',
-          name: 'PoliceAgentDetail',
-          component: () => import('../views/police/DigitalOfficerDetailView.vue'),
-          meta: { keepAlive: false, requiresAuth: true }
         }
       ]
     },

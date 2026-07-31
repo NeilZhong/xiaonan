@@ -77,7 +77,7 @@ export const policeEvidenceApi = {
   chain: (caseId) => apiGet(`/api/police/evidence/case/${caseId}/chain`),
 }
 
-// ── 数字警员 (融合 StaffDeck 数字员工概念) ──────────────────
+// ── 智能体 / 流程技能 (SOP) ────────────────────────────────
 export const policeAgentApi = {
   list: ({ type, status, keyword, page = 1, page_size = 50 } = {}) => {
     const params = new URLSearchParams({ page, page_size })

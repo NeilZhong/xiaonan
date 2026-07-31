@@ -266,11 +266,6 @@
 
     <!-- 页面底部：版权信息等 -->
     <footer class="page-footer">
-      <div class="footer-links">
-        <a href="https://github.com/NeilZhong" target="_blank">联系我们</a>
-        <span class="divider">|</span>
-        <a href="https://github.com/NeilZhong/xiaonan" target="_blank">使用帮助</a>
-      </div>
       <div class="copyright">
         &copy; {{ new Date().getFullYear() }} {{ brandName }}. All Rights Reserved.
       </div>
