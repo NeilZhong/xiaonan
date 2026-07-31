@@ -40,12 +40,12 @@ class Config(BaseModel):
     enable_content_guard: bool = Field(default=False, description="是否启用内容审查")
     enable_content_guard_llm: bool = Field(default=False, description="是否启用LLM内容审查")
     default_model: str = Field(
-        default="custom-openai:gpt-4o",
-        description="默认对话模型 (OpenAI 兼容接口, 可通过 OPENAI_API_BASE 配置端点)",
+        default="",
+        description="默认对话模型，留空时自动使用当前可用的第一个聊天模型",
     )
     fast_model: str = Field(
-        default="custom-openai:gpt-4o",
-        description="快速响应模型",
+        default="",
+        description="快速响应模型，留空时自动使用当前可用的第一个聊天模型",
     )
     embed_model: str = Field(
         default="custom-openai:text-embedding-3-small",
@@ -56,8 +56,8 @@ class Config(BaseModel):
         description="默认 Re-Ranker 模型",
     )
     content_guard_llm_model: str = Field(
-        default="custom-openai:gpt-4o",
-        description="内容审查LLM模型",
+        default="",
+        description="内容审查LLM模型，留空时自动使用当前可用的第一个聊天模型",
     )
     default_ocr_engine: str = Field(default=DEFAULT_OCR_ENGINE, description="默认 OCR 解析引擎")
 

@@ -235,6 +235,13 @@ const fetchV2Models = async () => {
         modelMetadataBySpec.value = catalog
           ? buildModelMetadataBySpec(v2Models.value, catalog.providers)
           : {}
+        // 当前未指定模型且有可用模型时，自动回退到第一个可用聊天模型
+        if (!props.model_spec && !props.disabled) {
+          const firstSpec = getFirstAvailableModelSpec()
+          if (firstSpec) {
+            emit('select-model', firstSpec)
+          }
+        }
       }
     } catch (error) {
       console.warn('Failed to load v2 models:', error)
@@ -255,6 +262,16 @@ const buildModelMetadataBySpec = (modelsByProvider, providers) => {
     }
     return result
   }, {})
+}
+
+const getFirstAvailableModelSpec = () => {
+  for (const providerData of Object.values(v2Models.value)) {
+    const models = providerData.models || []
+    if (models.length) {
+      return models[0].spec
+    }
+  }
+  return ''
 }
 
 const getModelInfo = (model) => modelMetadataBySpec.value[model.spec] || {}

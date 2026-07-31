@@ -11,12 +11,23 @@ from yuxi.utils.logging_config import logger
 def resolve_chat_model_spec(model_spec: str | None, *, fallback: str | None = None) -> str:
     """解析空模型配置，不吞掉已经配置但无效的模型值。
 
-    这里仅处理模型为空时的优先级：请求或配置值、调用方 fallback、系统默认模型；
-    具体模型是否存在、是否为聊天模型仍由 model_cache 校验。
+    这里处理模型为空时的优先级：请求或配置值、调用方 fallback、系统默认模型；
+    若上述候选均不可用，则自动回退到当前可用的第一个聊天模型，避免硬编码默认模型
+    在真实环境中不存在时直接报错。
     """
-    for candidate in (model_spec, fallback, sys_config.default_model):
-        if isinstance(candidate, str) and candidate.strip():
-            return candidate.strip()
+    candidates = [c.strip() for c in (model_spec, fallback, sys_config.default_model) if isinstance(c, str) and c.strip()]
+    available = model_cache.get_all_specs("chat")
+    available_by_spec = {info.spec: info for info in available}
+    for candidate in candidates:
+        info = available_by_spec.get(candidate)
+        if info and info.model_type == "chat":
+            return candidate
+    if available:
+        logger.warning(
+            f"Configured chat model(s) unavailable: {candidates}. "
+            f"Falling back to first available chat model: {available[0].spec}"
+        )
+        return available[0].spec
     raise ValueError("model spec 不能为空")
 
 
