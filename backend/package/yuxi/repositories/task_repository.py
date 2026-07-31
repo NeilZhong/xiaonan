@@ -17,6 +17,12 @@ class TaskRepository:
         async with pg_manager.get_async_session_context() as session:
             return await session.get(PoliceTask, task_id)
 
+    async def list_all(self) -> list[PoliceTask]:
+        """返回全部任务记录（task_service 启动时恢复内存队列状态用）"""
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(select(PoliceTask))
+            return list(result.scalars().all())
+
     async def list_tasks(
         self,
         skip: int = 0,

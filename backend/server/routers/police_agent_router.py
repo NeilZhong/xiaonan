@@ -4,7 +4,7 @@
 """
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 from yuxi.services.police_service import police_agent_service
@@ -19,7 +19,7 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     type: str
     system_prompt: str
-    model_config: dict
+    model_settings: dict = Field(default={}, alias="model_config")
     badge_number: Optional[str] = None
     rank: Optional[str] = None
     specialty: Optional[str] = None
@@ -37,7 +37,7 @@ class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     system_prompt: Optional[str] = None
-    model_config: Optional[dict] = None
+    model_settings: Optional[dict] = Field(default=None, alias="model_config")
     badge_number: Optional[str] = None
     rank: Optional[str] = None
     specialty: Optional[str] = None
@@ -93,13 +93,13 @@ async def get_agent(agent_id: int):
 @agent_router.post("")
 async def create_agent(data: AgentCreate):
     """创建数字警员"""
-    return await police_agent_service.create_agent(data.model_dump())
+    return await police_agent_service.create_agent(data.model_dump(by_alias=True))
 
 
 @agent_router.put("/{agent_id}")
 async def update_agent(agent_id: int, data: AgentUpdate):
     """更新数字警员"""
-    result = await police_agent_service.update_agent(agent_id, data.model_dump(exclude_none=True))
+    result = await police_agent_service.update_agent(agent_id, data.model_dump(exclude_none=True, by_alias=True))
     if not result:
         return {"error": "Agent not found"}, 404
     return result

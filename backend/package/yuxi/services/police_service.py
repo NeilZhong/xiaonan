@@ -3,7 +3,7 @@
 import hashlib
 from typing import Any
 
-from yuxi.repositories.agent_repository import agent_repository
+from yuxi.repositories.police_agent_repository import police_agent_repository
 from yuxi.repositories.case_repository import case_repository
 from yuxi.repositories.evidence_repository import evidence_repository
 from yuxi.repositories.task_repository import task_repository
@@ -315,40 +315,40 @@ class PoliceAgentService:
         self, *, type: str | None = None, status: str | None = None,
         keyword: str | None = None, page: int = 1, page_size: int = 50,
     ) -> dict[str, Any]:
-        agents, total = await agent_repository.list_agents(
+        agents, total = await police_agent_repository.list_agents(
             type=type, status=status, keyword=keyword,
             page=page, page_size=page_size,
         )
         return {"items": [a.to_dict() for a in agents], "total": total}
 
     async def get_agent(self, agent_id: int) -> dict[str, Any] | None:
-        agent = await agent_repository.get_by_id(agent_id)
+        agent = await police_agent_repository.get_by_id(agent_id)
         if not agent:
             return None
         d = agent.to_dict()
         # 聚合运行记录
-        runs, run_total = await agent_repository.list_runs(agent_id=agent_id, page=1, page_size=5)
+        runs, run_total = await police_agent_repository.list_runs(agent_id=agent_id, page=1, page_size=5)
         d["recent_runs"] = [r.to_dict() for r in runs]
         d["run_total"] = run_total
         # 获取关联 SOP
-        sops = await agent_repository.list_sops(agent_type=agent.type)
+        sops = await police_agent_repository.list_sops(agent_type=agent.type)
         d["sops"] = [s.to_dict() for s in sops]
         return d
 
     async def create_agent(self, data: dict[str, Any]) -> dict[str, Any]:
-        agent = await agent_repository.create(data)
+        agent = await police_agent_repository.create(data)
         await self._audit_agent(agent.id, "create", data)
         return agent.to_dict()
 
     async def update_agent(self, agent_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
-        agent = await agent_repository.update(agent_id, data)
+        agent = await police_agent_repository.update(agent_id, data)
         if not agent:
             return None
         await self._audit_agent(agent_id, "update", data)
         return agent.to_dict()
 
     async def delete_agent(self, agent_id: int) -> bool:
-        ok = await agent_repository.delete(agent_id)
+        ok = await police_agent_repository.delete(agent_id)
         if ok:
             await self._audit_agent(agent_id, "delete", {})
         return ok
@@ -357,38 +357,38 @@ class PoliceAgentService:
         self, *, agent_id: int | None = None, case_id: int | None = None,
         page: int = 1, page_size: int = 20,
     ) -> dict[str, Any]:
-        runs, total = await agent_repository.list_runs(
+        runs, total = await police_agent_repository.list_runs(
             agent_id=agent_id, case_id=case_id, page=page, page_size=page_size,
         )
         return {"items": [r.to_dict() for r in runs], "total": total}
 
     async def list_sops(self, *, agent_type: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
-        sops = await agent_repository.list_sops(agent_type=agent_type, category=category)
+        sops = await police_agent_repository.list_sops(agent_type=agent_type, category=category)
         return [s.to_dict() for s in sops]
 
     async def get_sop(self, sop_id: int) -> dict[str, Any] | None:
-        sop = await agent_repository.get_sop(sop_id)
+        sop = await police_agent_repository.get_sop(sop_id)
         return sop.to_dict() if sop else None
 
     async def create_sop(self, data: dict[str, Any]) -> dict[str, Any]:
-        sop = await agent_repository.create_sop(data)
+        sop = await police_agent_repository.create_sop(data)
         return sop.to_dict()
 
     async def update_sop(self, sop_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
-        sop = await agent_repository.update_sop(sop_id, data)
+        sop = await police_agent_repository.update_sop(sop_id, data)
         return sop.to_dict() if sop else None
 
     async def seed_preset_agents(self) -> dict[str, Any]:
         """初始化预设数字警员（幂等，已存在则跳过）"""
         created = []
         for preset in self.PRESET_AGENTS:
-            existing, total = await agent_repository.list_agents(
+            existing, total = await police_agent_repository.list_agents(
                 type=preset["type"], page=1, page_size=1,
             )
             if total > 0:
                 continue
-            agent = await agent_repository.create(preset)
-            await agent_repository.add_growth_event(
+            agent = await police_agent_repository.create(preset)
+            await police_agent_repository.add_growth_event(
                 agent.id, "created", f"数字警员 {agent.name} 初始化完成"
             )
             created.append(agent.to_dict())
@@ -397,9 +397,9 @@ class PoliceAgentService:
     async def _audit_agent(self, agent_id: int, action: str, details: dict):
         try:
             from yuxi.storage.postgres.models_police import PoliceAuditLog
-            from yuxi.storage.postgres.pg_manager import get_async_session_context
+            from yuxi.storage.postgres.manager import pg_manager
 
-            async with get_async_session_context() as session:
+            async with pg_manager.get_async_session_context() as session:
                 log = PoliceAuditLog(
                     action=action,
                     resource_type="agent",
