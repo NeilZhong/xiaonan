@@ -170,7 +170,7 @@ def _patch_task_start_and_await(
 
 
 @pytest.mark.asyncio
-async def test_create_task_middleware_loads_all_visible_subagents_when_empty(monkeypatch) -> None:
+async def test_create_task_middleware_loads_all_visible_subagents_when_unset(monkeypatch) -> None:
     class _UserRepository:
         async def get_by_uid_with_db(self, _db, uid):
             assert uid == "user-1"
@@ -196,24 +196,51 @@ async def test_create_task_middleware_loads_all_visible_subagents_when_empty(mon
             del slug
             del user
             del kind
-            raise AssertionError("empty subagents should load all visible subagents")
+            raise AssertionError("unset subagents should load all visible subagents")
 
     _patch_session(monkeypatch)
     monkeypatch.setattr(subagent_task_middleware, "UserRepository", _UserRepository)
     monkeypatch.setattr(subagent_task_middleware, "AgentRepository", _AgentRepository)
 
+    # 未配置 subagents（None）时继承全部可见子智能体（历史默认行为，向后兼容）
+    middleware = await subagent_task_middleware.create_subagent_task_middleware(
+        SimpleNamespace(thread_id="parent-thread", uid="user-1", subagents=None),
+    )
+
+    assert isinstance(middleware, YuxiSubAgentMiddleware)
+
+
+@pytest.mark.asyncio
+async def test_create_task_middleware_returns_none_when_explicit_empty_list(monkeypatch) -> None:
+    class _UserRepository:
+        async def get_by_uid_with_db(self, _db, uid):
+            del uid
+            return SimpleNamespace(uid="user-1", role="user")
+
+    class _AgentRepository:
+        def __init__(self, _db):
+            pass
+
+        async def list_visible_subagents(self, *, user):
+            del user
+            raise AssertionError("显式空数组不应加载全部子智能体")
+
+        async def get_visible_by_slug(self, *, slug, user, kind="main"):
+            del slug
+            del user
+            del kind
+            raise AssertionError("显式空数组不应按 slug 加载子智能体")
+
+    _patch_session(monkeypatch)
+    monkeypatch.setattr(subagent_task_middleware, "UserRepository", _UserRepository)
+    monkeypatch.setattr(subagent_task_middleware, "AgentRepository", _AgentRepository)
+
+    # 显式空数组表示不关联任何子智能体，不创建 task 委派中间件
     middleware = await subagent_task_middleware.create_subagent_task_middleware(
         SimpleNamespace(thread_id="parent-thread", uid="user-1", subagents=[]),
     )
 
-    assert isinstance(middleware, YuxiSubAgentMiddleware)
-    assert {tool.name for tool in middleware.tools} == {
-        "task",
-        "subagent_start",
-        "subagent_status",
-        "subagent_cancel",
-        "subagent_await",
-    }
+    assert middleware is None
 
 
 @pytest.mark.asyncio

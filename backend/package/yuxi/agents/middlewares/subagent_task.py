@@ -91,8 +91,9 @@ SUBAGENT_RUN_ID_ARG = "子智能体运行 ID，由 subagent_start 返回。"
 
 async def create_subagent_task_middleware(parent_context) -> YuxiSubAgentMiddleware | None:
     """根据父智能体上下文加载可用子智能体，并在存在可调用项时创建 task 中间件。"""
+    raw_subagents = getattr(parent_context, "subagents", None)
     selected_slugs = [
-        str(slug).strip() for slug in (getattr(parent_context, "subagents", None) or []) if str(slug).strip()
+        str(slug).strip() for slug in (raw_subagents or []) if str(slug).strip()
     ]
     uid = str(getattr(parent_context, "uid", "") or "").strip()
     if not uid:
@@ -103,7 +104,11 @@ async def create_subagent_task_middleware(parent_context) -> YuxiSubAgentMiddlew
         if user is None:
             return None
         repo = AgentRepository(db)
-        if selected_slugs:
+        if raw_subagents is None:
+            # 未配置子智能体：继承全部可见子智能体（历史默认行为，保持向后兼容）
+            subagents = await repo.list_visible_subagents(user=user)
+        elif selected_slugs:
+            # 显式指定：仅加载列表内的子智能体
             subagents: list[Agent] = []
             seen: set[str] = set()
             for slug in selected_slugs:
@@ -114,7 +119,8 @@ async def create_subagent_task_middleware(parent_context) -> YuxiSubAgentMiddlew
                 if agent:
                     subagents.append(agent)
         else:
-            subagents = await repo.list_visible_subagents(user=user)
+            # 显式空数组：不关联任何子智能体（新建数字警员默认行为）
+            subagents = []
 
     if not subagents:
         return None

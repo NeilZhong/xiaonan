@@ -52,5 +52,12 @@ TODO_MID_PROMPT = """
 
 def build_prompt_with_context(context):
     current_date = f"当前日期：{shanghai_now().strftime('%Y-%m-%d')}"
-    system_prompt = f"{current_date}\n\n{PROMPT.strip()}\n\n{context.system_prompt or ''}"
+    custom_prompt = (context.system_prompt or "").strip()
+
+    if custom_prompt:
+        # 自定义角色提示词作为主身份置顶，基础 PROMPT 降级为工具/行为约束追加在后。
+        # 这样 LLM 在回答"你是谁"时会优先采用自定义角色，而非模型默认身份。
+        system_prompt = f"{current_date}\n\n{custom_prompt}\n\n{PROMPT.strip()}"
+    else:
+        system_prompt = f"{current_date}\n\n{PROMPT.strip()}"
     return system_prompt.strip()

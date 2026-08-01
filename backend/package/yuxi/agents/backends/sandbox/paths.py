@@ -63,6 +63,32 @@ def sandbox_workspace_agent_context_file(thread_id: str, uid: str, filename: str
     return sandbox_workspace_dir(thread_id, uid) / WORKSPACE_AGENTS_DIR_NAME / filename
 
 
+def _validate_agent_slug(agent_slug: str) -> str:
+    """校验智能体 slug，防止路径穿越。仅允许字母数字、连字符、下划线。"""
+    value = str(agent_slug or "").strip()
+    if not value:
+        raise ValueError("agent_slug is required")
+    if not _SAFE_ID_RE.match(value):
+        raise ValueError("agent_slug contains invalid characters")
+    return value
+
+
+def sandbox_workspace_agent_memory_file(thread_id: str, uid: str, agent_slug: str) -> Path:
+    """返回某智能体隔离的 MEMORY.md 路径：workspace/agents/{agent_slug}/MEMORY.md。
+
+    仅 MEMORY.md 做 per-agent 隔离；AGENTS.md / USER.md 仍走全局共享路径。
+    """
+    validate_thread_id(thread_id)
+    safe_slug = _validate_agent_slug(agent_slug)
+    return (
+        _global_user_data_dir(uid)
+        / WORKSPACE_DIR_NAME
+        / WORKSPACE_AGENTS_DIR_NAME
+        / safe_slug
+        / "MEMORY.md"
+    )
+
+
 def _threads_root_dir() -> Path:
     return (Path(conf.save_dir) / "threads").resolve(strict=False)
 

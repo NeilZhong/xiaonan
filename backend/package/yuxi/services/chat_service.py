@@ -707,6 +707,26 @@ async def _resolve_agent_runtime(
         user=user,
         context_schema=backend.context_schema,
     )
+
+    # 数字警员兜底：若 yuxi Agent 的 config_json 中缺失 system_prompt，
+    # 从 police_agents 表直接读取，确保自定义角色提示词不丢失。
+    if not agent_config.get("system_prompt") and resolved_agent_slug.startswith("DA-"):
+        try:
+            from yuxi.storage.postgres.manager import pg_manager
+            from yuxi.storage.postgres.models_police import PoliceAgent
+            from sqlalchemy import select
+            async with pg_manager.get_async_session_context() as inner_db:
+                result = await inner_db.execute(
+                    select(PoliceAgent.system_prompt).where(
+                        PoliceAgent.badge_number == resolved_agent_slug
+                    )
+                )
+                row = result.scalar_one_or_none()
+                if row:
+                    agent_config["system_prompt"] = row
+        except Exception:
+            pass  # 兜底失败不阻塞聊天
+
     return agent_item, backend, agent_config
 
 
@@ -863,6 +883,7 @@ async def stream_agent_chat(
         agent_config,
         thread_id=thread_id,
         uid=uid,
+        agent_slug=agent_item.slug,
         run_id=meta.get("run_id"),
         request_id=meta.get("request_id"),
     )
@@ -1175,6 +1196,7 @@ async def stream_agent_resume(
         agent_config or {},
         thread_id=thread_id,
         uid=uid,
+        agent_slug=agent_item.slug,
         run_id=meta.get("run_id"),
         request_id=meta.get("request_id"),
     )
@@ -1397,6 +1419,7 @@ async def get_agent_state_view(
             agent_config,
             thread_id=thread_id,
             uid=current_uid,
+            agent_slug=agent_item.slug,
         )
         latest_run = await run_repo.get_latest_run_by_thread_for_user(thread_id, current_uid)
         if latest_run and isinstance(latest_run.input_payload, dict):

@@ -340,6 +340,20 @@ def _compute_dir_hash(source_dir: Path) -> str:
     return hasher.hexdigest()
 
 
+def _safe_rename(src: Path, dst: Path) -> None:
+    """重命名目录，兼容 9p/Windows 绑定挂载下 os.rename 失败的场景。
+
+    在 Docker Desktop on Windows 的 9p(drvfs) 挂载上，对目录执行原子 rename
+    会抛 PermissionError；此时回退到 shutil.move（copy+rmtree），保证内置
+    skill 初始化在开发环境也能完成。常规 Linux 文件系统上 os.rename 优先命中，
+    行为与原实现一致。
+    """
+    try:
+        src.rename(dst)
+    except OSError:
+        shutil.move(str(src), str(dst))
+
+
 def _replace_skill_target(target_dir: Path, source_dir: Path) -> None:
     temp_target = target_dir.with_name(f".{target_dir.name}.tmp-{uuid.uuid4().hex[:8]}")
     trash_dir: Path | None = None
@@ -350,12 +364,12 @@ def _replace_skill_target(target_dir: Path, source_dir: Path) -> None:
     try:
         if target_dir.exists():
             trash_dir = target_dir.with_name(f".{target_dir.name}.bak-{uuid.uuid4().hex[:8]}")
-            target_dir.rename(trash_dir)
-        temp_target.rename(target_dir)
+            _safe_rename(target_dir, trash_dir)
+        _safe_rename(temp_target, target_dir)
     except Exception:
         shutil.rmtree(temp_target, ignore_errors=True)
         if trash_dir and trash_dir.exists() and not target_dir.exists():
-            trash_dir.rename(target_dir)
+            _safe_rename(trash_dir, target_dir)
         raise
 
     if trash_dir and trash_dir.exists():

@@ -87,6 +87,10 @@ export const policeAgentApi = {
     return apiGet(`/api/police/agents?${params}`)
   },
   get: (agentId) => apiGet(`/api/police/agents/${agentId}`),
+  /** 按 yuxi 智能体主键 id 查询关联的数字警员档案（无关联返回 null） */
+  getByYuxiId: (yuxiAgentId) => apiGet(`/api/police/agents/by-yuxi/${yuxiAgentId}`),
+  /** 按数字警员工号查询档案（档案页路由 /agent-manage/:badge_number 使用） */
+  getByBadgeNumber: (badgeNumber) => apiGet(`/api/police/agents/by-badge/${badgeNumber}`),
   create: (data) => apiPost('/api/police/agents', data),
   update: (agentId, data) => apiPut(`/api/police/agents/${agentId}`, data),
   delete: (agentId) => apiDelete(`/api/police/agents/${agentId}`),
@@ -102,6 +106,18 @@ export const policeAgentApi = {
   createSop: (data) => apiPost('/api/police/agents/sops', data),
   updateSop: (sopId, data) => apiPut(`/api/police/agents/sops/${sopId}`, data),
   seed: () => apiPost('/api/police/agents/seed'),
+  // ── 市场模板 ────────────────────────────────────────
+  listTemplates: ({ category, keyword, page = 1, page_size = 50 } = {}) => {
+    const params = new URLSearchParams({ page, page_size })
+    if (category) params.set('category', category)
+    if (keyword) params.set('keyword', keyword)
+    return apiGet(`/api/police/agents/templates?${params}`)
+  },
+  installTemplate: (templateId) => apiPost(`/api/police/agents/templates/${templateId}/install`),
+  shareAgent: (agentId, { scope, department_ids, user_uids, author_id }) =>
+    apiPost(`/api/police/agents/${agentId}/share`, { scope, department_ids, user_uids, author_id }),
+  approveAgent: (agentId, { approved, reviewer_id }) =>
+    apiPost(`/api/police/agents/${agentId}/approve`, { approved, reviewer_id }),
 }
 
 // ── 案件独立工作区（树状节点）────────────────────────────────

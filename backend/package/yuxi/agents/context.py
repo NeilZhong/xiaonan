@@ -3,9 +3,13 @@
 import asyncio
 import uuid
 from dataclasses import MISSING, dataclass, field, fields
+from pathlib import Path
 from typing import Any, get_origin
 
-from yuxi.agents.backends.sandbox.paths import sandbox_workspace_agent_context_file
+from yuxi.agents.backends.sandbox.paths import (
+    sandbox_workspace_agent_context_file,
+    sandbox_workspace_agent_memory_file,
+)
 from yuxi.agents.tool_approval import DEFAULT_TOOL_APPROVAL_MODE
 from yuxi.utils.logging_config import logger
 from yuxi.utils.paths import WORKSPACE_AGENT_CONTEXT_FILES
@@ -60,28 +64,65 @@ def _role_can_access(auth: str | None, role: str | None) -> bool:
     return False
 
 
-def _load_workspace_agent_context(thread_id: str, uid: str) -> str:
-    sections: list[str] = []
-    for filename in WORKSPACE_AGENT_CONTEXT_FILES:
-        context_file = sandbox_workspace_agent_context_file(thread_id, uid, filename)
-        try:
-            with context_file.open("rb") as buffer:
-                content = buffer.read(WORKSPACE_AGENTS_PROMPT_MAX_BYTES + 1)
-        except FileNotFoundError:
-            continue
-        except IsADirectoryError:
-            logger.warning(f"读取工作区 {filename} 失败: 路径是目录")
-            continue
-        except OSError as exc:
-            logger.warning(f"读取工作区 {filename} 失败: {exc}")
-            continue
+def _read_workspace_context_file(context_file: Path) -> str:
+    """读取单个工作区文件内容，文件缺失或不可读时返回空字符串。"""
+    try:
+        with context_file.open("rb") as buffer:
+            content = buffer.read(WORKSPACE_AGENTS_PROMPT_MAX_BYTES + 1)
+    except FileNotFoundError:
+        return ""
+    except IsADirectoryError:
+        logger.warning(f"读取工作区 {context_file.name} 失败: 路径是目录")
+        return ""
+    except OSError as exc:
+        logger.warning(f"读取工作区 {context_file.name} 失败: {exc}")
+        return ""
 
-        prompt = content[:WORKSPACE_AGENTS_PROMPT_MAX_BYTES].decode("utf-8", errors="replace").strip()
-        if not prompt:
+    prompt = content[:WORKSPACE_AGENTS_PROMPT_MAX_BYTES].decode("utf-8", errors="replace").strip()
+    if not prompt:
+        return ""
+    if len(content) > WORKSPACE_AGENTS_PROMPT_MAX_BYTES:
+        prompt = f"{prompt}\n\n[{context_file.name} 内容已截断]"
+    return prompt
+
+
+def _load_workspace_agent_context(thread_id: str, uid: str, agent_slug: str | None = None) -> str:
+    """加载用户工作区 agents/ 下的上下文文件并注入系统提示词。
+
+    隔离策略（已确认）：
+    - AGENTS.md / USER.md 保持**全局共享**（同一用户下所有智能体共用）。
+    - MEMORY.md 按**智能体隔离**：优先读取 `agents/{agent_slug}/MEMORY.md`，
+      该文件不存在时 fallback 到全局 `agents/MEMORY.md`（向下兼容旧对话）。
+    """
+    sections: list[str] = []
+
+    # AGENTS.md / USER.md：全局共享，所有智能体一致
+    for filename in ("AGENTS.md", "USER.md"):
+        if filename not in WORKSPACE_AGENT_CONTEXT_FILES:
             continue
-        if len(content) > WORKSPACE_AGENTS_PROMPT_MAX_BYTES:
-            prompt = f"{prompt}\n\n[{filename} 内容已截断]"
-        sections.append(f"用户工作区 agents/{filename} 内容：\n{prompt}")
+        context_file = sandbox_workspace_agent_context_file(thread_id, uid, filename)
+        prompt = _read_workspace_context_file(context_file)
+        if prompt:
+            sections.append(f"用户工作区 agents/{filename} 内容：\n{prompt}")
+
+    # MEMORY.md：per-agent 隔离，fallback 到全局（per-agent 文件不存在时）
+    memory_filename = "MEMORY.md"
+    memory_label = f"用户工作区 agents/{memory_filename} 内容"
+    memory_file = sandbox_workspace_agent_context_file(thread_id, uid, memory_filename)
+    if agent_slug:
+        try:
+            per_agent_file = sandbox_workspace_agent_memory_file(thread_id, uid, agent_slug)
+            if per_agent_file.exists():
+                memory_file = per_agent_file
+                memory_label = f"用户工作区 agents/{agent_slug}/MEMORY.md 内容"
+            # per-agent 文件不存在时保持全局 memory_file / memory_label（向下兼容）
+        except ValueError as exc:
+            logger.warning(f"智能体记忆路径校验失败，回退全局 MEMORY: {exc}")
+
+    memory_prompt = _read_workspace_context_file(memory_file)
+    if memory_prompt:
+        sections.append(f"{memory_label}：\n{memory_prompt}")
+
     return "\n\n".join(sections)
 
 
@@ -90,11 +131,12 @@ async def build_agent_input_context(
     *,
     thread_id: str,
     uid: str,
+    agent_slug: str | None = None,
     run_id: str | None = None,
     request_id: str | None = None,
 ) -> dict:
     input_context = dict(agent_config or {})
-    agent_context = await asyncio.to_thread(_load_workspace_agent_context, thread_id, uid)
+    agent_context = await asyncio.to_thread(_load_workspace_agent_context, thread_id, uid, agent_slug)
 
     if agent_context:
         base_prompt = str(input_context.get("system_prompt") or "").rstrip()
@@ -409,9 +451,6 @@ def _resource_fields_requiring_available_keys(normalized: dict, resource_fields:
                 fields_to_load.add(field_name)
             else:
                 normalized[field_name] = []
-        elif field_name in _EMPTY_ALL_CONTEXT_FIELDS and current == []:
-            normalized[field_name] = None
-            fields_to_load.add(field_name)
         elif isinstance(current, list) and current:
             fields_to_load.add(field_name)
         else:

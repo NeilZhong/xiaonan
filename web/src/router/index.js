@@ -94,6 +94,12 @@ const router = createRouter({
           name: 'AgentManageComp',
           component: () => import('../views/AgentManageView.vue'),
           meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: ':id',
+          name: 'AgentProfileComp',
+          component: () => import('../views/AgentProfileView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
         }
       ]
     },
@@ -162,6 +168,12 @@ const router = createRouter({
           meta: { keepAlive: false, requiresAuth: true }
         },
         {
+          path: 'import',
+          name: 'PoliceCaseImport',
+          component: () => import('../views/police/CaseImportView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
           path: 'cases/:caseId',
           name: 'PoliceCaseDetail',
           component: () => import('../views/police/CaseDetailView.vue'),
@@ -178,6 +190,16 @@ const router = createRouter({
           name: 'PoliceTaskDetail',
           component: () => import('../views/police/TaskDetailView.vue'),
           meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: 'officers',
+          name: 'PoliceOfficerPlaza',
+          redirect: '/agent-manage'
+        },
+        {
+          path: 'officers/:id',
+          name: 'PoliceOfficerProfile',
+          redirect: to => ({ name: 'AgentProfileComp', params: { id: to.params.id } })
         }
       ]
     },

@@ -113,7 +113,7 @@ onMounted(() => loadData(1))
         <p class="page-subtitle">共 {{ policeStore.casesTotal }} 件案件</p>
       </div>
       <div class="header-actions">
-        <a-button @click="router.push('/police')">
+        <a-button @click="router.push('/police/import')">
           <template #icon><PlusOutlined /></template>
           导入笔录
         </a-button>

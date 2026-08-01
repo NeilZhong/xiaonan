@@ -27,6 +27,28 @@ class PoliceAgentRepository:
             result = await session.execute(stmt)
             return result.scalar_one_or_none()
 
+    async def get_by_badge_number(self, badge_number: str) -> PoliceAgent | None:
+        """按工号查询数字警员（工号为 yuxi 桥接 slug，须全局唯一）。"""
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = select(PoliceAgent).where(PoliceAgent.badge_number == badge_number)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    async def get_by_yuxi_agent_id(self, yuxi_agent_id: int) -> PoliceAgent | None:
+        """按关联的 yuxi 智能体主键 id 查询数字警员（统一档案页桥接用）。
+
+        police_agents.agent_id 是 yuxi agents 表主键的外键，与档案页路由中的
+        yuxi agent slug 形成稳定映射，比按 slug/badge_number 字符串匹配更可靠。
+        """
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = select(PoliceAgent).where(PoliceAgent.agent_id == yuxi_agent_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
     async def list_agents(
         self,
         *,
@@ -237,6 +259,111 @@ class PoliceAgentRepository:
             await session.commit()
             await session.refresh(sop)
             return sop
+
+
+    async def list_templates(
+        self,
+        *,
+        category: str | None = None,
+        keyword: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[PoliceAgent], int]:
+        """查询市场模板列表（is_template=1 的公开模板）"""
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = select(PoliceAgent).where(PoliceAgent.is_template == 1)
+            count_stmt = select(func.count()).select_from(PoliceAgent).where(
+                PoliceAgent.is_template == 1
+            )
+
+            if category:
+                stmt = stmt.where(PoliceAgent.category == category)
+                count_stmt = count_stmt.where(PoliceAgent.category == category)
+            if keyword:
+                pattern = f"%{keyword}%"
+                stmt = stmt.where(PoliceAgent.name.ilike(pattern))
+                count_stmt = count_stmt.where(PoliceAgent.name.ilike(pattern))
+
+            total = (await session.execute(count_stmt)).scalar() or 0
+            stmt = stmt.order_by(PoliceAgent.install_count.desc(), PoliceAgent.id.asc()).offset(
+                (page - 1) * page_size
+            ).limit(page_size)
+            result = await session.execute(stmt)
+            agents = list(result.scalars().all())
+            return agents, total
+
+    async def increment_install_count(self, agent_id: int) -> bool:
+        """模板安装次数 +1（best-effort）"""
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            agent = await session.get(PoliceAgent, agent_id)
+            if not agent:
+                return False
+            agent.install_count = (agent.install_count or 0) + 1
+            await session.commit()
+            return True
+
+    async def get_installed_template_ids(self) -> list[int]:
+        """查询当前用户已安装的模板 ID 列表（通过 source_template_id 关联）"""
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            stmt = (
+                select(PoliceAgent.source_template_id)
+                .where(
+                    PoliceAgent.source_template_id.isnot(None),
+                    PoliceAgent.is_template == 0,
+                )
+                .distinct()
+            )
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]
+
+    async def update_share(self, agent_id: int, **kwargs) -> bool:
+        """更新智能体的共享字段（share_scope / is_public / approval_status 等）"""
+        from yuxi.storage.postgres.manager import pg_manager
+
+        async with pg_manager.get_async_session_context() as session:
+            agent = await session.get(PoliceAgent, agent_id)
+            if not agent:
+                return False
+            for k, v in kwargs.items():
+                if hasattr(agent, k):
+                    setattr(agent, k, v)
+            await session.commit()
+            return True
+
+    async def list_public_shared(
+        self, *, keyword: str | None = None, page: int = 1, page_size: int = 50,
+    ) -> tuple[list["PoliceAgent"], int]:
+        """查询市场中「来自分享」的智能体（is_public=1 且非内置模板）"""
+        from yuxi.storage.postgres.manager import pg_manager
+        from sqlalchemy import func, or_
+
+        async with pg_manager.get_async_session_context() as session:
+            base = (
+                select(PoliceAgent)
+                .where(PoliceAgent.is_public == 1, PoliceAgent.is_template == 0)
+            )
+            if keyword:
+                base = base.where(
+                    or_(
+                        PoliceAgent.name.ilike(f"%{keyword}%"),
+                        PoliceAgent.specialty.ilike(f"%{keyword}%"),
+                        PoliceAgent.description.ilike(f"%{keyword}%"),
+                    )
+                )
+            count_stmt = select(func.count()).select_from(base.subquery())
+            total = (await session.execute(count_stmt)).scalar() or 0
+
+            stmt = base.order_by(PoliceAgent.approved_at.desc().nulls_last(), PoliceAgent.id.desc()).offset(
+                (page - 1) * page_size
+            ).limit(page_size)
+            result = await session.execute(stmt)
+            return list(result.scalars().all()), total
 
 
 police_agent_repository = PoliceAgentRepository()

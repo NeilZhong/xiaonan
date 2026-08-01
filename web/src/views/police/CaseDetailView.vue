@@ -6,10 +6,12 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePoliceStore } from '@/stores/police'
+import { policeAgentApi } from '@/apis/police_api'
 import { message } from 'ant-design-vue'
 import {
   ArrowLeftOutlined, UserOutlined, ClockCircleOutlined,
-  DollarOutlined, EnvironmentOutlined, TeamOutlined
+  DollarOutlined, EnvironmentOutlined, TeamOutlined,
+  AppstoreOutlined, UnorderedListOutlined
 } from '@ant-design/icons-vue'
 
 const route = useRoute()
@@ -20,6 +22,7 @@ const activeTab = ref('overview')
 const loading = ref(false)
 const showCreateTaskModal = ref(false)
 const showPhaseModal = ref(false)
+const taskViewMode = ref('table') // table / kanban — 任务 tab 内双视图切换
 
 const caseId = computed(() => parseInt(route.params.caseId))
 const caseData = computed(() => policeStore.currentCase)
@@ -31,13 +34,40 @@ const taskColumns = [
   { title: '任务', dataIndex: 'title', key: 'title', ellipsis: true },
   { title: '类型', dataIndex: 'type', key: 'type', width: 140 },
   { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
-  { title: '分配给', dataIndex: 'assignee_name', key: 'assignee_name', width: 140 },
+  { title: '执行人', dataIndex: 'assignees', key: 'assignees', width: 180 },
   { title: '优先级', dataIndex: 'priority', key: 'priority', width: 80 },
   { title: '操作', key: 'action', width: 80 },
 ]
 
 const taskStatusText = { pending: '待处理', in_progress: '进行中', review: '待审核', completed: '已完成', blocked: '已驳回' }
 const taskStatusColor = { pending: 'default', in_progress: 'processing', review: 'warning', completed: 'success', blocked: 'error' }
+
+// ── 看板视图常量（与 TaskBoardView 保持一致） ─────
+const statusColumns = [
+  { key: 'pending', title: '待处理', color: '#718096' },
+  { key: 'in_progress', title: '进行中', color: '#3182CE' },
+  { key: 'review', title: '待审核', color: '#D69E2E' },
+  { key: 'completed', title: '已完成', color: '#38A169' },
+  { key: 'blocked', title: '已驳回', color: '#E53E3E' },
+]
+
+const typeText = {
+  transcript_analysis: '笔录分析', fund_analysis: '资金分析', evidence_collection: '调证生成',
+  evidence_submission: '证据提交', legal_review: '法制审核', document_generation: '文书生成',
+  investigation: '侦查', interrogation: '审讯', arrest: '抓捕', cyber_inquiry: '网警查询',
+  knowledge_extraction: '知识抽取',
+}
+
+const priorityColor = { urgent: 'red', high: 'orange', medium: 'blue', low: 'default' }
+
+/** 按状态分组的任务（仅含当前案件） */
+const tasksByStatus = computed(() => {
+  const map = {}
+  for (const col of statusColumns) {
+    map[col.key] = policeStore.tasks.filter(t => t.status === col.key)
+  }
+  return map
+})
 
 const phaseSteps = [
   { key: 'research', title: '前期研判' },
@@ -82,7 +112,7 @@ async function loadCase() {
   }
 }
 
-// 可选的分配对象
+// 可选的分配对象——人类（案件成员）
 const humanOptions = computed(() => {
   const members = caseData.value?.members || []
   return members.map(m => ({
@@ -92,9 +122,115 @@ const humanOptions = computed(() => {
   }))
 })
 
+// 可选的分配对象——智能体
+const agentOptions = ref([])
+const agentsLoading = ref(false)
+
+async function loadAgents() {
+  agentsLoading.value = true
+  try {
+    const res = await policeAgentApi.list({ page_size: 50 })
+    agentOptions.value = (res.items || []).map(a => ({
+      label: `${a.name || a.display_name || '未命名智能体'} (${a.type || a.agent_type || '-'})`,
+      value: a.id,
+      name: a.name || a.display_name || '',
+    }))
+  } catch (e) {
+    // 智能体列表加载失败不阻塞主流程
+    agentOptions.value = []
+  } finally {
+    agentsLoading.value = false
+  }
+}
+
+/** 当前分配选项（根据 assignee_type 切换） */
+const currentAssigneeOptions = computed(() =>
+  taskForm.value.assignee_type === 'agent' ? agentOptions.value : humanOptions.value
+)
+
 function handleAssigneeChange(value, option) {
   taskForm.value.assignee_id = value
   taskForm.value.assignee_name = option?.name || option?.label || ''
+}
+
+function handleAssigneeTypeChange(val) {
+  // 切换类型时清空已选分配对象
+  taskForm.value.assignee_type = val
+  taskForm.value.assignee_id = null
+  taskForm.value.assignee_name = ''
+}
+
+// ── 任务列表内分配已有任务（表格行 / 看板卡片共用） ──
+const assignModalVisible = ref(false)
+const assignTaskId = ref(null)
+const assignLoading = ref(false)
+// 多执行人表单：支持同时选多个民警和多个智能体
+const assignForm = ref({
+  selectedHumans: [],    // [{value, label, name}]
+  selectedAgents: [],   // [{value, label, name}]
+})
+
+function showAssignModalFor(task) {
+  assignTaskId.value = task.id
+  // 预填已有的执行人（编辑模式）
+  const existing = task.assignees || []
+  assignForm.value = {
+    selectedHumans: existing.filter(a => a.assignee_type === 'human').map(a => ({
+      value: a.assignee_id, label: a.assignee_name, name: a.assignee_name,
+    })),
+    selectedAgents: existing.filter(a => a.assignee_type === 'agent').map(a => ({
+      value: a.assignee_id, label: a.assignee_name, name: a.assignee_name,
+    })),
+  }
+  assignModalVisible.value = true
+}
+
+/** 构造后端需要的 assignees 数组 */
+function buildAssigneesPayload() {
+  const assignees = [
+    ...assignForm.value.selectedHumans.map(h => ({
+      assignee_type: 'human',
+      assignee_id: h.value,
+      assignee_name: h.name || h.label || '',
+      role: 'executor',
+    })),
+    ...assignForm.value.selectedAgents.map(a => ({
+      assignee_type: 'agent',
+      assignee_id: a.value,
+      assignee_name: a.name || a.label || '',
+      role: 'executor',
+    })),
+  ]
+  return assignees
+}
+
+async function handleAssignTask() {
+  const payload = buildAssigneesPayload()
+  if (payload.length === 0) {
+    message.warning('请至少选择一名办案民警或智能体')
+    return
+  }
+  assignLoading.value = true
+  try {
+    await policeStore.assignTask(assignTaskId.value, { assignees: payload })
+    message.success(`任务已分配给 ${payload.length} 名执行人`)
+    assignModalVisible.value = false
+    await policeStore.loadTasks({ case_id: caseId.value, page_size: 100 })
+  } catch (e) {
+    message.error('分配失败')
+  } finally {
+    assignLoading.value = false
+  }
+}
+
+/** 格式化任务执行人显示（支持多人） */
+function formatAssignees(task) {
+  const assignees = task.assignees || []
+  if (assignees.length === 0) return task.assignee_name || '未分配'
+  if (assignees.length <= 2) {
+    return assignees.map(a => a.assignee_name).join('、')
+  }
+  return `${assignees[0].assignee_name} 等 ${assignees.length} 人`
 }
 
 async function handleCreateTask() {
@@ -131,7 +267,7 @@ function goTask(taskId) {
   router.push(`/police/tasks/${taskId}`)
 }
 
-onMounted(loadCase)
+onMounted(() => { loadCase(); loadAgents() })
 watch(caseId, loadCase)
 </script>
 
@@ -225,35 +361,89 @@ watch(caseId, loadCase)
         </div>
       </a-tab-pane>
 
-      <!-- 任务 -->
+      <!-- 任务（整合看板/表格双视图） -->
       <a-tab-pane key="tasks" tab="任务">
         <div class="tab-toolbar">
+          <div class="toolbar-left">
+            <a-radio-group v-model:value="taskViewMode" button-style="solid" size="small">
+              <a-radio-button value="table"><UnorderedListOutlined /> 表格</a-radio-button>
+              <a-radio-button value="kanban"><AppstoreOutlined /> 看板</a-radio-button>
+            </a-radio-group>
+          </div>
           <a-button type="primary" size="small" @click="showCreateTaskModal = true">创建任务</a-button>
         </div>
-        <a-table
-          :columns="taskColumns"
-          :data-source="policeStore.tasks"
-          row-key="id"
-          size="middle"
-          :pagination="false"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'title'">
-              <a class="task-link" @click="goTask(record.id)">{{ record.title }}</a>
+
+        <!-- 表格视图 -->
+        <div v-if="taskViewMode === 'table'">
+          <a-table
+            :columns="taskColumns"
+            :data-source="policeStore.tasks"
+            row-key="id"
+            size="middle"
+            :pagination="false"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'title'">
+                <a class="task-link" @click="goTask(record.id)">{{ record.title }}</a>
+              </template>
+              <template v-else-if="column.key === 'status'">
+                <a-badge :status="taskStatusColor[record.status]" :text="taskStatusText[record.status]" />
+              </template>
+              <template v-else-if="column.key === 'priority'">
+                <a-tag :color="{ urgent: 'red', high: 'orange', medium: 'blue', low: 'default' }[record.priority]">
+                  {{ record.priority }}
+                </a-tag>
+              </template>
+              <template v-else-if="column.key === 'assignees'">
+                <span v-if="record.assignees && record.assignees.length">
+                  <a-tag v-for="a in record.assignees.slice(0, 3)" :key="a.id" :color="a.assignee_type === 'agent' ? 'purple' : 'blue'" size="small">
+                    {{ a.assignee_name }}
+                  </a-tag>
+                  <a-tag v-if="record.assignees.length > 3" size="small">+{{ record.assignees.length - 3 }}</a-tag>
+                </span>
+                <span v-else class="text-gray">{{ formatAssignees(record) }}</span>
+              </template>
+              <template v-else-if="column.key === 'action'">
+                <a-button type="link" size="small" @click="goTask(record.id)">详情</a-button>
+                <a-button type="link" size="small" @click="showAssignModalFor(record)">分配</a-button>
+              </template>
             </template>
-            <template v-else-if="column.key === 'status'">
-              <a-badge :status="taskStatusColor[record.status]" :text="taskStatusText[record.status]" />
-            </template>
-            <template v-else-if="column.key === 'priority'">
-              <a-tag :color="{ urgent: 'red', high: 'orange', medium: 'blue', low: 'default' }[record.priority]">
-                {{ record.priority }}
-              </a-tag>
-            </template>
-            <template v-else-if="column.key === 'action'">
-              <a-button type="link" size="small" @click="goTask(record.id)">详情</a-button>
-            </template>
-          </template>
-        </a-table>
+          </a-table>
+        </div>
+
+        <!-- 看板视图 -->
+        <div v-else class="kanban-board">
+          <div v-for="col in statusColumns" :key="col.key" class="kanban-column">
+            <div class="kanban-column-header" :style="{ borderTopColor: col.color }">
+              <span class="column-title">{{ col.title }}</span>
+              <span class="column-count">{{ tasksByStatus[col.key]?.length || 0 }}</span>
+            </div>
+            <div class="kanban-column-body">
+              <div
+                v-for="task in (tasksByStatus[col.key] || [])"
+                :key="task.id"
+                class="kanban-card"
+                @click="goTask(task.id)"
+              >
+                <div class="card-title">{{ task.title }}</div>
+                <div class="card-meta">
+                  <a-tag size="small">{{ typeText[task.type] || task.type }}</a-tag>
+                  <a-tag :color="priorityColor[task.priority]" size="small">{{ task.priority }}</a-tag>
+                </div>
+                <div class="card-footer">
+                  <span class="card-assignee">
+                    <a-avatar size="small" style="background: var(--main-color, #24839b)">
+                      {{ (task.assignee_name || '?')[0] }}
+                    </a-avatar>
+                    <span>{{ task.assignee_name || '未分配' }}</span>
+                  </span>
+                  <a-button type="link" size="small" @click.stop="showAssignModalFor(task)">分配</a-button>
+                </div>
+              </div>
+              <div v-if="!tasksByStatus[col.key]?.length" class="kanban-empty">暂无任务</div>
+            </div>
+          </div>
+        </div>
       </a-tab-pane>
 
       <!-- 证据 -->
@@ -310,15 +500,26 @@ watch(caseId, loadCase)
           </a-col>
         </a-row>
         <a-form-item label="分配给">
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <a-radio-group v-model:value="taskForm.assignee_type" size="small" @change="(e) => handleAssigneeTypeChange(e.target.value)">
+              <a-radio-button value="human">
+                <UserOutlined /> 办案民警
+              </a-radio-button>
+              <a-radio-button value="agent">
+                <TeamOutlined /> 智能体
+              </a-radio-button>
+            </a-radio-group>
+          </div>
           <a-select
             v-model:value="taskForm.assignee_id"
-            :options="humanOptions"
-            placeholder="选择办案民警"
-            :loading="loading"
+            :options="currentAssigneeOptions"
+            :placeholder="taskForm.assignee_type === 'agent' ? '选择智能体' : '选择办案民警'"
+            :loading="taskForm.assignee_type === 'agent' ? agentsLoading : loading"
             allow-clear
             show-search
             option-filter-prop="label"
             @change="handleAssigneeChange"
+            :not-found-content="taskForm.assignee_type === 'agent' ? (agentsLoading ? '加载中...' : '暂无可用智能体') : '暂无案件成员'"
           />
         </a-form-item>
         <a-form-item label="任务指引">
@@ -341,6 +542,55 @@ watch(caseId, loadCase)
           <a-tag v-if="step.key === caseData.phase" color="blue">当前</a-tag>
         </div>
       </div>
+    </a-modal>
+
+        <!-- 列表内分配任务弹窗（多人+多智能体协同） -->
+    <a-modal
+      v-model:open="assignModalVisible"
+      title="分配任务"
+      :confirm-loading="assignLoading"
+      @ok="handleAssignTask"
+      ok-text="确认分配"
+      cancel-text="取消"
+      width="520px"
+    >
+      <a-form layout="vertical" style="margin-top: 16px">
+        <a-form-item label="办案民警（可多选）">
+          <a-select
+            mode="multiple"
+            v-model:value="assignForm.selectedHumans"
+            :options="humanOptions"
+            placeholder="选择要分配的办案民警"
+            :loading="loading"
+            allow-clear
+            show-search
+            option-filter-prop="label"
+            :not-found-content="loading ? '加载中...' : '暂无案件成员'"
+          />
+        </a-form-item>
+        <a-form-item label="智能体（可多选，与民警协同执行）">
+          <a-select
+            mode="multiple"
+            v-model:value="assignForm.selectedAgents"
+            :options="agentOptions"
+            placeholder="选择要参与的智能体（可选）"
+            :loading="agentsLoading"
+            allow-clear
+            show-search
+            option-filter-prop="label"
+            :not-found-content="agentsLoading ? '加载中...' : '暂无可用智能体'"
+          />
+        </a-form-item>
+        <div class="assign-summary" v-if="assignForm.selectedHumans.length || assignForm.selectedAgents.length">
+          <a-tag v-for="h in assignForm.selectedHumans" :key="'h-'+h.value" color="blue">
+            <UserOutlined /> {{ h.label }}
+          </a-tag>
+          <a-tag v-for="a in assignForm.selectedAgents" :key="'a'+a.value" color="purple">
+            <TeamOutlined /> {{ a.label }}
+          </a-tag>
+          <span class="assign-count">共 {{ assignForm.selectedHumans.length + assignForm.selectedAgents.length }} 名执行人</span>
+        </div>
+      </a-form>
     </a-modal>
   </div>
   <div v-else class="loading-state">
@@ -467,8 +717,111 @@ export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
 
 .tab-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   margin-bottom: 12px;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── 看板视图（任务 tab 内） ── */
+.kanban-board {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.kanban-column {
+  min-width: 240px;
+  flex: 1;
+  max-width: 280px;
+  background: var(--gray-10, #f7fafc);
+  border: 1px solid var(--gray-50, #e2e8f0);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.kanban-column-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-top: 3px solid;
+  border-radius: 10px 10px 0 0;
+}
+
+.column-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.column-count {
+  font-size: 11px;
+  background: var(--gray-50, #e2e8f0);
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: var(--gray-600, #4a5568);
+}
+
+.kanban-column-body {
+  padding: 8px;
+  flex: 1;
+  min-height: 80px;
+}
+
+.kanban-card {
+  background: var(--gray-0, #fff);
+  border: 1px solid var(--gray-50, #e2e8f0);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+
+.kanban-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.card-title {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.card-meta {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--gray-500, #718096);
+}
+
+.card-assignee {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.kanban-empty {
+  text-align: center;
+  color: var(--gray-400, #a0aec0);
+  padding: 20px 0;
+  font-size: 12px;
 }
 
 /* 概览 */
@@ -586,4 +939,22 @@ export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
   align-items: center;
   min-height: 400px;
 }
+
+/* 多执行人分配弹窗 */
+.assign-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 12px;
+  background: #f6f8fa;
+  border-radius: 8px;
+  margin-top: 4px;
+}
+.assign-count {
+  font-size: 12px;
+  color: #718096;
+  margin-left: 4px;
+}
+.text-gray { color: #a0aec0; }
 </style>

@@ -1,6 +1,6 @@
 # 智案协 — 项目进度与待办
 
-> **最后更新**: 2026-07-31
+> **最后更新**: 2026-08-01
 > **当前里程碑**: M0 ✅ → M1 ✅ (待联调) → M1.5 ✅ (数字警员) → M2 ⏳
 > **开发文档**: [POLICE_REQUIREMENTS.md](./POLICE_REQUIREMENTS.md) v1.2
 
@@ -72,11 +72,11 @@
 
 ### Phase 1 遗留 (联调测试)
 
-- [ ] **后端端到端测试**: 启动服务后测试所有 27 个 API endpoints
-- [ ] **前端联调**: 前后端对接，验证案件/任务/证据全流程
-- [ ] **证据文件上传**: 对接 Yuxi MinIO 文件存储，当前仅计算哈希未实际上传
-- [ ] **任务流转规则引擎验证**: 配置 TaskFlowRule 后测试自动创建后续任务
-- [ ] **审计日志全量覆盖**: 验证所有操作均写入 audit_logs
+- [x] **后端端到端测试**: 新增 `test/integration/api/test_police_business_router.py`（案件/任务/证据/流转引擎/审计/工作台主链路，5 个用例），需 `docker compose` 起的 api+PG+MinIO 跑通
+- [ ] **前端联调**: 前后端对接，验证案件/任务/证据全流程（待 Docker 联调）
+- [x] **证据文件上传**: `upload_evidence` 已调用 `aupload_file` 落 MinIO（之前描述过时）；本轮补全 `download` / `preview` 端点 + 上传审计
+- [x] **任务流转规则引擎验证**: 引擎已在 `complete_task` 接线；本轮新增 `flow-rules` 配置 API（增/查/删）+ 端到端测试验证"完成任务自动建后续任务"
+- [x] **审计日志全量覆盖**: 案件/智能体原本已有；本轮补齐 **任务全部操作**（创建/分配/开始/完成/审核）+ **证据上传/审核** 审计埋点，统一收敛到 `write_audit_log`
 
 ### Phase 1.5: 数字警员平台 (融合 StaffDeck) ✅
 
@@ -121,12 +121,14 @@
 
 ### Phase 2: 笔录分析智能体 + 案件智能创建 (3周)
 
-- [ ] 开发 `transcript_analysis` Skill (基于 Yuxi Skills 系统)
-- [ ] 集成 Yuxi OCR 引擎 (MinerU/PaddleX) 解析笔录 PDF/图片
-- [ ] 笔录信息提取 → 结构化案件信息 JSON (涉案银行卡/微信号/嫌疑人等)
-- [ ] 自动创建案件 + 生成初始任务列表
-- [ ] 复用 Yuxi 审批中间件: 智能体产出需民警确认
-- [ ] 案件导入流程页面 (上传笔录 → AI 分析 → 确认 → 创建案件)
+> 2026-08-01 推进：已落地「上传笔录 → AI 分析 → 民警确认 → 建案并生成任务」最小闭环（后端 + 前端）。实现方式较原计划的调整见各项说明。
+
+- [x] **笔录信息提取 → 结构化案件信息 JSON**：`police_transcript_service.analyze_transcript` 复用 `load_chat_model(agnes)` 调 LLM，结构化提取案件概览（案由/当事人/时间地点/金额/关键事实）+ 建议任务列表
+- [x] **自动创建案件 + 生成初始任务列表**：`POST /police/import/transcript/confirm` 复用 `police_case_service.create_case` + `police_task_service.create_task`（自动走审计埋点）
+- [x] **案件导入流程页面**：`web/src/views/police/CaseImportView.vue`（上传/粘贴 → 分析 → 可编辑概览+任务 → 确认建案）+ 路由 `/police/import` + 案件列表「导入笔录」入口按钮
+- [x] **集成 Yuxi OCR 引擎（解析 PDF/图片）**：复用 `ocr_service.parse_document`（统一 OCR 网关，内部选 MinerU/PaddleX）；代码已接，best-effort——文本路径无需 OCR 即可跑，PDF/图片需 `docker compose up -d mineru-api paddlex`（当前未启动）
+- [~] **开发 `transcript_analysis` Skill（基于 Yuxi Skills 系统）**：实现方式调整——未注册为 Yuxi builtin Skill，而是作为独立 `police_*` 业务服务 + API（Yuxi Skills 偏 agent 工具集，笔录建案是带鉴权/审计/落库的业务流程，更适独立实现）；如需纳入 Skill 体系可后续补注册
+- [~] **复用 Yuxi 审批中间件**：以「AI 分析 → 民警确认 → 建案」流程实现「产出需确认」约束；未接入 Yuxi 审批中间件机制（checkpoint resume），需确认是否符合预期
 
 ### Phase 3: 专业智能体开发 (4周)
 
@@ -184,7 +186,7 @@
 | M0: 语析底座跑通 | 第 2 周 | ✅ 完成 | Fork 运行 + 用户模型扩展 + LLM 配置 |
 | M1: 案件管理可用 | 第 6 周 | ✅ 代码完成 / ⏳ 待联调 | 案件-任务-证据 + 工作台，需 Docker 联调 |
 | M1.5: 数字警员 | 第 7 周 | ✅ 完成 | StaffDeck 融合 + 数字警员 + SOP + 手绘风格 UI |
-| M2: 智能创建上线 | 第 9 周 | ⬜ 未开始 | 笔录分析智能体 + 案件智能创建 |
+| M2: 智能创建上线 | 第 9 周 | ✅ 闭环代码完成 / ⏳ 待 OCR 与真实 LLM 联调 | 笔录分析智能体 + 案件智能创建 |
 | M3: 多智能体协作 | 第 13 周 | ⬜ 未开始 | 资金分析+调证+法制+编排，任务自动流转 |
 | M4: 知识图谱上线 | 第 16 周 | ⬜ 未开始 | 知识库+知识图谱+可视化+图谱分析 |
 | M5: 安全加固完成 | 第 19 周 | ⬜ 未开始 | PII 脱敏+审计+隔离+渗透测试 |

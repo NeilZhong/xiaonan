@@ -154,6 +154,12 @@
         </div>
       </div>
     </div>
+
+    <!-- 模型供应商配置 (原智能体管理页「模型供应商」Tab，整合至此) -->
+    <div v-if="userStore.isAdmin" class="section-title">模型供应商配置</div>
+    <div v-if="userStore.isAdmin" class="model-providers-wrapper">
+      <ModelProviderManagePanel />
+    </div>
   </div>
 </template>
 
@@ -165,6 +171,7 @@ import { Globe } from 'lucide-vue-next'
 import ModelSelectorComponent from '@/components/ModelSelectorComponent.vue'
 import EmbeddingModelSelector from '@/components/EmbeddingModelSelector.vue'
 import RerankModelSelector from '@/components/RerankModelSelector.vue'
+import ModelProviderManagePanel from '@/components/model-management/ModelProviderManagePanel.vue'
 
 const configStore = useConfigStore()
 const userStore = useUserStore()
@@ -284,6 +291,10 @@ const openLink = (url) => {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 12px;
+    margin-top: 16px;
+  }
+
+  .model-providers-wrapper {
     margin-top: 16px;
   }
 

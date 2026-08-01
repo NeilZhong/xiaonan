@@ -110,9 +110,7 @@
         <div v-if="userStore.isAdmin || hasModelMetadata" class="model-metadata-source">
           <template v-if="userStore.isAdmin">
             没有合适的模型？
-            <RouterLink :to="{ path: '/agent-manage', query: { tab: 'providers' } }" @click.stop>
-              配置模型
-            </RouterLink>
+            <a class="link-like" @click.stop="goConfigureProviders">配置模型</a>
           </template>
           <template v-if="hasModelMetadata">
             <span v-if="userStore.isAdmin">。 </span>
@@ -127,8 +125,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, inject, reactive, ref, watch } from 'vue'
 import { modelProviderApi } from '@/apis/system_api'
 import { Eye, RefreshCw, X } from 'lucide-vue-next'
 import { useModelStatus } from '@/composables/useModelStatus'
@@ -166,6 +163,9 @@ const props = defineProps({
 
 const emit = defineEmits(['select-model'])
 const userStore = useUserStore()
+// 模型供应商配置已整合到系统设置-基本设置，点击跳转打开设置弹窗
+const { openSettingsModal } = inject('settingsModal', {})
+const goConfigureProviders = () => openSettingsModal?.('base')
 
 // v2 模型数据：每次展开下拉时实时从后端拉取
 const v2Models = ref({})
@@ -589,6 +589,10 @@ const handleClear = () => {
 
   a {
     color: var(--main-600);
+
+    &.link-like {
+      cursor: pointer;
+    }
   }
 }
 </style>

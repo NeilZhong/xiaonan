@@ -5,10 +5,23 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.utils.auth_middleware import get_db, get_required_user
+from yuxi.repositories.task_repository import task_repository
 from yuxi.services.police_service import police_task_service
 from yuxi.storage.postgres.models_business import User
 
 task_router = APIRouter(prefix="/police/tasks", tags=["police-tasks"])
+
+
+class FlowRuleCreate(BaseModel):
+    name: str = Field(..., max_length=100)
+    trigger_event: str  # task_completed / file_uploaded / phase_changed
+    condition: dict = Field(default_factory=dict)  # 触发条件 (JSON规则)
+    action: str = "create_task"  # create_task / notify / auto_approve
+    target_task_type: str | None = None
+    target_assignee_type: str | None = None
+    target_assignee_id: int | None = None
+    case_id: int | None = None  # NULL=全局规则
+    enabled: int = 1
 
 
 class TaskCreate(BaseModel):
@@ -35,9 +48,16 @@ class TaskUpdate(BaseModel):
 
 
 class TaskAssign(BaseModel):
-    assignee_type: str  # human/agent
-    assignee_id: int
-    assignee_name: str
+    """任务分配请求（支持多执行人）
+
+    向后兼容：若直接传 assignee_type/assignee_id/assignee_name（单执行人），
+    内部自动转为 assignees 数组；新调用方应优先使用 assignees 数组。
+    """
+    assignees: list[dict] | None = Field(default=None, description="执行人列表，每项 {assignee_type, assignee_id, assignee_name, role?}")
+    # 向后兼容单执行人字段
+    assignee_type: str | None = Field(default=None, description="单执行人类型（向后兼容）")
+    assignee_id: int | None = Field(default=None, description="单执行人ID（向后兼容）")
+    assignee_name: str | None = Field(default=None, description="单执行人名称（向后兼容）")
 
 
 class TaskComplete(BaseModel):
@@ -149,10 +169,21 @@ async def assign_task(
     current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """分配任务"""
-    result = await police_task_service.assign_task(
-        task_id, body.assignee_type, body.assignee_id, body.assignee_name, current_user.id
-    )
+    """分配任务（支持多人/多智能体协同）"""
+    # 统一转为多执行人数组
+    if body.assignees is not None:
+        assignees = body.assignees
+    else:
+        # 向后兼容：单执行人字段转数组
+        if not body.assignee_type or body.assignee_id is None:
+            raise HTTPException(status_code=422, detail="需提供 assignees 数组或单执行人字段")
+        assignees = [{
+            "assignee_type": body.assignee_type,
+            "assignee_id": body.assignee_id,
+            "assignee_name": body.assignee_name or "",
+            "role": "executor",
+        }]
+    result = await police_task_service.assign_task_multi(task_id, assignees, current_user.id)
     if not result:
         raise HTTPException(status_code=404, detail="任务不存在")
     return {"code": 0, "message": "success", "data": result}
@@ -213,3 +244,40 @@ async def task_events(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return {"code": 0, "message": "success", "data": task.get("events", [])}
+
+
+# ── 任务流转规则管理 (POLICE_REQUIREMENTS §3.4 / §6 自动流转) ──
+
+@task_router.get("/flow-rules/list")
+async def list_flow_rules(
+    case_id: int | None = None,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出任务流转规则 (含全局规则)"""
+    rules = await task_repository.list_flow_rules(case_id)
+    return {"code": 0, "message": "success", "data": [r.to_dict() for r in rules]}
+
+
+@task_router.post("/flow-rules")
+async def create_flow_rule(
+    body: FlowRuleCreate,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """创建任务流转规则 — 配置完成后，满足条件的任务完成时会自动创建后续任务"""
+    rule = await task_repository.create_flow_rule(body.model_dump(exclude_none=True))
+    return {"code": 0, "message": "success", "data": rule.to_dict()}
+
+
+@task_router.delete("/flow-rules/{rule_id}")
+async def delete_flow_rule(
+    rule_id: int,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除任务流转规则"""
+    ok = await task_repository.delete_flow_rule(rule_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="流转规则不存在")
+    return {"code": 0, "message": "success", "data": {"deleted": True}}

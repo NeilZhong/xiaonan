@@ -4,9 +4,10 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from yuxi.storage.postgres.manager import pg_manager
-from yuxi.storage.postgres.models_police import PoliceTask, TaskEvent, TaskFlowRule
+from yuxi.storage.postgres.models_police import PoliceTask, TaskAssignee, TaskEvent, TaskFlowRule
 from yuxi.utils.datetime_utils import utc_now_naive
 
 
@@ -36,7 +37,7 @@ class TaskRepository:
         my_tasks_user_id: int | None = None,
         review_user_id: int | None = None,
     ) -> tuple[list[PoliceTask], int]:
-        """列表查询 + 总数"""
+        """列表查询 + 总数（支持多执行人 JOIN 查询）"""
         async with pg_manager.get_async_session_context() as session:
             query = select(PoliceTask)
             count_query = select(func.count(PoliceTask.id))
@@ -61,20 +62,43 @@ class TaskRepository:
                 query = query.where(PoliceTask.title.ilike(pattern))
                 count_query = count_query.where(PoliceTask.title.ilike(pattern))
             if my_tasks_user_id:
-                query = query.where(
-                    PoliceTask.assignee_type == "human",
-                    PoliceTask.assignee_id == my_tasks_user_id,
+                # 通过 TaskAssignee 关联表查找：当前用户作为执行人的待办/进行中任务
+                query = query.join(TaskAssignee, PoliceTask.id == TaskAssignee.task_id).where(
+                    TaskAssignee.assignee_type == "human",
+                    TaskAssignee.assignee_id == my_tasks_user_id,
                     PoliceTask.status.in_(["pending", "in_progress"]),
                 )
-                count_query = count_query.where(
-                    PoliceTask.assignee_type == "human",
-                    PoliceTask.assignee_id == my_tasks_user_id,
+                count_query = count_query.join(TaskAssignee, PoliceTask.id == TaskAssignee.task_id).where(
+                    TaskAssignee.assignee_type == "human",
+                    TaskAssignee.assignee_id == my_tasks_user_id,
                     PoliceTask.status.in_(["pending", "in_progress"]),
                 )
             if review_user_id:
-                # 待审核: status=review 且分配给该民警 或 该民警是案件成员中的 reviewer
-                query = query.where(PoliceTask.status == "review")
-                count_query = count_query.where(PoliceTask.status == "review")
+                # 待审核任务：status=review 且
+                #   (a) 当前用户是任务的执行人之一，或
+                #   (b) 当前用户是案件指挥员(commander)
+                from yuxi.storage.postgres.models_police import CaseMember
+                review_subquery = select(PoliceTask.id).join(
+                    TaskAssignee, PoliceTask.id == TaskAssignee.task_id
+                ).where(
+                    TaskAssignee.assignee_type == "human",
+                    TaskAssignee.assignee_id == review_user_id,
+                ).union_all(
+                    select(PoliceTask.id).join(
+                        CaseMember, PoliceTask.case_id == CaseMember.case_id
+                    ).where(
+                        CaseMember.user_id == review_user_id,
+                        CaseMember.role == "commander",
+                    )
+                )
+                query = query.where(
+                    PoliceTask.status == "review",
+                    PoliceTask.id.in_(review_subquery),
+                )
+                count_query = count_query.where(
+                    PoliceTask.status == "review",
+                    PoliceTask.id.in_(review_subquery),
+                )
 
             query = query.order_by(PoliceTask.priority.desc(), PoliceTask.created_at.desc()).offset(skip).limit(limit)
             result = await session.execute(query)
@@ -121,6 +145,7 @@ class TaskRepository:
             return task
 
     async def assign(self, task_id: int, assignee_type: str, assignee_id: int, assignee_name: str) -> PoliceTask | None:
+        """向后兼容的单执行人分配（同步更新冗余字段）"""
         async with pg_manager.get_async_session_context() as session:
             task = await session.get(PoliceTask, task_id)
             if not task:
@@ -201,6 +226,82 @@ class TaskRepository:
                 query = query.where((TaskFlowRule.case_id == case_id) | (TaskFlowRule.case_id.is_(None)))
             result = await session.execute(query)
             return list(result.scalars().all())
+
+    async def create_flow_rule(self, data: dict[str, Any]) -> TaskFlowRule:
+        """创建任务流转规则 (POLICE_REQUIREMENTS §3.4 / §6 自动流转)"""
+        async with pg_manager.get_async_session_context() as session:
+            rule = TaskFlowRule(**data)
+            session.add(rule)
+            await session.commit()
+            await session.refresh(rule)
+            return rule
+
+    async def delete_flow_rule(self, rule_id: int) -> bool:
+        async with pg_manager.get_async_session_context() as session:
+            rule = await session.get(TaskFlowRule, rule_id)
+            if not rule:
+                return False
+            await session.delete(rule)
+            await session.commit()
+            return True
+
+    # ── 多执行人管理 (TaskAssignee) ──────────────────────────
+
+    async def get_assignees(self, task_id: int) -> list[TaskAssignee]:
+        """获取任务的全部执行人列表"""
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(TaskAssignee).where(TaskAssignee.task_id == task_id)
+                    .order_by(TaskAssignee.assignee_type, TaskAssignee.id)
+            )
+            return list(result.scalars().all())
+
+    async def set_assignees(self, task_id: int, assignees: list[dict]) -> list[TaskAssignee]:
+        """替换任务的全部执行人（先删后插），返回新列表。
+
+        assignees 每项格式: {assignee_type, assignee_id, assignee_name, role?}
+        """
+        async with pg_manager.get_async_session_context() as session:
+            old = await session.execute(
+                select(TaskAssignee).where(TaskAssignee.task_id == task_id)
+            )
+            for row in old.scalars().all():
+                await session.delete(row)
+            new_list = []
+            for a in assignees:
+                ta = TaskAssignee(
+                    task_id=task_id,
+                    assignee_type=a["assignee_type"],
+                    assignee_id=a.get("assignee_id"),
+                    assignee_name=a.get("assignee_name", ""),
+                    role=a.get("role", "executor"),
+                )
+                session.add(ta)
+                new_list.append(ta)
+            await session.commit()
+            for ta in new_list:
+                await session.refresh(ta)
+            return new_list
+
+    async def get_task_with_assignees(self, task_id: int) -> PoliceTask | None:
+        """获取任务详情（预加载执行人列表）"""
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(PoliceTask).options(selectinload(PoliceTask.assignees))
+                    .where(PoliceTask.id == task_id)
+            )
+            return result.scalar_one_or_none()
+
+    async def get_assignee_summary(self, task_id: int) -> dict[str, Any]:
+        """返回任务执行人摘要：{humans, agents, has_human, has_agent}"""
+        assignees = await self.get_assignees(task_id)
+        humans = [a.to_dict() for a in assignees if a.assignee_type == "human"]
+        agents = [a.to_dict() for a in assignees if a.assignee_type == "agent"]
+        return {
+            "humans": humans, "agents": agents,
+            "has_human": len(humans) > 0, "has_agent": len(agents) > 0,
+            "total": len(assignees),
+        }
 
 
 task_repository = TaskRepository()

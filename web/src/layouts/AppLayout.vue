@@ -12,8 +12,7 @@ import {
   MessageCirclePlus,
   Search,
   Shield,
-  Briefcase,
-  ListChecks
+  Briefcase
 } from 'lucide-vue-next'
 
 import { useConfigStore } from '@/stores/config'
@@ -134,18 +133,11 @@ const mainList = computed(() => {
   })
 
   items.push({
-    name: '任务管理',
-    path: '/police/tasks',
-    icon: ListChecks,
-    activeIcon: ListChecks,
-    activePaths: ['/police/tasks']
-  })
-
-  items.push({
     name: '智能体',
     path: '/agent-manage',
     icon: Box,
-    activeIcon: Box
+    activeIcon: Box,
+    activePaths: ['/agent-manage']
   })
 
   items.push({

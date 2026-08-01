@@ -1054,6 +1054,20 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE INDEX IF NOT EXISTS ix_police_agents_backend ON police_agents(backend_id)",
             "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS agent_id INTEGER",
             "CREATE INDEX IF NOT EXISTS ix_police_agents_agent ON police_agents(agent_id)",
+            # 智能体市场: 分类与安装计数 (复用 police_agents 表, is_template=1 即市场模板)
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS category VARCHAR(50)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agents_category ON police_agents(category)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS install_count INTEGER DEFAULT 0",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS source_template_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_police_agents_source_template ON police_agents(source_template_id)",
+            # 共享与市场发布: 作者、可见性、审批状态
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS author_id INTEGER",
+            "CREATE INDEX IF NOT EXISTS ix_police_agents_author ON police_agents(author_id)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 0",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS share_scope VARCHAR(20) DEFAULT 'personal'",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20)",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS approved_by INTEGER",
+            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP",
             # SOP 流程技能定义表 (StaffDeck 状态机驱动 SOP 概念)
             """
             CREATE TABLE IF NOT EXISTS police_sops (

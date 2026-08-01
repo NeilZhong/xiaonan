@@ -444,7 +444,8 @@ const canManageCurrentAgent = computed(() => !!selectedAgent.value?.can_manage)
 const isReadOnlyConfig = computed(() => !canManageCurrentAgent.value)
 
 const segmentConfigKeys = computed(() => {
-  const keys = Object.keys(configurableItems.value)
+  // 子智能体为内部运行时委派细节，不在配置 UI 暴露
+  const keys = Object.keys(configurableItems.value).filter((key) => key !== 'subagents')
   return {
     model: keys.filter((key) => {
       const meta = configurableItems.value[key]?.kind

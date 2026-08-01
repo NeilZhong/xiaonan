@@ -14,7 +14,6 @@ import {
 
 import { userApi } from '@/apis/user_api'
 import AgentRuntimeConfigForm from '@/components/AgentRuntimeConfigForm.vue'
-import ShareConfigForm from '@/components/ShareConfigForm.vue'
 import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import { useUserStore } from '@/stores/user'
@@ -39,10 +38,8 @@ const editingAgentId = ref(null)
 const agentModalActiveTab = ref('basic')
 const agentIconUploading = ref(false)
 const saving = ref(false)
-const agentShareConfigFormRef = ref(null)
 const runtimeConfigFormRef = ref(null)
 const agentNameInputRef = ref(null)
-const agentShareConfig = ref({ access_level: 'user', department_ids: [], user_uids: [] })
 const agentForm = reactive({
   slug: '',
   name: '',
@@ -78,31 +75,7 @@ const isRuntimeAgentModalTab = (key) => runtimeAgentModalTabs.includes(key)
 const getDefaultBackendId = () => DEFAULT_AGENT_BACKEND_ID
 const isSubAgentBackend = (backendId) => backendId === SUB_AGENT_BACKEND_ID
 
-const getInitialShareConfig = () => ({
-  access_level: userStore.isAdmin ? 'global' : 'user',
-  department_ids: [],
-  user_uids: userStore.uid ? [userStore.uid] : []
-})
-
-const normalizeShareConfigForPayload = () => {
-  if (isBuiltinAgent({ id: editingAgentId.value })) {
-    return { access_level: 'global', department_ids: [], user_uids: [] }
-  }
-  const config = agentShareConfig.value || getInitialShareConfig()
-  const accessLevel = userStore.isAdmin ? config.access_level : 'user'
-  return {
-    access_level: accessLevel,
-    department_ids: accessLevel === 'department' ? config.department_ids || [] : [],
-    user_uids: accessLevel === 'user' ? config.user_uids || [] : []
-  }
-}
-
 const isEditingBuiltinAgent = computed(() => isBuiltinAgent({ id: editingAgentId.value }))
-const canEditAgentShareConfig = computed(() => !isEditingBuiltinAgent.value)
-const getAgentShareAllowedLevels = () => {
-  if (isEditingBuiltinAgent.value) return ['global']
-  return userStore.isAdmin ? ['global', 'department', 'user'] : ['user']
-}
 
 const agentModalTitle = computed(() => (editingAgentId.value ? '编辑智能体' : '新增智能体'))
 const agentPreviewDefaultIcon = computed(() =>
@@ -128,7 +101,6 @@ const resetAgentForm = () => {
     description: '',
     icon: ''
   })
-  agentShareConfig.value = getInitialShareConfig()
 }
 
 const focusAgentNameInput = async () => {
@@ -153,10 +125,16 @@ const openEdit = async (agent) => {
   if (!agentId) return
 
   const detail = await agentStore.fetchAgentDetail(agentId, true)
-  if (!detail?.can_manage) {
+  // 数字警员（police agent）通过 _officer 标记识别；内置智能助手、数字警员
+  // 默认可管理，不依赖 yuxi 的 can_manage（其桥接记录 created_by 不匹配当前用户）
+  const isOfficer = !!agent?._officer || !!detail?._officer
+  const manageable = !!detail?.can_manage || isOfficer || isBuiltinAgent(detail)
+  if (!manageable) {
     message.warning('当前智能体不可编辑')
     return
   }
+  // 同步给下游配置表单（模型/工具/其他配置依赖 selectedAgent.can_manage 判定只读）
+  detail.can_manage = manageable
 
   editingAgentId.value = detail.id
   agentModalActiveTab.value = 'basic'
@@ -167,9 +145,6 @@ const openEdit = async (agent) => {
     description: detail.description || '',
     icon: detail.icon || ''
   })
-  agentShareConfig.value = isBuiltinAgent(detail)
-    ? { access_level: 'global', department_ids: [], user_uids: [] }
-    : detail.share_config || getInitialShareConfig()
   await agentStore.selectAgent(detail.id, { allowSubagent: true })
   showAgentModal.value = true
 }
@@ -219,13 +194,16 @@ const buildAgentPayload = () => {
     name: agentForm.name.trim(),
     description: agentForm.description.trim() || null,
     icon: agentForm.icon.trim() || null,
-    share_config: normalizeShareConfigForPayload(),
+    // 新增智能体默认个人使用，共享权限在档案页单独设置
+    share_config: { access_level: 'user', department_ids: [], user_uids: [] },
     is_subagent: isSubAgentBackend(agentForm.backend_id)
   }
 
   if (!editingAgentId.value) {
     payload.slug = agentForm.slug.trim() || undefined
     payload.backend_id = agentForm.backend_id
+    // 新建智能体默认不关联任何子智能体（子智能体为内部运行时委派细节，不在 UI 暴露）
+    payload.config_json = { context: { subagents: [] } }
   }
 
   return payload
@@ -235,15 +213,6 @@ const saveAgent = async () => {
   if (!agentForm.name.trim()) {
     agentModalActiveTab.value = 'basic'
     message.error('请填写智能体名称')
-    return
-  }
-
-  const validation = canEditAgentShareConfig.value
-    ? agentShareConfigFormRef.value?.validate?.()
-    : null
-  if (validation && !validation.valid) {
-    agentModalActiveTab.value = 'basic'
-    message.error(validation.message)
     return
   }
 
@@ -334,7 +303,7 @@ defineExpose({
       <div class="agent-modal-main">
         <section v-show="agentModalActiveTab === 'basic'" class="agent-modal-section">
           <div class="agent-profile-header">
-            <div class="agent-icon-preview" aria-label="智能体图标、名称与后端">
+            <div class="agent-icon-preview" aria-label="智能体图标、名称与类型">
               <div class="agent-profile-main">
                 <a-upload
                   :show-upload-list="false"
@@ -393,13 +362,13 @@ defineExpose({
               <div
                 class="agent-backend-summary"
                 :class="{ editable: !editingAgentId }"
-                aria-label="智能体后端"
+                aria-label="智能体类型"
               >
                 <span class="agent-backend-icon">
                   <component :is="selectedBackendIcon" :size="16" />
                 </span>
                 <div class="agent-backend-text">
-                  <span class="agent-backend-label">智能体后端</span>
+                  <span class="agent-backend-label">智能体类型</span>
                   <a-select
                     v-if="!editingAgentId"
                     v-model:value="agentForm.backend_id"
@@ -422,18 +391,6 @@ defineExpose({
                 placeholder="可选"
               />
             </label>
-          </div>
-
-          <div v-if="canEditAgentShareConfig" class="share-config-block">
-            <div class="section-heading">
-              <span>共享权限</span>
-            </div>
-            <ShareConfigForm
-              ref="agentShareConfigFormRef"
-              v-model="agentShareConfig"
-              :auto-select-user-dept="true"
-              :allowed-access-levels="getAgentShareAllowedLevels()"
-            />
           </div>
         </section>
 

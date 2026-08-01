@@ -207,7 +207,8 @@ async def test_normalize_agent_context_config_expands_null_and_filters_explicit_
         context_schema=ChatBotContext,
     )
 
-    assert empty_subagents_normalized["subagents"] == ["research-agent", "critique-agent"]
+    # 显式空数组表示不关联任何子智能体（与 tools/skills 等保持一致语义）
+    assert empty_subagents_normalized["subagents"] == []
 
 
 @pytest.mark.asyncio
@@ -325,7 +326,8 @@ async def test_prepare_agent_runtime_context_filters_resources_and_derives_runti
     assert prepared.knowledges == ["kb-a"]
     assert prepared.mcps == ["mcp-a"]
     assert prepared.skills == ["skill-a"]
-    assert prepared.subagents == ["research-agent"]
+    # 显式空数组 subagents 现在表示不关联任何子智能体
+    assert prepared.subagents == []
     assert prepared._visible_knowledge_bases == [{"slug": "kb-a", "name": "Docs A"}]
     assert prepared._prompt_skills == ["skill-a", "skill-b"]
     assert prepared._readable_skills == ["skill-a", "skill-b"]

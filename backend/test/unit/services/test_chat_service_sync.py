@@ -12,7 +12,7 @@ from yuxi.agents.backends.sandbox import paths as workspace_paths
 from yuxi.services import chat_service as svc
 
 
-def _empty_agent_context(_thread_id: str, _uid: str) -> str:
+def _empty_agent_context(_thread_id: str, _uid: str, _agent_slug: str | None = None) -> str:
     return ""
 
 
@@ -295,7 +295,7 @@ async def test_build_agent_input_context_loads_all_workspace_agent_context_files
 
 @pytest.mark.asyncio
 async def test_build_agent_input_context_merges_workspace_agent_context(monkeypatch: pytest.MonkeyPatch):
-    def fake_agent_context(_thread_id: str, _uid: str) -> str:
+    def fake_agent_context(_thread_id: str, _uid: str, _agent_slug: str | None = None) -> str:
         return (
             "用户工作区 agents/AGENTS.md 内容：\n回答前先读取 AGENTS.md\n\n"
             "用户工作区 agents/USER.md 内容：\n用户偏好中文"
@@ -386,7 +386,7 @@ async def test_get_agent_state_view_returns_interrupted_checkpoint_payload(monke
 
         async def get_by_slug(self, slug: str):
             assert slug == "main"
-            return SimpleNamespace(backend_id="ChatBot", config_json={"context": {}})
+            return SimpleNamespace(backend_id="ChatBot", slug="main", config_json={"context": {}})
 
     class ThreadRepo:
         def __init__(self, _db):
@@ -487,6 +487,7 @@ async def test_get_agent_state_view_includes_subagent_thread_relation(monkeypatc
             assert slug == "worker"
             return SimpleNamespace(
                 backend_id="SubAgentBackend",
+                slug="worker",
                 config_json={"context": {}},
             )
 
@@ -619,7 +620,7 @@ async def test_get_agent_state_view_reports_malformed_subagent_run_as_server_err
 
         async def get_by_slug(self, slug: str):
             assert slug == "worker"
-            return SimpleNamespace(backend_id="SubAgentBackend", config_json={"context": {}})
+            return SimpleNamespace(backend_id="SubAgentBackend", slug="worker", config_json={"context": {}})
 
     class ThreadRepo:
         def __init__(self, _db):
@@ -706,3 +707,137 @@ async def test_build_agent_input_context_keeps_prompt_when_workspace_agent_conte
     )
 
     assert context["system_prompt"] == "原始系统提示词"
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_runtime_falls_back_to_police_system_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """数字警员（DA- 前缀）在 yuxi Agent 的 config_json.context 缺失 system_prompt 时，
+    应从 police_agents 表兜底读取，避免对话回落到模型默认身份。"""
+    POLICE_PROMPT = "你是案件编排智能体，负责拆解与编排案件侦办流程。"
+
+    class FakeAgentRepository:
+        def __init__(self, _db):
+            pass
+
+        async def get_visible_by_slug(self, *, slug: str, user, kind="main"):
+            del user, kind
+            assert slug == "DA-005"
+            # yuxi 配置中缺失 system_prompt（复现前端编辑覆盖后丢失的场景）
+            return SimpleNamespace(slug="DA-005", backend_id="ChatbotAgent", config_json={"context": {}})
+
+    class FakeConversationRepository:
+        def __init__(self, _db):
+            pass
+
+        async def get_conversation_by_thread_id(self, thread_id):
+            del thread_id
+            return None
+
+    class _FakeResult:
+        def scalar_one_or_none(self):
+            return POLICE_PROMPT
+
+    class _FakeSession:
+        async def execute(self, _stmt):
+            return _FakeResult()
+
+    class _FakeSessionContext:
+        def __init__(self):
+            self.session = _FakeSession()
+
+        async def __aenter__(self):
+            return self.session
+
+        async def __aexit__(self, *_exc):
+            return False
+
+    class _FakePGManager:
+        def get_async_session_context(self):
+            return _FakeSessionContext()
+
+    monkeypatch.setattr(svc, "AgentRepository", FakeAgentRepository)
+    monkeypatch.setattr(svc, "ConversationRepository", FakeConversationRepository)
+    monkeypatch.setattr(svc, "normalize_agent_context_config", _fake_normalize_agent_context_config)
+    monkeypatch.setattr(svc.agent_manager, "get_agent", lambda backend_id: SimpleNamespace(context_schema=None))
+    monkeypatch.setattr("yuxi.storage.postgres.manager.pg_manager", _FakePGManager())
+
+    user = SimpleNamespace(uid="user-1")
+    agent_item, backend, agent_config = await svc._resolve_agent_runtime(
+        db=object(),
+        user=user,
+        requested_agent_slug="DA-005",
+        thread_id=None,
+    )
+
+    assert agent_item.slug == "DA-005"
+    assert backend.context_schema is None
+    assert agent_config["system_prompt"] == POLICE_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_resolve_agent_runtime_keeps_yuxi_system_prompt_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """当 yuxi 配置已包含 system_prompt 时，不应被 police_agents 兜底覆盖（避免误写）。"""
+    YUXI_PROMPT = "yuxi 中已配置的角色提示词"
+
+    class FakeAgentRepository:
+        def __init__(self, _db):
+            pass
+
+        async def get_visible_by_slug(self, *, slug: str, user, kind="main"):
+            del user, kind
+            return SimpleNamespace(slug=slug, backend_id="ChatbotAgent", config_json={"context": {"system_prompt": YUXI_PROMPT}})
+
+    class FakeConversationRepository:
+        def __init__(self, _db):
+            pass
+
+        async def get_conversation_by_thread_id(self, thread_id):
+            del thread_id
+            return None
+
+    monkeypatch.setattr(svc, "AgentRepository", FakeAgentRepository)
+    monkeypatch.setattr(svc, "ConversationRepository", FakeConversationRepository)
+    monkeypatch.setattr(svc, "normalize_agent_context_config", _fake_normalize_agent_context_config)
+    monkeypatch.setattr(svc.agent_manager, "get_agent", lambda backend_id: SimpleNamespace(context_schema=None))
+
+    user = SimpleNamespace(uid="user-1")
+    agent_item, backend, agent_config = await svc._resolve_agent_runtime(
+        db=object(),
+        user=user,
+        requested_agent_slug="DA-005",
+        thread_id=None,
+    )
+
+    assert agent_config["system_prompt"] == YUXI_PROMPT
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_with_context_puts_custom_prompt_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """自定义 system_prompt 应作为主身份置顶在基础 PROMPT 之前，
+    确保 LLM 回答"你是谁"时采用自定义角色而非模型默认身份。"""
+    from yuxi.agents.buildin.chatbot.prompt import build_prompt_with_context
+
+    class FakeContext:
+        system_prompt = "你是案件编排智能体，负责调度专业子智能体。"
+
+    result = build_prompt_with_context(FakeContext())
+    # 自定义提示词必须在基础 PROMPT（含"小南"）之前出现
+    custom_pos = result.index("案件编排智能体")
+    base_pos = result.index("小南")
+    assert custom_pos < base_pos, f"自定义提示词位置({custom_pos})应在基础PROMPT({base_pos})之前"
+    # 两者都必须存在
+    assert "案件编排智能体" in result
+    assert "小南" in result
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_with_context_no_custom_uses_base_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """无自定义 system_prompt 时，仅输出基础 PROMPT（向后兼容）。"""
+    from yuxi.agents.buildin.chatbot.prompt import build_prompt_with_context
+
+    class FakeContext:
+        system_prompt = ""
+
+    result = build_prompt_with_context(FakeContext())
+    assert "小南" in result
+    assert "当前日期：" in result

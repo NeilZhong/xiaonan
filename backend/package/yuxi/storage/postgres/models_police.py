@@ -19,8 +19,10 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    inspect,
 )
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from yuxi.storage.postgres.models_business import Base
 from yuxi.utils.datetime_utils import format_utc_datetime, utc_now_naive
@@ -31,7 +33,21 @@ CASE_PHASE = ("research", "arrest", "handling", "prosecution")
 TASK_STATUS = ("pending", "in_progress", "review", "completed", "blocked")
 TASK_PRIORITY = ("urgent", "high", "medium", "low")
 ASSIGNEE_TYPE = ("human", "agent")
+ASSIGNEE_ROLE = ("executor", "reviewer")  # executor=执行人, reviewer=审核人
 EVIDENCE_TYPE = ("transcript", "bank_flow", "screenshot", "audio", "video", "document", "report", "other")
+
+
+def _safe_assignees(task: "PoliceTask") -> list[dict[str, Any]]:
+    """安全读取任务执行人列表。
+
+    该关系为懒加载，在 session 已关闭的 detached 实例上直接访问会抛
+    DetachedInstanceError（如 task_service 启动时从数据库重建任务状态）。
+    此处仅当关系已加载时序列化，未加载则回退为空列表，避免启动崩溃。
+    """
+    try:
+        return [a.to_dict() for a in task.assignees]
+    except DetachedInstanceError:
+        return []
 
 
 class PoliceCase(Base):
@@ -175,6 +191,7 @@ class PoliceTask(Base):
 
     case = relationship("PoliceCase", back_populates="tasks")
     events = relationship("TaskEvent", back_populates="task", cascade="all, delete-orphan")
+    assignees = relationship("TaskAssignee", back_populates="task", cascade="all, delete-orphan")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -204,6 +221,39 @@ class PoliceTask(Base):
             "signed_hash": self.signed_hash,
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
+            "assignees": _safe_assignees(self),
+        }
+
+
+class TaskAssignee(Base):
+    """★ 任务执行人表（多对多）
+
+    支持一个任务分配给多个民警和/或多个智能体协同执行。
+    替代原 PoliceTask 单字段 assignee_id/assignee_type，实现"人机协作"模式。
+    原字段保留用于向后兼容（冗余存储主执行人）。
+    """
+
+    __tablename__ = "police_task_assignees"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("police_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignee_type = Column(String(10), nullable=False)  # human / agent
+    assignee_id = Column(Integer, nullable=True)  # users.id 或 police_agents.id
+    assignee_name = Column(String(100), nullable=True)  # 冗余显示名
+    role = Column(String(20), default="executor")  # executor=执行人, reviewer=审核人
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    task = relationship("PoliceTask", back_populates="assignees")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "task_id": self.task_id,
+            "assignee_type": self.assignee_type,
+            "assignee_id": self.assignee_id,
+            "assignee_name": self.assignee_name,
+            "role": self.role,
+            "created_at": format_utc_datetime(self.created_at),
         }
 
 
@@ -393,6 +443,18 @@ class PoliceAgent(Base):
     icon = Column(String(50), nullable=True)
     status = Column(String(20), default="active")  # active/offline/training
     is_template = Column(Integer, default=0)
+    category = Column(String(50), nullable=True, index=True)  # 市场分类: case_analysis/fund_tracking/legal_review/...
+    install_count = Column(Integer, default=0)  # 市场安装次数
+    source_template_id = Column(Integer, nullable=True, index=True)  # 安装来源模板 ID（NULL 表示自建或预设）
+
+    # ── 共享与市场发布 ────────────────────────────────────────
+    author_id = Column(Integer, nullable=True, index=True)  # 创建者 users.id（NULL=系统预设）
+    is_public = Column(Integer, default=0)  # 是否在市场中可见（1=可见）
+    share_scope = Column(String(20), default="personal")  # personal / department / global
+    approval_status = Column(String(20), nullable=True)  # NULL / pending / approved / rejected
+    approved_by = Column(Integer, nullable=True)  # 审批人 users.id
+    approved_at = Column(DateTime, nullable=True)  # 审批时间
+
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -425,6 +487,15 @@ class PoliceAgent(Base):
             "icon": self.icon,
             "status": self.status,
             "is_template": self.is_template,
+            "category": self.category,
+            "install_count": self.install_count or 0,
+            "source_template_id": self.source_template_id,
+            "author_id": self.author_id,
+            "is_public": self.is_public or 0,
+            "share_scope": self.share_scope or "personal",
+            "approval_status": self.approval_status,
+            "approved_by": self.approved_by,
+            "approved_at": format_utc_datetime(self.approved_at) if self.approved_at else None,
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
         }
