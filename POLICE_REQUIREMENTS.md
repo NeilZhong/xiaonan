@@ -2,9 +2,9 @@
 
 > **产品品牌**: 小南 / Xiaonan（前端 UI 与对外物料统一使用此品牌名）  
 > **内部代号**: 智案协  
-> **版本**: v1.4  
+> **版本**: v1.5  
 > **日期**: 2026-08-03  
-> **状态**: 多智能体协作架构落地——定义推进智能体/执行智能体分层模型、任务状态机扩展、人机协作协议；前端 UI 吸收 Multica 卡片式看板设计；个人工作台聚合待办分组  
+> **状态**: **文档—代码对齐版**。本次修订不新增设计，只做三件事：①把与代码不符的描述改成代码实际的样子（数据模型主键/表名、API 路径、事件驱动实现方式）；②把已实现但文档缺失的功能补写进来（侦查任务模板体系、案件工作区文件系统、数字警员市场与共享审批、任务多执行人）；③为每一节标注实现状态，区分「已实现」与「规划中」  
 > **基础底座**: 语析 Yuxi v0.7.1 (https://github.com/xerrors/Yuxi, MIT 协议)  
 > **产品形态参考**: StaffDeck (https://github.com/OpenBMB/StaffDeck，数字员工广场 / 员工档案 / SOP / 工作记录交互语言)  
 > **看板交互参考**: Multica (https://github.com/multica-ai/multica，卡片式看板 / 优先级标签 / 多列拖拽 / Agent 队友呈现)  
@@ -25,6 +25,57 @@
 - [9. 安全与合规设计](#9-安全与合规设计)
 - [10. 部署方案](#10-部署方案)
 - [11. 开发计划与里程碑](#11-开发计划与里程碑)
+
+---
+
+## 0. 实现状态说明（v1.5 新增，阅读本文档前必读）
+
+本文档同时承载「已建成的系统说明」与「未来规划」两种内容。为避免把规划当成已实现来验收，全文使用统一状态标记：
+
+| 标记 | 含义 | 阅读方式 |
+|---|---|---|
+| ✅ **已实现** | 代码已落地，描述与代码一致，可直接用于联调 | 可信，以本文档为准 |
+| ⚠️ **部分实现** | 主链路已通，但存在文档描述的能力缺口 | 需看该节的「实现差异」说明 |
+| 📋 **规划中** | 仅为设计意图，**代码 0 行**，不可用于联调或验收 | 不要照此写调用 |
+| 🔀 **实现方式不同** | 功能存在，但实现手段与文档原描述不一致，已按代码修正 | 以本文档修订后的描述为准 |
+
+### 0.1 分章实现状态总览
+
+| 章节 | 主题 | 状态 | 说明 |
+|---|---|---|---|
+| §1–§3 | 概述 / 选型 / 架构 | ✅ 已实现 | 技术栈与分层与代码一致 |
+| §3.4 | 任务自动流转机制 | ⚠️ 部分实现 | `police_task_flow_rules` 表与 CRUD 已实现，条件规则引擎为简化版 |
+| §4.1–§4.3 | 案件 / 任务 / 数字警员中心 | ✅ 已实现 | — |
+| §4.4 | 知识库与知识图谱 | 📋 规划中 | `knowledge_base_id` / `graph_id` 为**空壳字段**，police 侧无任何读写；Neo4j / Milvus 未接入公安业务 |
+| §4.5 | 证据材料管理 | ✅ 已实现 | 上传 / 下载 / 预览 / 审核签名 / 证据链均已实现 |
+| §4.6 | 法律文书生成 | 📋 规划中 | 仅有 DA-003 提示词，无文书模板引擎 |
+| §4.7 | 工作台 | ✅ 已实现 | — |
+| §4.8 | SOP / 办案规程管理 | ⚠️ 部分实现 | `police_sops` 表 + CRUD 已实现；**无 SOP 执行器、无实例表**，状态机不会真正运行 |
+| §4.9 | 侦查任务模板配置体系 | ✅ 已实现 | **v1.5 补写**，此前文档完全未记录 |
+| §4.10 | 案件工作区文件系统 | ✅ 已实现 | **v1.5 补写**，此前文档完全未记录 |
+| §4.11 | 数字警员市场与共享审批 | ✅ 已实现 | **v1.5 补写**，此前文档完全未记录 |
+| §5.2 | 核心表结构 | 🔀 已按代码重写 | 原文用 UUID 主键 / 无前缀表名，**与代码完全不符**；v1.5 已全量替换为真实 17 张表 |
+| §6.1–§6.5 | 各执行智能体 | ⚠️ 部分实现 | 预设警员已扩到 **DA-001~DA-007**；执行为单轮 LLM 调用，`tools`/`skills`/`knowledge_base_ids` 字段暂未参与执行 |
+| §6.6 | 案件推进智能体 | 🔀 已按代码修正 | 实际为**顺序管线**而非 LangGraph StateGraph；任务模板已配置化落库 |
+| §6.7.6 | 事件驱动机制 | 🔀 已按代码修正 | 实际用 `asyncio.create_task()` 进程内直调，**未走 ARQ 队列**；触发点在 `review_task` 而非 `complete_task` |
+| §6.7.7 | 数据库变更 | 📋 部分作废 | `police_case_advancement_agents` 表与三个 PoliceTask 字段**未实现**；实际以 `police_advancement_logs` + `PoliceTask.extra` 承载 |
+| §7 | API 接口设计 | 🔀 已按代码重写 | 真实前缀为 `/api/police/*`，**原文 `/api/v1/*` 路径全部不可用** |
+| §8.4.5 | 知识图谱可视化 | 📋 规划中 | 无对应前端页面 |
+| §8.4.6 | 数字警员广场 | 🔀 已按代码修正 | 已合并进统一智能体管理页，`/police/officers` 为重定向 |
+| §8.4.8 | SOP 管理页 | 📋 规划中 | 无对应前端页面 |
+| §9.1 / §9.3 | PII 脱敏中间件 / 智能体安全 | 📋 规划中 | 无脱敏中间件代码，仅在提示词中约束 |
+| §9.5.1 / §9.5.2 | 证据双哈希与签名 | ✅ 已实现 | — |
+| §9.5.3 | 完整性校验 | 📋 规划中 | **只签不验**：无任何校验函数；原文伪代码字段有误，v1.5 已修正 |
+| §10 | 部署方案 | ⚠️ 部分实现 | 开发态 compose 可用，生产态离线部署配置待验证 |
+
+### 0.2 已知的高优先级技术债
+
+以下问题在本次对齐中被识别出来，属于**代码侧隐患**，不通过改文档解决：
+
+1. **推进智能体触发不可靠** — `police_service.py:420` 用 `asyncio.create_task()` 进程内直调，**进程重启即丢事件**，无重试、无幂等锁；而 §6.6 要求「同一案件同时只运行一个实例」。应改为 ARQ 投递。
+2. **证据只签不验** — `verify_evidence_integrity` 全库未实现，签名链无法在诉讼阶段被校验，§9.5 的合规目标尚未闭环。
+3. **`TaskEvent` 无自动化消费者** — 该表仅用于任务详情页时间线展示，任务流转规则并不由它驱动。
+4. **DA-005 命名冲突** — 代码中该警员仍名为「案件编排官 / case_orchestrator」，职责写作"多Agent调度"，与 §6.6 重定位后的「案件推进智能体（建议者，非指挥者）」定位不一致，需统一。
 
 ---
 
@@ -654,7 +705,7 @@ rule_fund_analysis_followup = TaskFlowRule(
 SOP（办案规程）是连接「数字警员技能」与「复杂专案协同」的编排层：由「案件编排官」按预设规程，把多个数字警员的技能串联为跨步骤流程，由案件事件触发。
 
 - **SOP 定义**：业务域（如电诈/盗窃）、步骤序列、每步调用的数字警员/技能、触发条件、分支与异常处理
-- **SOP 与任务流转的关系**：SOP 落地为 LangGraph 状态机 + `task_flow_rules` 任务流转规则（见 3.4 节、6.6 节），由案件事件（任务完成/文件上传/阶段变更）驱动
+- **SOP 与任务流转的关系**：⚠️ SOP 的**表结构与 CRUD 已落地**（`police_sops`，含 `states`/`initial_state`/`terminal_states` 状态机三件套），但**尚无执行器、无实例表**，状态机不会真正运行；`task_flow_rules` 规则表存在，但任务流转并不由 `police_task_events` 事件驱动（见 §5.2.6 / §6.7.2）。v1.4 描述的「LangGraph 状态机驱动」目前未实现。
 - **SOP 管理功能**（参考 StaffDeck 的 SOP 页）：
   - 本地 SOP 列表：业务域、状态、版本、调用次数、好评率/差评率
   - 版本管理：SOP 可迭代升级，旧版本归档可追溯
@@ -664,6 +715,34 @@ SOP（办案规程）是连接「数字警员技能」与「复杂专案协同�
 > SOP 是 v1.3 新增的一等概念。它让「数字警员参与复杂专案、提示需开具的文书」有了标准化的承载形式，而不是散落在硬编码的任务规则里。
 
 ---
+
+### 4.9 侦查任务模板配置体系（v1.5 补写，✅ 已实现）
+
+> v1.4 将「涉案要素 → 侦查任务」的映射规则硬编码在 prompt 中。v1.5 将其外置为可配置数据（`police_task_templates` 表，详见 §5.2.9），由推进智能体在管线第②步匹配。
+
+- **模板核心字段**：`code`（唯一标识，内置模板幂等植入）、`element_type`（触发要素，对应 `ELEMENT_TYPE`）、`case_types` / `phases` / `source_task_types`（适用约束）、`task_title` / `task_type` / `instructions`（生成的任务）、`suggested_agent_type`（建议召唤的数字警员）、`next_template_codes`（链式推进）、`enabled` / `is_builtin`（启用与内置保护）。
+- **占位符**：`task_title` / `task_description` / `instructions` 支持 `{element}` `{element_value}` `{case_title}` `{case_number}` `{source_task}` 动态填充。
+- **触发逻辑**：推进智能体提取涉案要素后，按 `element_type` + 案件类型/阶段/源任务类型 命中模板；生成的任务草案进入 `pending_confirmation`，由主办民警审查（§6.7.3）。
+- **管理接口**：`/api/police/task-templates`（列表/新建/更新/删除/启用停用/预览）+ `/seed` 植入内置模板（见 §7.2.8）。
+
+### 4.10 案件工作区文件系统（v1.5 补写，✅ 已实现）
+
+> 每个案件一个独立 MinIO 存储命名空间，承载证据材料、任务产物与系统生成报告，替代 v1.4 散落在各处的文件引用。
+
+- **数据模型**：`police_case_workspaces`（每案件一条，含 `storage_bucket` / `storage_prefix` = `cases/{case_number}/` / `stats`）+ `police_workspace_nodes`（可嵌套文件树，`node_type` = folder/file，`source_type` = manual/task/evidence/system）（详见 §5.2.7）。
+- **多来源落盘**：民警手动上传、任务执行产物、证据、系统生成报告均可写入工作区节点；产物经审核后自动落盘（呼应 §6.7 人机协作）。
+- **管理接口**：`/api/police/workspaces/{case_id}/*`（init / nodes / folders / upload / download / move / rename）（见 §7.2.7）。
+
+### 4.11 数字警员市场与共享审批（v1.5 补写，✅ 已实现）
+
+> v1.4 未记录数字警员的共享/市场能力。v1.5 在 `police_agents` 中补齐了发布与审批字段，并提供了从市场安装、共享发布、管理员审批的完整链路（详见 §5.2.4）。
+
+- **发布字段**：`author_id`（创建者，NULL=系统预设）、`is_public`、`share_scope`（personal/department/global）、`approval_status`（pending/approved/rejected）、`approved_by` / `approved_at`。
+- **共享链路**：民警将自有数字警员 `POST /agents/{agent_id}/share` 发布到市场 → 状态 `pending` → 管理员 `POST /agents/{agent_id}/approve` 审批 → `approved` 后可被他人 `POST /agents/templates/{template_id}/install` 安装（详见 §7.2.5）。
+- **系统预设 vs 用户创建**：`PRESET_AGENTS`（DA-001~DA-007）由 `POST /agents/seed` 幂等植入，`is_builtin=1` 不可删除（可停用/修改）；用户自建模板 `is_builtin=0`。
+
+---
+
 
 ## 5. 数据模型设计
 
@@ -691,229 +770,507 @@ SOP（办案规程）是连接「数字警员技能」与「复杂专案协同�
 
 ### 5.2 核心表结构
 
-#### 5.2.1 用户与权限
+> ✅ **已实现 — 本节为代码真实结构（v1.5 全量重写）**
+>
+> **重要修订说明**：v1.4 及之前版本本节使用 `UUID PRIMARY KEY DEFAULT gen_random_uuid()` 主键、无前缀表名（`cases` / `tasks` / `evidence`），**与代码完全不符**，照此建表会全部对不上。真实实现遵循 yuxi 底座规范：
+>
+> - **主键统一为 `Integer autoincrement`**，不使用 UUID
+> - **所有公安业务表统一带 `police_` 前缀**
+> - 时间戳为 `DateTime`（`utc_now_naive`，naive UTC），不是 `TIMESTAMPTZ`
+> - JSON 字段使用 SQLAlchemy `JSON` 类型（不是 `JSONB`）
+> - 保留字规避：`metadata` 为 SQLAlchemy 保留名，业务扩展字段统一命名为 **`extra`**
+> - 模型定义位置：`backend/package/yuxi/storage/postgres/models_police.py`（共 17 张表）
+> - 建表方式：**无 Alembic**，由 `ensure_business_schema()` 在运行时幂等 `CREATE TABLE IF NOT EXISTS` + 增量补列
 
-```sql
--- 用户表
-CREATE TABLE users (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username    VARCHAR(50) UNIQUE NOT NULL,
-    password_hash  VARCHAR(255) NOT NULL,
-    real_name   VARCHAR(50) NOT NULL,
-    police_id   VARCHAR(20) UNIQUE,        -- 警号
-    rank        VARCHAR(20),                -- 警衔
-    department  VARCHAR(100),               -- 所属部门
-    phone       VARCHAR(20),
-    role        VARCHAR(20) NOT NULL DEFAULT 'officer',  -- admin/chief/officer/legal
-    status      VARCHAR(20) DEFAULT 'active',
-    created_at  TIMESTAMPTZ DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ DEFAULT NOW()
-);
+#### 5.2.0 表清单总览
 
--- 专案组成员表 (多对多，民警 + 数字警员)
-CREATE TABLE case_members (
-    case_id     UUID REFERENCES cases(id) ON DELETE CASCADE,
-    member_type VARCHAR(10) NOT NULL,   -- human(民警) / agent(数字警员)
-    member_id   UUID NOT NULL,          -- 用户ID 或 数字警员ID(agents.id)
-    role        VARCHAR(20) NOT NULL,  -- commander/handler/reviewer/observer
-    joined_at   TIMESTAMPTZ DEFAULT NOW(),
-    PRIMARY KEY (case_id, member_type, member_id)
-);
+| # | 模型类 | 表名 | 职责 |
+|---|---|---|---|
+| 1 | `PoliceCase` | `police_cases` | 案件主表 |
+| 2 | `CaseMember` | `police_case_members` | 案件成员（民警） |
+| 3 | `CasePhase` | `police_case_phases` | 案件阶段记录 |
+| 4 | `PoliceTask` | `police_tasks` | 任务主表 |
+| 5 | `TaskAssignee` | `police_task_assignees` | 任务多执行人（人机协作） |
+| 6 | `TaskFlowRule` | `police_task_flow_rules` | 任务流转规则 |
+| 7 | `TaskEvent` | `police_task_events` | 任务事件日志 |
+| 8 | `Evidence` | `police_evidence` | 证据材料 |
+| 9 | `EvidenceLink` | `police_evidence_links` | 证据关联关系（证据链） |
+| 10 | `PoliceAgent` | `police_agents` | 数字警员定义 |
+| 11 | `PoliceAgentRun` | `police_agent_runs` | 数字警员运行记录 |
+| 12 | `PoliceSOP` | `police_sops` | SOP 流程技能定义 |
+| 13 | `PoliceAuditLog` | `police_audit_logs` | 审计日志 |
+| 14 | `PoliceCaseWorkspace` | `police_case_workspaces` | 案件工作区 |
+| 15 | `PoliceWorkspaceNode` | `police_workspace_nodes` | 工作区文件树节点 |
+| 16 | `PoliceAdvancementLog` | `police_advancement_logs` | 推进智能体决策日志 |
+| 17 | `PoliceTaskTemplate` | `police_task_templates` | 侦查任务模板 |
+
+> **用户表 `users` 属于 yuxi 底座**（`models_business.py`），公安侧仅扩展了警号/警衔/真实姓名等字段，不在本节展开。所有指向用户的外键均为 `users.id`（Integer）。
+
+#### 5.2.1 枚举常量
+
+全部定义于 `models_police.py` 头部，前后端应以此为唯一口径：
+
+```python
+CASE_STATUS   = ("draft", "investigation", "arrest", "handling", "prosecution", "closed")
+CASE_PHASE    = ("research", "arrest", "handling", "prosecution")
+
+TASK_STATUS = (
+    "pending_confirmation",  # 推进智能体生成的任务草案，等待主办民警审查确认
+    "pending",               # 已确认通过，等待分配/领取
+    "in_progress",           # 进行中
+    "review",                # 已提交，等待主办民警审核
+    "completed",             # 审核通过，已完成
+    "suspended",             # 主办民警主动暂停（可恢复）
+    "terminated",            # 侦查方向调整导致终止（保留为历史记录）
+    "cancelled",             # 待确认/待开始阶段被驳回或方向调整取消
+    "blocked",               # 异常阻塞
+)
+TASK_PRIORITY = ("urgent", "high", "medium", "low")
+ASSIGNEE_TYPE = ("human", "agent")
+ASSIGNEE_ROLE = ("executor", "reviewer")      # executor=执行人, reviewer=审核人
+EVIDENCE_TYPE = ("transcript", "bank_flow", "screenshot", "audio",
+                 "video", "document", "report", "other")
+
+# 涉案要素类型 — 侦查任务模板的触发键（详见 §4.9）
+ELEMENT_TYPE = (
+    "bank_card",         # 涉案银行卡 / 账户
+    "phone",             # 手机号 / 固话
+    "wechat",            # 微信号 / QQ 号等社交账号
+    "person",            # 涉案人员（嫌疑人 / 关系人 / 受害人）
+    "address",           # 涉案地址 / 落脚点 / 案发地
+    "vehicle",           # 涉案车辆
+    "ip",                # IP 地址 / 设备指纹
+    "virtual_currency",  # 虚拟货币地址
+    "company",           # 涉案公司 / 商户
+    "express",           # 快递单号 / 物流信息
+    "device",            # 涉案手机 / 电脑等物证
+    "platform_account",  # 平台账号（电商 / 直播 / 游戏）
+    "other",
+)
 ```
 
 #### 5.2.2 案件
 
 ```sql
-CREATE TABLE cases (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_number     VARCHAR(50) UNIQUE NOT NULL,    -- 案件编号
-    title           VARCHAR(200) NOT NULL,
-    case_type       VARCHAR(50),                     -- 案件类型: fraud/theft/etc
-    description     TEXT,
-    status          VARCHAR(20) DEFAULT 'draft',     -- draft/investigation/arrest/handling/prosecution/closed
-    phase           VARCHAR(30) DEFAULT 'research',  -- research/arrest/handling/prosecution
-    priority        VARCHAR(10) DEFAULT 'medium',
-    incident_date   TIMESTAMPTZ,                      -- 案发时间
-    incident_location   TEXT,                         -- 案发地点
-    total_amount    DECIMAL(15,2),                    -- 涉案金额
-    victim_info     JSONB,                            -- 受害人信息
-    suspect_info    JSONB,                            -- 嫌疑人信息 (动态)
-    metadata        JSONB DEFAULT '{}',               -- 扩展字段
-    knowledge_base_id  VARCHAR(100),                  -- 关联知识库ID
-    graph_id        VARCHAR(100),                     -- 关联知识图谱ID
-    created_by      UUID REFERENCES users(id),
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
+-- 案件主表
+CREATE TABLE police_cases (
+    id                      SERIAL PRIMARY KEY,
+    case_number             VARCHAR(50) UNIQUE NOT NULL,          -- 案件编号（索引）
+    title                   VARCHAR(200) NOT NULL,
+    case_type               VARCHAR(50),                          -- fraud/theft/drug/...（索引）
+    description             TEXT,
+    status                  VARCHAR(20) DEFAULT 'draft',          -- CASE_STATUS（索引）
+    phase                   VARCHAR(30) DEFAULT 'research',       -- CASE_PHASE（索引）
+    priority                VARCHAR(10) DEFAULT 'medium',
+    advancement_enabled     INTEGER DEFAULT 1,                    -- 1=启用推进智能体 0=手动模式
+    investigation_direction TEXT,                                 -- 当前侦查方向（主办民警可调整）
+    incident_date           TIMESTAMP,
+    incident_location       TEXT,
+    total_amount            FLOAT,                                -- 涉案金额（Float，非 DECIMAL）
+    victim_info             JSON DEFAULT '{}',
+    suspect_info            JSON DEFAULT '[]',
+    extra                   JSON DEFAULT '{}',                    -- 扩展字段（原文档写作 metadata）
+    knowledge_base_id       VARCHAR(100),                         -- 📋 空壳字段，police 侧暂无读写
+    graph_id                VARCHAR(100),                         -- 📋 空壳字段，police 侧暂无读写
+    created_by              INTEGER REFERENCES users(id),
+    created_at              TIMESTAMP DEFAULT NOW(),
+    updated_at              TIMESTAMP DEFAULT NOW()
+);
+
+-- 案件成员（仅民警；数字警员通过任务执行人关联，不入本表）
+CREATE TABLE police_case_members (
+    id          SERIAL PRIMARY KEY,
+    case_id     INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role        VARCHAR(20) NOT NULL,        -- commander/handler/reviewer/observer
+    joined_at   TIMESTAMP DEFAULT NOW()
 );
 
 -- 案件阶段记录
-CREATE TABLE case_phases (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id     UUID REFERENCES cases(id) ON DELETE CASCADE,
-    phase       VARCHAR(30) NOT NULL,
-    status      VARCHAR(20) DEFAULT 'active',  -- active/completed/skipped
-    started_at  TIMESTAMPTZ DEFAULT NOW(),
-    completed_at TIMESTAMPTZ,
-    summary     TEXT,
-    metadata    JSONB DEFAULT '{}'
+CREATE TABLE police_case_phases (
+    id           SERIAL PRIMARY KEY,
+    case_id      INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+    phase        VARCHAR(30) NOT NULL,
+    status       VARCHAR(20) DEFAULT 'active',   -- active/completed/skipped
+    started_at   TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP,
+    summary      TEXT,
+    extra        JSON DEFAULT '{}'
 );
 ```
+
+> **与 v1.4 的差异**：原文档 `case_members` 设计为「民警 + 数字警员」多态成员表（`member_type` + 复合主键）。**代码未采用该设计** —— 本表只存民警，数字警员通过 `police_task_assignees`（§5.2.3）以执行人身份参与案件。
 
 #### 5.2.3 任务
 
 ```sql
-CREATE TABLE tasks (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id         UUID REFERENCES cases(id) ON DELETE CASCADE,
-    title           VARCHAR(200) NOT NULL,
-    description     TEXT,
-    type            VARCHAR(50) NOT NULL,              -- 任务类型
-    status          VARCHAR(20) DEFAULT 'pending',     -- pending/in_progress/review/completed/blocked
-    assignee_type   VARCHAR(10) NOT NULL,              -- human/agent
-    assignee_id     UUID,                               -- 用户ID或智能体ID
-    assignee_name   VARCHAR(100),                       -- 冗余字段，显示用
-    creator_id      UUID,                               -- 创建者(用户或智能体)
-    creator_type    VARCHAR(10) DEFAULT 'human',        -- human/agent/system
-    priority        VARCHAR(10) DEFAULT 'medium',
-    phase           VARCHAR(30),                         -- 案件阶段
-    parent_task_id  UUID REFERENCES tasks(id),
-    dependencies    UUID[] DEFAULT '{}',                 -- 依赖任务ID列表
-    attachments     JSONB DEFAULT '[]',                  -- 附件列表
-    result          JSONB,                               -- 任务结果
-    instructions    TEXT,                                -- 任务指引说明
-    due_date        TIMESTAMPTZ,
-    started_at      TIMESTAMPTZ,
-    completed_at    TIMESTAMPTZ,
-    reviewed_by     UUID REFERENCES users(id),           -- 审核民警 (完成任务审核时填入)
-    reviewed_at     TIMESTAMPTZ,                          -- 审核时间
-    signed_hash     VARCHAR(128),                         -- 民警审核签名哈希 (SHA-256: police_id + reviewed_at + result_hash)
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 任务流转规则表
-CREATE TABLE task_flow_rules (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id         UUID REFERENCES cases(id) ON DELETE CASCADE,  -- NULL=全局规则
-    name            VARCHAR(100) NOT NULL,
-    trigger_event   VARCHAR(50) NOT NULL,     -- task_completed/file_uploaded/phase_changed
-    condition       JSONB NOT NULL,            -- 触发条件 (JSON规则)
-    action          VARCHAR(50) NOT NULL,      -- create_task/notify/auto_approve
-    target_task_type VARCHAR(50),              -- 创建的新任务类型
-    target_assignee_type VARCHAR(10),          -- human/agent
-    target_assignee_id UUID,                   -- 具体分配对象
-    enabled         BOOLEAN DEFAULT TRUE,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 任务事件日志 (用于触发流转规则)
-CREATE TABLE task_events (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id     UUID REFERENCES cases(id) ON DELETE CASCADE,
-    task_id     UUID REFERENCES tasks(id) ON DELETE CASCADE,
-    event_type  VARCHAR(50) NOT NULL,          -- created/assigned/started/completed/blocked/file_uploaded
-    event_data  JSONB DEFAULT '{}',
-    created_by  UUID,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+-- 任务主表
+CREATE TABLE police_tasks (
+    id             SERIAL PRIMARY KEY,
+    case_id        INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+    title          VARCHAR(200) NOT NULL,
+    description    TEXT,
+    type           VARCHAR(50) NOT NULL,               -- 任务类型（索引）
+    status         VARCHAR(20) DEFAULT 'pending',      -- TASK_STATUS（索引）
+    assignee_type  VARCHAR(10) NOT NULL,               -- human/agent（主执行人，冗余）
+    assignee_id    INTEGER,                            -- users.id 或 police_agents.id
+    assignee_name  VARCHAR(100),
+    creator_id     INTEGER,
+    creator_type   VARCHAR(10) DEFAULT 'human',        -- human/agent/system
+    priority       VARCHAR(10) DEFAULT 'medium',
+    phase          VARCHAR(30),
+    parent_task_id INTEGER REFERENCES police_tasks(id),
+    dependencies   JSON DEFAULT '[]',                  -- 依赖任务 ID 列表（JSON，非 UUID[]）
+    attachments    JSON DEFAULT '[]',
+    result         JSON,
+    instructions   TEXT,
+    due_date       TIMESTAMP,
+    started_at     TIMESTAMP,
+    completed_at   TIMESTAMP,
+    -- 证据链防篡改签名（§9.5）
+    reviewed_by    INTEGER REFERENCES users(id),
+    reviewed_at    TIMESTAMP,
+    signed_hash    VARCHAR(128),
+    -- 关闭原因（cancelled/terminated 时填写：驳回意见 / 方向调整说明）
+    close_reason   TEXT,
+    -- 推进智能体溯源信息（见下方结构说明）
+    extra          JSON DEFAULT '{}',
+    created_at     TIMESTAMP DEFAULT NOW(),
+    updated_at     TIMESTAMP DEFAULT NOW()
 );
 ```
 
-#### 5.2.4 智能体
+**`police_tasks.extra` 的推进溯源结构**（替代 v1.4 规划但未实现的 `source_event_id` / `draft_reasoning` / `evidence_refs` 三个独立字段）：
+
+```json
+{
+  "advancement": {
+    "source_task_id":     123,
+    "template_id":        7,
+    "template_code":      "bank_card_to_flow_query",
+    "element_type":       "bank_card",
+    "element_value":      "6222***1234",
+    "origin":             "template | llm | chain",
+    "suggested_assignee": "fund_analyst",
+    "direction_change":   false
+  }
+}
+```
 
 ```sql
--- 数字警员定义（即 Yuxi Agent，平台一等公民）
-CREATE TABLE agents (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name            VARCHAR(100) NOT NULL,          -- 数字警员姓名/代号
-    police_id       VARCHAR(20) UNIQUE,             -- 数字警员工号
-    rank            VARCHAR(20),                    -- 警衔 (如: 一级警司)
-    department      VARCHAR(100),                   -- 所属部门/警种
-    avatar          VARCHAR(255),                   -- 头像
-    description     TEXT,
-    type            VARCHAR(50) NOT NULL,          -- transcript_analyst/fund_analyst/etc
-    system_prompt   TEXT NOT NULL,                  -- 系统提示词（人格设定）
-    model_config    JSONB NOT NULL,                 -- 模型配置 (provider/model/temperature)
-    tools           JSONB DEFAULT '[]',             -- 工具列表
-    skills          JSONB DEFAULT '[]',             -- 技能列表（引用 Yuxi Skill ID）
-    knowledge_base_ids  JSONB DEFAULT '[]',         -- 关联知识库
-    capabilities    JSONB DEFAULT '[]',             -- 能力标签/专长
-    growth_log      JSONB DEFAULT '{}',             -- 成长记录(使用频次/好评差评/能力演进)
-    icon            VARCHAR(50),                    -- 图标
-    status          VARCHAR(20) DEFAULT 'active',   -- active/busy/offline
-    is_template     BOOLEAN DEFAULT FALSE,          -- 是否为模板
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
+-- ✅ 任务多执行人（v1.5 补写，此前文档完全未记录）
+-- 支持一个任务分配给多名民警和/或多个数字警员协同执行，实现「人机协作」。
+-- police_tasks 上的 assignee_* 字段保留用于向后兼容，冗余存储主执行人。
+CREATE TABLE police_task_assignees (
+    id            SERIAL PRIMARY KEY,
+    task_id       INTEGER NOT NULL REFERENCES police_tasks(id) ON DELETE CASCADE,
+    assignee_type VARCHAR(10) NOT NULL,        -- human / agent
+    assignee_id   INTEGER,                     -- users.id 或 police_agents.id
+    assignee_name VARCHAR(100),
+    role          VARCHAR(20) DEFAULT 'executor',  -- executor=执行人 / reviewer=审核人
+    created_at    TIMESTAMP DEFAULT NOW()
 );
 
--- 智能体运行记录
-CREATE TABLE agent_runs (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id        UUID REFERENCES agents(id),
-    task_id         UUID REFERENCES tasks(id),
-    case_id         UUID REFERENCES cases(id),
-    status          VARCHAR(20) DEFAULT 'queued',   -- queued/running/completed/failed/cancelled
-    input           JSONB,                           -- 输入参数
-    output          JSONB,                           -- 输出结果
-    artifacts       JSONB DEFAULT '[]',              -- 产出文件列表
-    error           TEXT,
-    tokens_used     INTEGER DEFAULT 0,
-    duration_ms     INTEGER,
-    started_at      TIMESTAMPTZ,
-    completed_at    TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+-- 任务流转规则
+CREATE TABLE police_task_flow_rules (
+    id                   SERIAL PRIMARY KEY,
+    case_id              INTEGER REFERENCES police_cases(id) ON DELETE CASCADE,  -- NULL=全局规则
+    name                 VARCHAR(100) NOT NULL,
+    trigger_event        VARCHAR(50) NOT NULL,   -- task_completed/file_uploaded/phase_changed
+    condition            JSON NOT NULL,
+    action               VARCHAR(50) NOT NULL,   -- create_task/notify/auto_approve
+    target_task_type     VARCHAR(50),
+    target_assignee_type VARCHAR(10),
+    target_assignee_id   INTEGER,
+    enabled              INTEGER DEFAULT 1,      -- 1=启用 0=禁用（Integer，非 BOOLEAN）
+    created_at           TIMESTAMP DEFAULT NOW()
 );
 
--- 智能体消息记录 (LangGraph 对话历史)
-CREATE TABLE agent_messages (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id          UUID REFERENCES agent_runs(id) ON DELETE CASCADE,
-    role            VARCHAR(20) NOT NULL,            -- user/assistant/tool/system
-    content         TEXT,
-    tool_calls      JSONB,                           -- 工具调用记录
-    metadata        JSONB DEFAULT '{}',
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+-- 任务事件日志
+-- ⚠️ 现状：本表用于任务详情页时间线展示（police_service.py 会读取），
+--    但**没有任何自动化消费者**，任务流转规则并不由本表驱动。
+CREATE TABLE police_task_events (
+    id         SERIAL PRIMARY KEY,
+    case_id    INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+    task_id    INTEGER NOT NULL REFERENCES police_tasks(id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,   -- created/assigned/started/completed/blocked/file_uploaded
+    event_data JSON DEFAULT '{}',
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 ```
 
-#### 5.2.5 证据与文档
+#### 5.2.4 数字警员
+
+```sql
+-- 数字警员定义（公安专用业务配置；与 yuxi 原生 agents 表互补）
+CREATE TABLE police_agents (
+    id                  SERIAL PRIMARY KEY,
+    name                VARCHAR(100) NOT NULL,
+    description         TEXT,
+    type                VARCHAR(50) NOT NULL,     -- transcript_analyst/fund_analyst/...（索引）
+    system_prompt       TEXT NOT NULL,
+    model_config        JSON NOT NULL,            -- {provider, model, temperature}
+
+    -- 数字警员档案
+    badge_number        VARCHAR(20),              -- 工号，如 DA-001（索引）
+    rank                VARCHAR(30),              -- 警衔
+    specialty           VARCHAR(100),             -- 专业领域
+    avatar              VARCHAR(200),
+    department          VARCHAR(100),
+    color_theme         VARCHAR(20),              -- blue/green/coral/purple/amber
+
+    -- 与 yuxi 原生智能体体系的双向关联
+    backend_id          VARCHAR(64),              -- yuxi agents.backend_id（索引）
+    agent_id            INTEGER,                  -- yuxi agents 主键（索引）
+
+    -- 能力矩阵
+    tools               JSON DEFAULT '[]',        -- ⚠️ 当前执行路径未读取
+    skills              JSON DEFAULT '[]',        -- ⚠️ 当前执行路径未读取
+    knowledge_base_ids  JSON DEFAULT '[]',        -- ⚠️ 当前执行路径未读取
+    capabilities        JSON DEFAULT '[]',        -- 能力标签
+    sop_ids             JSON DEFAULT '[]',
+
+    -- 工作统计（系统聚合）
+    work_stats          JSON DEFAULT '{}',        -- {tasks_completed, tasks_total, success_rate, ...}
+
+    -- 成长记录
+    growth_log          JSON DEFAULT '[]',        -- [{date, event, description}]
+    experience_level    INTEGER DEFAULT 1,        -- 1-5
+
+    icon                VARCHAR(50),
+    status              VARCHAR(20) DEFAULT 'active',  -- active/offline/training
+    is_template         INTEGER DEFAULT 0,
+    category            VARCHAR(50),              -- 市场分类（索引）
+    install_count       INTEGER DEFAULT 0,
+    source_template_id  INTEGER,                  -- 安装来源模板 ID（索引）
+
+    -- 共享与市场发布（v1.5 补写，详见 §4.11）
+    author_id           INTEGER,                  -- 创建者 users.id，NULL=系统预设（索引）
+    is_public           INTEGER DEFAULT 0,
+    share_scope         VARCHAR(20) DEFAULT 'personal',  -- personal/department/global
+    approval_status     VARCHAR(20),              -- NULL/pending/approved/rejected
+    approved_by         INTEGER,
+    approved_at         TIMESTAMP,
+
+    created_at          TIMESTAMP DEFAULT NOW(),
+    updated_at          TIMESTAMP DEFAULT NOW()
+);
+
+-- 数字警员运行记录
+CREATE TABLE police_agent_runs (
+    id           SERIAL PRIMARY KEY,
+    agent_id     INTEGER REFERENCES police_agents(id),
+    task_id      INTEGER REFERENCES police_tasks(id),
+    case_id      INTEGER REFERENCES police_cases(id) ON DELETE CASCADE,
+    status       VARCHAR(20) DEFAULT 'queued',   -- queued/running/completed/failed/cancelled
+    input        JSON,
+    output       JSON,
+    artifacts    JSON DEFAULT '[]',
+    error        TEXT,
+    tokens_used  INTEGER DEFAULT 0,
+    duration_ms  INTEGER,
+    started_at   TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at   TIMESTAMP DEFAULT NOW()
+);
+```
+
+> **v1.4 规划的 `agent_messages` 表未实现**（全库 0 命中）。对话历史由 yuxi 底座的会话体系承载，公安侧不再单独建表。
+
+#### 5.2.5 证据
 
 ```sql
 -- 证据材料
-CREATE TABLE evidence (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id         UUID REFERENCES cases(id) ON DELETE CASCADE,
-    task_id         UUID REFERENCES tasks(id),        -- 关联任务 (可空)
-    name            VARCHAR(200) NOT NULL,
-    type            VARCHAR(50) NOT NULL,              -- transcript/bank_flow/screenshot/audio/video/document
-    file_path       VARCHAR(500) NOT NULL,             -- MinIO 存储路径
-    file_hash       VARCHAR(64),                       -- SHA-256 完整性校验
-    file_size       BIGINT,
-    mime_type       VARCHAR(100),
-    ocr_text        TEXT,                              -- OCR 提取的文本
-    parsed_content  JSONB,                             -- 结构化解析结果
-    metadata        JSONB DEFAULT '{}',
-    uploaded_by     UUID REFERENCES users(id),
-    version         INTEGER DEFAULT 1,
-    parent_id       UUID REFERENCES evidence(id),      -- 上一版本
-    reviewed_by     UUID REFERENCES users(id),          -- 审核民警 (AI生成的证据材料需民警审核确认)
-    reviewed_at     TIMESTAMPTZ,                         -- 审核时间
-    signed_hash     VARCHAR(128),                        -- 民警审核签名 (SHA-256: police_id + reviewed_at + file_hash)
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+CREATE TABLE police_evidence (
+    id             SERIAL PRIMARY KEY,
+    case_id        INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+    task_id        INTEGER REFERENCES police_tasks(id),
+    name           VARCHAR(200) NOT NULL,
+    type           VARCHAR(50) NOT NULL,        -- EVIDENCE_TYPE（索引）
+    file_path      VARCHAR(500) NOT NULL,       -- MinIO 存储路径
+    file_hash      VARCHAR(64),                 -- SHA-256 文件内容哈希
+    file_size      INTEGER,
+    mime_type      VARCHAR(100),
+    ocr_text       TEXT,
+    parsed_content JSON,
+    extra          JSON DEFAULT '{}',
+    uploaded_by    INTEGER REFERENCES users(id),
+    version        INTEGER DEFAULT 1,
+    parent_id      INTEGER REFERENCES police_evidence(id),   -- 上一版本
+    -- 防篡改签名（§9.5）
+    reviewed_by    INTEGER REFERENCES users(id),
+    reviewed_at    TIMESTAMP,
+    signed_hash    VARCHAR(128),
+    created_at     TIMESTAMP DEFAULT NOW()
 );
 
--- 证据关联关系 (证据链)
-CREATE TABLE evidence_links (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    case_id         UUID REFERENCES cases(id) ON DELETE CASCADE,
-    source_evidence_id  UUID REFERENCES evidence(id) ON DELETE CASCADE,
-    target_evidence_id  UUID REFERENCES evidence(id) ON DELETE CASCADE,
-    relation_type   VARCHAR(50),                      -- derives_from/supports/contradicts
-    description     TEXT,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+-- 证据关联关系（证据链）
+CREATE TABLE police_evidence_links (
+    id                 SERIAL PRIMARY KEY,
+    case_id            INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+    source_evidence_id INTEGER NOT NULL REFERENCES police_evidence(id) ON DELETE CASCADE,
+    target_evidence_id INTEGER NOT NULL REFERENCES police_evidence(id) ON DELETE CASCADE,
+    relation_type      VARCHAR(50),      -- derives_from / supports / contradicts
+    description        TEXT,
+    created_at         TIMESTAMP DEFAULT NOW()
 );
 ```
 
-#### 5.2.6 知识图谱 (Neo4j)
+> `relation_type = 'contradicts'`（矛盾关系）已在模型层预留，但当前业务流程中尚无写入方，属可用于后续「反证 / 矛盾清单」能力的埋点。
+
+#### 5.2.6 SOP / 办案规程
+
+```sql
+-- ⚠️ 部分实现：表与 CRUD 已实现，但**无执行器、无实例表**，状态机不会真正运行
+CREATE TABLE police_sops (
+    id              SERIAL PRIMARY KEY,
+    name            VARCHAR(100) NOT NULL,
+    description     TEXT,
+    agent_type      VARCHAR(50),           -- 关联的数字警员类型（索引）
+    category        VARCHAR(50),           -- transcript/fund_analysis/legal_review/evidence_collection
+    version         INTEGER DEFAULT 1,
+    states          JSON NOT NULL,         -- 状态机节点：[{id,name,description,actions,transitions:[{to,condition}]}]
+    initial_state   VARCHAR(50) NOT NULL,
+    terminal_states JSON DEFAULT '[]',
+    input_schema    JSON DEFAULT '{}',
+    output_template TEXT,
+    is_published    INTEGER DEFAULT 0,     -- 0=草稿 1=已发布
+    created_at      TIMESTAMP DEFAULT NOW(),
+    updated_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+> **与 v1.4 的差异**：原文档设计的 `business_domain` / `steps` / `trigger_event` / `call_count` / `good_rate` / `bad_rate` / `created_by` 字段**均未实现**；实际采用 `agent_type` + `category` + 状态机三件套（`states` / `initial_state` / `terminal_states`）。
+> **v1.4 规划的 `sop_instances`（SOP 执行实例表）与 `officer_feedback`（警员评价表）全库 0 命中，均未实现**，对应的「SOP 调用统计」「好评率 / 成长轨迹」功能目前无数据支撑。
+
+#### 5.2.7 案件工作区（v1.5 补写）
+
+```sql
+-- 案件独立工作区：每个案件一个 MinIO 存储命名空间
+CREATE TABLE police_case_workspaces (
+    id                SERIAL PRIMARY KEY,
+    case_id           INTEGER NOT NULL UNIQUE REFERENCES police_cases(id) ON DELETE CASCADE,
+    case_number       VARCHAR(50) NOT NULL,      -- 冗余，用于构造存储路径
+    storage_bucket    VARCHAR(64) NOT NULL DEFAULT 'police-workspace',
+    storage_prefix    VARCHAR(255) NOT NULL,     -- cases/{case_number}/
+    knowledge_base_id VARCHAR(100),              -- 📋 预留：案件专属知识库（Milvus collection）
+    graph_id          VARCHAR(100),              -- 📋 预留：案件专属图谱（Neo4j）
+    status            VARCHAR(20) DEFAULT 'ready',  -- ready / initializing
+    stats             JSON DEFAULT '{}',         -- {evidence_count, material_count, report_count, total_size}
+    created_at        TIMESTAMP DEFAULT NOW(),
+    updated_at        TIMESTAMP DEFAULT NOW()
+);
+
+-- 工作区文件树节点（可嵌套）
+CREATE TABLE police_workspace_nodes (
+    id             SERIAL PRIMARY KEY,
+    workspace_id   INTEGER NOT NULL REFERENCES police_case_workspaces(id) ON DELETE CASCADE,
+    parent_id      INTEGER REFERENCES police_workspace_nodes(id) ON DELETE CASCADE,
+    node_type      VARCHAR(20) NOT NULL DEFAULT 'file',   -- folder / file
+    name           VARCHAR(255) NOT NULL,
+    storage_path   VARCHAR(1024),                -- MinIO 对象路径（文件夹为空）
+    mime_type      VARCHAR(100),
+    size           INTEGER,                      -- 字节
+    source_type    VARCHAR(20),                  -- manual / task / evidence / system
+    source_task_id INTEGER REFERENCES police_tasks(id),
+    created_by     INTEGER REFERENCES users(id),
+    extra          JSON DEFAULT '{}',
+    created_at     TIMESTAMP DEFAULT NOW(),
+    updated_at     TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### 5.2.8 推进决策日志（v1.5 补写）
+
+```sql
+-- 案件推进智能体每一次决策的完整上下文（满足 §6.7 可审计、可解释要求）
+CREATE TABLE police_advancement_logs (
+    id              SERIAL PRIMARY KEY,
+    case_id         INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+    trigger_task_id INTEGER REFERENCES police_tasks(id),
+    decision_type   VARCHAR(30) NOT NULL,   -- 见下表（索引）
+    summary         TEXT,                   -- 决策摘要（一句话）
+    details         JSON DEFAULT '{}',      -- {source_task, direction, generated_tasks, reasoning, model, duration_ms}
+    created_by      INTEGER REFERENCES users(id),  -- 触发人；后台自动触发为 NULL
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+| `decision_type` | 含义 |
+|---|---|
+| `task_draft` | 根据完成任务生成任务草案 |
+| `direction_change` | 侦查方向调整，重新规划任务 |
+| `phase_summary` | 阶段全部完成，生成阶段小结与下一阶段建议 |
+| `no_action` | 评估后认为暂不需要新任务（附 reasoning） |
+
+> 本表是 v1.4 规划的 `police_case_advancement_agents`（每案件一个推进智能体实例表）的**实际替代方案**。代码未采用"每案件实例"模型，推进服务为**模块级单例**，决策上下文改为按次落 log。
+
+#### 5.2.9 侦查任务模板（v1.5 补写）
+
+```sql
+-- 把「涉案要素 → 侦查任务」的映射规则从 prompt 中外置为可配置数据（详见 §4.9）
+CREATE TABLE police_task_templates (
+    id                  SERIAL PRIMARY KEY,
+    code                VARCHAR(64) UNIQUE NOT NULL,   -- 唯一标识，内置模板幂等植入用（索引）
+    name                VARCHAR(120) NOT NULL,         -- 如「银行卡 → 调取流水」
+    description         TEXT,
+    -- 触发条件
+    element_type        VARCHAR(30),        -- ELEMENT_TYPE；NULL=仅链式触发（索引）
+    case_types          JSON DEFAULT '[]',  -- 适用案件类型；空=全部
+    phases              JSON DEFAULT '[]',  -- 适用案件阶段；空=全部
+    source_task_types   JSON DEFAULT '[]',  -- 限定触发源任务类型；空=任意
+    -- 生成的任务
+    task_title          VARCHAR(200) NOT NULL,   -- 支持占位符
+    task_type           VARCHAR(50) NOT NULL,
+    task_description    TEXT,
+    instructions        TEXT,               -- 依据/办理指引（展示在草案审查界面）
+    priority            VARCHAR(10) DEFAULT 'medium',
+    suggested_agent_type VARCHAR(50),       -- 建议召唤的数字警员 type
+    due_days            INTEGER,            -- 相对期限（天）；NULL=不设期限
+    -- 链式推进
+    next_template_codes JSON DEFAULT '[]',  -- 本模板生成的任务完成后接续触发的模板 code
+    -- 管理字段
+    enabled             INTEGER DEFAULT 1,  -- 1=启用 0=停用（索引）
+    is_builtin          INTEGER DEFAULT 0,  -- 1=内置模板（不可删除，可停用/修改）
+    sort_order          INTEGER DEFAULT 100,
+    created_by          INTEGER REFERENCES users(id),
+    created_at          TIMESTAMP DEFAULT NOW(),
+    updated_at          TIMESTAMP DEFAULT NOW()
+);
+```
+
+**模板占位符**（可用于 `task_title` / `task_description` / `instructions`）：
+
+| 占位符 | 含义 |
+|---|---|
+| `{element}` | 要素中文名（如「银行卡」） |
+| `{element_value}` | 要素值（如「6222***1234」） |
+| `{case_title}` | 案件名称 |
+| `{case_number}` | 案件编号 |
+| `{source_task}` | 触发源任务标题 |
+
+#### 5.2.10 审计日志
+
+```sql
+CREATE TABLE police_audit_logs (
+    id            SERIAL PRIMARY KEY,
+    user_id       INTEGER,                  -- 索引
+    user_name     VARCHAR(100),
+    action        VARCHAR(50) NOT NULL,     -- create/update/delete/login/assign/approve/reject
+    resource_type VARCHAR(50),              -- case/task/agent/evidence/document
+    resource_id   INTEGER,
+    case_id       INTEGER,                  -- 索引
+    details       JSON,
+    ip_address    VARCHAR(45),              -- VARCHAR，非 INET
+    user_agent    TEXT,
+    created_at    TIMESTAMP DEFAULT NOW()
+);
+```
+
+#### 5.2.11 知识图谱 Schema（Neo4j）
+
+> 📋 **规划中** — 以下 Schema 尚未在公安业务侧落地，Neo4j / Milvus 在所有 `police_*` 代码中均无调用。保留作为 §4.4 的设计目标。
 
 ```cypher
 // 节点
@@ -933,81 +1290,6 @@ CREATE TABLE evidence_links (
 (:Person)-[:MEMBER_OF {role}]->(:Organization)
 (:Person)-[:RELATED_TO {type: 'family|accomplice|friend'}]->(:Person)
 ```
-
-#### 5.2.7 审计日志
-
-```sql
-CREATE TABLE audit_logs (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id         UUID,
-    user_name       VARCHAR(100),
-    action          VARCHAR(50) NOT NULL,    -- create/update/delete/login/assign/approve/reject
-    resource_type   VARCHAR(50),             -- case/task/agent/evidence/document
-    resource_id     UUID,
-    case_id         UUID,                    -- 关联案件
-    details         JSONB,                   -- 操作详情
-    ip_address      INET,
-    user_agent      TEXT,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
-#### 5.2.8 SOP / 办案规程
-
-> SOP 是连接「数字警员技能」与「复杂专案协同」的编排层（详见 4.8 节）。落库为定义表 + 执行实例表。
-
-```sql
--- 办案规程（SOP）定义
-CREATE TABLE police_sops (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name            VARCHAR(100) NOT NULL,          -- SOP 名称
-    business_domain VARCHAR(50) NOT NULL,           -- 业务域: fraud/theft/...
-    description     TEXT,
-    version         INTEGER DEFAULT 1,              -- 版本号（支持迭代升级）
-    status          VARCHAR(20) DEFAULT 'active',   -- active/deprecated
-    steps           JSONB NOT NULL,                 -- 步骤序列: [{order, officer_type/skill, action, trigger, branch}]
-    trigger_event   VARCHAR(50),                    -- 触发事件 (案件类型/阶段变更/文件上传)
-    call_count      INTEGER DEFAULT 0,              -- 调用次数
-    good_rate       FLOAT DEFAULT 0,                -- 好评率
-    bad_rate        FLOAT DEFAULT 0,                -- 差评率
-    created_by      UUID REFERENCES users(id),
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
-);
-
--- SOP 执行实例（某次专案中触发的 SOP 运行轨迹）
-CREATE TABLE sop_instances (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    sop_id          UUID REFERENCES police_sops(id),
-    case_id         UUID REFERENCES cases(id) ON DELETE CASCADE,
-    status          VARCHAR(20) DEFAULT 'running',  -- running/completed/aborted
-    current_step    INTEGER DEFAULT 0,
-    context         JSONB DEFAULT '{}',             -- 运行上下文
-    created_at      TIMESTAMPTZ DEFAULT NOW(),
-    completed_at    TIMESTAMPTZ
-);
-```
-
-#### 5.2.9 数字警员工作记录与成长
-
-数字警员的工作记录复用 §5.2.4 的 `agent_runs` / `agent_messages` 表（每次对话、任务执行、产出均落库）。额外沉淀评价与成长档案：
-
-```sql
--- 数字警员评价/反馈记录
-CREATE TABLE officer_feedback (
-    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id        UUID REFERENCES agents(id),     -- 数字警员
-    run_id          UUID REFERENCES agent_runs(id), -- 关联产出运行
-    reviewer_id     UUID REFERENCES users(id),      -- 评价民警
-    rating          SMALLINT,                       -- 1-5 评分
-    comment         TEXT,                           -- 评价内容
-    is_positive     BOOLEAN,                        -- 好评/差评
-    created_at      TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-> 民警对数字警员产出的评价计入 `officer_feedback`，汇总后形成数字警员的成长轨迹与技能好评率（见 4.3.4 节）。工作记录时间线由 `agent_runs` + `agent_messages` 直接支撑。
-```
-
 ---
 
 ## 6. 数字警员设计
@@ -1026,6 +1308,20 @@ CREATE TABLE officer_feedback (
 | 文书生成师 | 生成各类法律文书 | 案件信息 | 法律文书文档 | document_generation |
 | 证据梳理员 | 梳理证据链，生成证据清单 | 证据材料 | 证据链报告 | knowledge_extraction |
 | 案件编排官 | 分析案件进展，按 SOP 调度各数字警员 | 案件上下文 | SOP 实例推进 / 新工作项创建指令 | (编排层，不直接接任务) |
+
+> 🔀 **v1.5 修订**：v1.4 本节列出的「文书生成师 / 证据梳理员」**在代码中不存在**（`PRESET_AGENTS` 全库仅 7 个，无此二者）；而代码中实际存在的 **DA-006 群聊分析专家、DA-007 审讯辅助专家** 本节原未列出。下表已按 `backend/package/yuxi/services/police_prompts.py` 的 `PRESET_AGENTS` 修正。
+
+| 工号 | 数字警员 | `type` | 职责 | 输入 | 输出 | 专用 PRD 小节 |
+|------|----------|--------|------|------|------|--------------|
+| DA-001 | 笔录分析师 | `transcript_analyst` | 分析报案笔录，提取关键信息 | 笔录文档 | 结构化案件信息 + 初始工作项 | §6.2 |
+| DA-002 | 资金追踪师 | `fund_analyst` | 分析银行流水，追踪涉案资金 | 流水文件 | 资金追踪报告 + 下级账户清单 | §6.3 |
+| DA-003 | 调证生成师 | `evidence_collector` | 生成调取通知书等法律文书 | 调证需求 | 法律文书文档 | §6.4 |
+| DA-004 | 法制审核官 | `legal_reviewer` | 审核案件程序合规性 | 案件材料 | 审核意见 + 整改建议 | §6.5 |
+| DA-005 | 案件编排官（推进智能体） | `case_orchestrator` | 读分析结果、提取要素、生成任务草案、推阶段 | 案件上下文 | 推进决策 / 任务草案 | §6.6 |
+| DA-006 | 群聊分析专家 | `chat_analyst` | 分析聊天记录等电子数据中关联关系 | 聊天记录 + 案件背景 | 群聊研判报告 | 📋 待补写 |
+| DA-007 | 审讯辅助专家 | `interrogation_advisor` | 基于笔录与证据给出审讯策略 | 笔录 + 证据 + 案件背景 | 审讯策略报告 | 📋 待补写 |
+
+> DA-006 / DA-007 已在 `PRESET_AGENTS` 中落地（prompt + 档案字段齐全），但本文档尚未为其单独撰写 PRD 小节，标记为「待补写」。
 
 ### 6.2 笔录分析师（数字警员）
 
@@ -1212,7 +1508,7 @@ CREATE TABLE officer_feedback (
 推进智能体是"建议者"而非"指挥者":
   - 读取分析结果（笔录分析、资金追踪等），提取涉案要素
   - 将涉案要素映射为侦查任务草案，标注依据来源
-  - 感知任务完成事件（事件推送，非轮询），判断阶段是否闭环
+  - 感知任务审核通过事件（`review_task` 后以 `asyncio.create_task` 进程内触发，非轮询、非队列），判断阶段是否闭环
   - 根据模板生成下一阶段任务草案，推给主办民警审查
   - 侦查方向变更时，分析受影响任务并生成处理建议
 
@@ -1222,26 +1518,20 @@ CREATE TABLE officer_feedback (
   - 不对案件做定性判断（留给主办民警）
   - 不越过主办民警做任何决策
 
-全局 vs 每案件决策:
-  采用「全局模板 + 每案件实例」模式。每个案件创建时自动实例化一个推进智能体。
-  理由: 隔离性好（一个案件故障不波及其他）、上下文纯净（不跨案污染）、
-  LangGraph 天然支持（每个案件对应一条 graph thread）。
+🔀 **实现方式不同（v1.5 修订）**：v1.4 计划为「每案件实例化一个推进智能体 + LangGraph StateGraph 状态机 + ARQ 队列驱动」。**代码实际未采用**，真实实现为：
 
-推进循环 (LangGraph StateGraph):
+- **进程内单例**：`PoliceAdvancementService` 为模块级单例，不按案件实例化；`police_case_advancement_agents` 表全库 0 命中（不存在）。
+- **线性管线，非状态机**：`advance_after_task_completed()` 是一条**顺序执行的管线**——① 提取涉案要素 → ② 匹配侦查任务模板 → ③ 生成任务草案。无 LangGraph `StateGraph`、无 `while/for` 循环迭代 LLM、无终止条件判断。
+- **进程内触发，非 ARQ**：由 `PoliceTaskService.review_task()` 在审核通过后以 `asyncio.create_task(self._trigger_advancement(...))` 进程内异步触发，**不经过任何 ARQ 队列**（项目虽引入 ARQ，但推进智能体未使用）。
+
+推进管线（线性顺序执行，非循环状态机）：
 
   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-  │ 1. 感知       │───▶│ 2. 分析       │───▶│ 3. 规划       │
-  │ 任务完成事件  │    │ 读取产出      │    │ 匹配模板      │
-  │ (ARQ 推送)    │    │ 提取涉案要素  │    │ 生成任务草案  │
-  └──────────────┘    └──────────────┘    └──────┬───────┘
-                                                  │
-                          ┌───────────────────────┘
-                          ▼
-                    ┌──────────────┐    ┌──────────────┐
-                    │ 4. 提交       │───▶│ 5. 等待       │
-                    │ 推送给主办    │    │ 下轮事件唤醒  │
-                    │ 民警审查      │    │              │
-                    └──────────────┘    └──────────────┘
+  │ 1. 提取要素   │───▶│ 2. 匹配模板   │───▶│ 3. 生成草案   │
+  │ 读取审核通过  │    │ 涉案要素 →    │    │ 组装任务草案  │
+  │ 任务的产出    │    │ 命中模板规则  │    │ 等待民警审查  │
+  └──────────────┘    └──────────────┘    └──────────────┘
+        (review_task 后 asyncio.create_task 进程内触发，非 ARQ 推送)
 ```
 
 **触发条件（EARS 格式）**：
@@ -1299,13 +1589,13 @@ CREATE TABLE officer_feedback (
 | 嫌疑人到案 | interrogation | DA-007 审讯辅助 | 收网 |
 | 上游银行卡流水已调取 | fund_analysis | DA-002 | 立案侦查 |
 
-**技术实现要点**：
+**技术实现要点（v1.5 按代码修正）**：
 
-- 利用现有 ARQ 任务队列实现事件投递，新增 `case_advancement` 队列
-- 推进智能体每次运行幂等（同一案件同一时刻只运行一个实例）
-- LLM 调用走 `custom-openai:agnes-2.5-flash`
-- 推进智能体实例存储于 `police_case_advancement_agents` 表（每案件一条记录）
-- 所有推进决策写入审计日志（`PoliceAuditLog`），标注 `actor = agent`
+- 🔀 推进由 `review_task()` 审核通过后以 `asyncio.create_task()` **进程内**异步触发，**没有 ARQ `case_advancement` 队列**
+- ⚠️ 幂等仅靠进程内单例 + 串行 `create_task` 近似保证，**无分布式锁**；多副本部署存在并发重复触发风险（见 §0.2 技术债）
+- LLM 调用走 `custom-openai:agnes-2.5-flash`（两次 `ainvoke`：要素提取、草案生成）
+- 🔀 **不存在** `police_case_advancement_agents` 表；每次推进决策写入 `police_advancement_logs`（`decision_type` ∈ task_draft / direction_change / phase_summary / no_action），详见 §5.2.8
+- 推进决策同时写入审计日志（`police_audit_logs`）
 
 ### 6.7 多智能体协作架构
 
@@ -1490,69 +1780,87 @@ CREATE TABLE officer_feedback (
 - **[Event-driven]** **When** 主办民警确认方向调整，推进智能体 **shall** 基于新方向重新生成任务草案。
 - **[Ubiquitous]** 方向变更事件 **shall** 写入案件时间线。
 
-#### 6.7.6 事件驱动机制（后端）
+#### 6.7.6 事件驱动机制（后端，v1.5 按代码修正）
+
+🔀 v1.4 描述为「`complete_task` 投递事件到 ARQ 队列 → `CaseAdvancementService.handle_task_completed()` 经 LangGraph 调用 LLM」。**代码实际实现不同**：
 
 ```
-任务完成事件推送流程：
+推进触发流程（进程内，非队列）：
 
-民警确认任务完成 (complete_task)
+民警在任务详情审核通过 (review_task)
        │
        ▼
-PoliceTaskService.complete_task()
-       ├─ 写入 task result
+PoliceTaskService.review_task()
+       ├─ 校验审核人，写入 reviewed_by / reviewed_at / signed_hash（§9.5）
+       ├─ 任务状态置为 completed
        ├─ 写入 TaskEvent (completed)
-       ├─ 写入工作区产物
-       ├─ 触发 TaskFlowRule (现有)
-       └─ 新增: 投递事件到 case_advancement 队列
+       ├─ 写入工作区产物（若有）
+       └─ asyncio.create_task(
+            self._trigger_advancement(case_id, task_id, reviewer_id))
               │
-              ▼
-       ARQ 任务队列 (case_advancement)
-              │
-              ▼
-       CaseAdvancementService.handle_task_completed()
-              ├─ 获取该案件的推进智能体实例
-              ├─ 构造 context: { completed_task, case_state, pending_tasks }
-              ├─ 调用推进智能体 LLM (LangGraph)
-              └─ 输出: 推进决策 (生成新任务/阶段完成/无操作)
+              ▼  (进程内异步，不经过 ARQ)
+       PoliceAdvancementService.advance_after_task_completed()
+              ├─ 读取该任务产出，提取涉案要素
+              ├─ 匹配 police_task_templates 规则
+              ├─ 调用 LLM（agnes-2.5-flash）生成任务草案
+              ├─ 写入 police_advancement_logs（decision_type=task_draft）
+              └─ 输出: 生成 pending_confirmation 任务草案 / 阶段小结 / 无操作
 ```
 
-#### 6.7.7 数据库变更
+> **关键差异**：① 触发点是 `review_task`（审核通过），不是 `complete_task`；② 走 `asyncio.create_task` 进程内调用，**无 ARQ 队列**；③ 推进服务是**线性管线**，无 LangGraph 状态机。
 
-**新增表** `police_case_advancement_agents`（每案件一个推进智能体实例）：
+#### 6.7.7 数据库变更（v1.5 按代码修正）
+
+🔀 v1.4 规划的 `police_case_advancement_agents` 表，以及 `police_tasks` 的 `source_event_id` / `draft_reasoning` / `evidence_refs` 三字段**均未实现**（全库 0 命中）。实际落地如下：
+
+**推进决策日志表 `police_advancement_logs`（已实现，详见 §5.2.8）** —— 替代原「每案件推进智能体实例表」：
+
 ```sql
-CREATE TABLE IF NOT EXISTS police_case_advancement_agents (
+CREATE TABLE police_advancement_logs (
     id              SERIAL PRIMARY KEY,
     case_id         INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
-    agent_id        INTEGER REFERENCES police_agents(id),
-    status          VARCHAR(20) DEFAULT 'active',
-    config_json     JSON DEFAULT '{}',
-    last_run_at     TIMESTAMP,
-    created_at      TIMESTAMP DEFAULT NOW(),
-    UNIQUE(case_id)
+    trigger_task_id INTEGER REFERENCES police_tasks(id),
+    decision_type   VARCHAR(30) NOT NULL,   -- task_draft / direction_change / phase_summary / no_action
+    summary         TEXT,
+    details         JSON DEFAULT '{}',      -- {source_task, direction, generated_tasks, reasoning, model, duration_ms}
+    created_by      INTEGER REFERENCES users(id),
+    created_at      TIMESTAMP DEFAULT NOW()
 );
 ```
 
-**police_tasks 表补充字段**：
-- `source_event_id` INTEGER — 引用触发该任务创建的事件 ID
-- `draft_reasoning` TEXT — 推进智能体生成此任务的决策理由
-- `evidence_refs` JSON — 引用的材料/分析结论引用列表
+**police_tasks 溯源信息（已实现，存于 `extra.advancement` JSON，非独立字段）**：
 
-**police_cases 表补充字段**：
-- `investigation_direction` TEXT — 当前侦查方向描述
-- `advancement_enabled` INTEGER DEFAULT 1 — 是否启用推进智能体
+```json
+{
+  "advancement": {
+    "source_task_id":    123,
+    "template_id":       7,
+    "template_code":     "bank_card_to_flow_query",
+    "element_type":      "bank_card",
+    "element_value":     "6222***1234",
+    "origin":            "template | llm | chain",
+    "suggested_assignee":"fund_analyst",
+    "direction_change":  false
+  }
+}
+```
 
-**任务状态枚举扩展**（在现有基础上新增）：
+**police_cases 已落地字段（详见 §5.2.2）**：
+- `investigation_direction` TEXT — 当前侦查方向描述 ✅ 已实现
+- `advancement_enabled` INTEGER DEFAULT 1 — 是否启用推进智能体 ✅ 已实现
+
+**任务状态枚举（已实现，与 §5.2.1 一致）**：
 ```python
 TASK_STATUS = (
-    "pending_confirmation",  # 新增
+    "pending_confirmation",  # 推进智能体生成的任务草案，待主办民警审查
     "pending",
     "in_progress",
     "review",
     "completed",
+    "suspended",
+    "terminated",
+    "cancelled",
     "blocked",
-    "suspended",             # 新增
-    "terminated",            # 新增
-    "cancelled",             # 新增
 )
 ```
 
@@ -1616,102 +1924,143 @@ class CaseAgent:
 - 风格: RESTful
 - 认证: JWT Bearer Token
 - 格式: JSON
-- 版本: `/api/v1/`
+- 前缀: 公安业务接口统一为 `/api/police/<resource>`（由 `app.include_router(router, prefix="/api")` + 各 `police_*` 路由器的 `/police/...` 前缀组成）；鉴权/用户等底座接口属 yuxi 原生，前缀为 `/api/auth`、`/api/user` 等，**不存在 `/api/v1/`**
 - 分页: `?page=1&page_size=20`
 - 排序: `?sort=-created_at` (负号=降序)
 - 筛选: `?status=pending&assignee_type=agent`
 
 ### 7.2 核心 API 列表
 
-#### 7.2.1 认证
+> 🔀 **v1.5 修订**：v1.4 本节所有路径写作 `/api/v1/...`，**与代码不符**。真实前缀为 `/api/police/<resource>`（见 §7.1）。下方路径均为代码真实存在的端点（✅ 已实现）；标注 📋 者为规划中、代码中尚无对应路由。
+
+#### 7.2.1 认证（yuxi 底座，非 police 前缀）
 
 | Method | Path | 说明 |
 |--------|------|------|
-| POST | `/api/v1/auth/login` | 用户登录 |
-| POST | `/api/v1/auth/refresh` | 刷新 Token |
-| GET  | `/api/v1/auth/me` | 获取当前用户信息 |
+| POST | `/api/auth/login` | 用户登录 |
+| POST | `/api/auth/refresh` | 刷新 Token |
+| GET  | `/api/auth/me` | 获取当前用户信息 |
 
-#### 7.2.2 案件管理
-
-| Method | Path | 说明 |
-|--------|------|------|
-| GET  | `/api/v1/cases` | 案件列表 (支持筛选/排序/分页) |
-| POST | `/api/v1/cases` | 创建案件 |
-| GET  | `/api/v1/cases/{id}` | 案件详情 |
-| PUT  | `/api/v1/cases/{id}` | 更新案件 |
-| DELETE | `/api/v1/cases/{id}` | 删除案件 |
-| POST | `/api/v1/cases/import` | 上传笔录智能创建案件 |
-| GET  | `/api/v1/cases/{id}/tasks` | 案件下的任务列表 |
-| GET  | `/api/v1/cases/{id}/evidence` | 案件证据列表 |
-| GET  | `/api/v1/cases/{id}/timeline` | 案件时间线 |
-| GET  | `/api/v1/cases/{id}/graph` | 案件知识图谱数据 |
-| POST | `/api/v1/cases/{id}/members` | 添加案件成员 |
-| PUT  | `/api/v1/cases/{id}/phase` | 切换案件阶段 |
-
-#### 7.2.3 任务管理
+#### 7.2.2 案件管理 `/api/police/cases`
 
 | Method | Path | 说明 |
 |--------|------|------|
-| GET  | `/api/v1/tasks` | 任务列表 (支持筛选) |
-| GET  | `/api/v1/tasks/my` | 我的任务 |
-| GET  | `/api/v1/tasks/my/review` | 待我审核的任务 |
-| POST | `/api/v1/cases/{case_id}/tasks` | 创建任务 |
-| GET  | `/api/v1/tasks/{id}` | 任务详情 |
-| PUT  | `/api/v1/tasks/{id}` | 更新任务 |
-| POST | `/api/v1/tasks/{id}/assign` | 分配任务 |
-| POST | `/api/v1/tasks/{id}/start` | 开始任务 |
-| POST | `/api/v1/tasks/{id}/complete` | 完成任务 |
-| POST | `/api/v1/tasks/{id}/review` | 审核任务 (通过/驳回) |
-| POST | `/api/v1/tasks/{id}/attachments` | 上传任务附件 |
-| GET  | `/api/v1/tasks/{id}/events` | 任务事件日志 |
+| GET  | `/api/police/cases` | 案件列表 (分页/筛选/排序) |
+| POST | `/api/police/cases` | 创建案件 |
+| GET  | `/api/police/cases/{case_id}` | 案件详情 |
+| PUT  | `/api/police/cases/{case_id}` | 更新案件 |
+| DELETE | `/api/police/cases/{case_id}` | 删除案件 |
+| POST | `/api/police/cases/{case_id}/members` | 添加案件成员 |
+| PUT  | `/api/police/cases/{case_id}/phase` | 切换案件阶段 |
+| GET  | `/api/police/cases/{case_id}/timeline` | 案件时间线 |
+| POST | `/api/police/import/transcript` | 上传笔录智能创建案件 |
+| POST | `/api/police/import/transcript/confirm` | 确认创建案件 |
 
-#### 7.2.4 智能体
+#### 7.2.3 任务管理 `/api/police/tasks`
 
 | Method | Path | 说明 |
 |--------|------|------|
-| GET  | `/api/v1/agents` | 智能体列表 |
-| POST | `/api/v1/agents` | 注册智能体 |
-| GET  | `/api/v1/agents/{id}` | 智能体详情 |
-| PUT  | `/api/v1/agents/{id}` | 更新智能体配置 |
-| GET  | `/api/v1/agents/{id}/runs` | 智能体运行记录 |
-| POST | `/api/v1/tasks/{task_id}/agent-run` | 触发智能体执行任务 |
-| GET  | `/api/v1/agent-runs/{id}` | 运行详情 |
-| GET  | `/api/v1/agent-runs/{id}/stream` | 运行流式输出 (SSE) |
-| POST | `/api/v1/agent-runs/{id}/cancel` | 取消运行 |
+| GET  | `/api/police/tasks` | 任务列表 (支持筛选) |
+| GET  | `/api/police/tasks/my` | 我的任务 |
+| GET  | `/api/police/tasks/review` | 待我审核的任务 |
+| POST | `/api/police/tasks` | 创建任务 |
+| GET  | `/api/police/tasks/{task_id}` | 任务详情 |
+| PUT  | `/api/police/tasks/{task_id}` | 更新任务 |
+| POST | `/api/police/tasks/{task_id}/assign` | 分配任务（多执行人见 §5.2.3）|
+| POST | `/api/police/tasks/{task_id}/start` | 开始任务 |
+| POST | `/api/police/tasks/{task_id}/complete` | 完成任务（民警）|
+| POST | `/api/police/tasks/{task_id}/review` | 审核任务（通过→触发推进，见 §6.7.6）|
+| GET  | `/api/police/tasks/{task_id}/events` | 任务事件日志 |
+| GET  | `/api/police/tasks/flow-rules/list` | 任务流转规则列表 |
+| POST | `/api/police/tasks/flow-rules` | 新建流转规则 |
+| PUT  | `/api/police/tasks/flow-rules/{rule_id}` | 更新流转规则 |
+| DELETE | `/api/police/tasks/flow-rules/{rule_id}` | 删除流转规则 |
 
-#### 7.2.5 证据与文档
-
-| Method | Path | 说明 |
-|--------|------|------|
-| POST | `/api/v1/cases/{case_id}/evidence` | 上传证据材料 |
-| GET  | `/api/v1/cases/{case_id}/evidence` | 证据列表 |
-| GET  | `/api/v1/evidence/{id}` | 证据详情 |
-| GET  | `/api/v1/evidence/{id}/download` | 下载证据文件 |
-| GET  | `/api/v1/evidence/{id}/preview` | 在线预览 |
-| POST | `/api/v1/evidence/{id}/ocr` | 触发OCR识别 |
-| GET  | `/api/v1/cases/{case_id}/evidence-chain` | 证据链 |
-
-#### 7.2.6 知识库与图谱
+#### 7.2.4 推进智能体 `/api/police/advancement`
 
 | Method | Path | 说明 |
 |--------|------|------|
-| POST | `/api/v1/cases/{case_id}/knowledge/search` | 案件知识库检索 |
-| GET  | `/api/v1/cases/{case_id}/graph` | 获取知识图谱 |
-| GET  | `/api/v1/cases/{case_id}/graph/entities` | 图谱实体列表 |
-| GET  | `/api/v1/cases/{case_id}/graph/relations` | 图谱关系列表 |
-| POST | `/api/v1/cases/{case_id}/graph/query` | Cypher/路径查询 |
-| POST | `/api/v1/cases/{case_id}/graph/extract` | 触发知识抽取 |
+| GET  | `/api/police/advancement/{case_id}/drafts` | 推进智能体生成的待确认任务草案 |
+| POST | `/api/police/advancement/tasks/{task_id}/confirm` | 主办民警确认任务草案 |
+| POST | `/api/police/advancement/tasks/{task_id}/reject` | 驳回任务草案 |
+| POST | `/api/police/advancement/{case_id}/direction` | 侦查方向调整 |
+| GET  | `/api/police/advancement/my-drafts` | 我收到的任务草案 |
+| GET  | `/api/police/advancement/{case_id}/logs` | 推进决策日志 (police_advancement_logs) |
+| POST | `/api/police/advancement/{case_id}/toggle` | 启用/停用推进智能体 |
 
-#### 7.2.7 工作台
+#### 7.2.5 数字警员与 SOP `/api/police/agents`
 
 | Method | Path | 说明 |
 |--------|------|------|
-| GET  | `/api/v1/dashboard/stats` | 工作台统计数据 |
-| GET  | `/api/v1/dashboard/my-tasks` | 我的待办任务 |
-| GET  | `/api/v1/dashboard/review-tasks` | 待审核任务 |
-| GET  | `/api/v1/dashboard/case-updates` | 案件动态 |
-| GET  | `/api/v1/dashboard/agent-updates` | 智能体动态 |
+| GET  | `/api/police/agents` | 数字警员列表 |
+| GET  | `/api/police/agents/by-badge/{badge_number}` | 按工号查 (DA-xxx) |
+| GET  | `/api/police/agents/by-yuxi/{yuxi_agent_id}` | 按 yuxi agent 查 |
+| GET  | `/api/police/agents/templates` | 数字警员市场模板列表 |
+| POST | `/api/police/agents/templates/{template_id}/install` | 从市场安装数字警员 |
+| POST | `/api/police/agents/{agent_id}/share` | 共享/发布到市场 |
+| POST | `/api/police/agents/{agent_id}/approve` | 共享审批（见 §4.11）|
+| GET  | `/api/police/agents/{agent_id}` | 详情 |
+| PUT  | `/api/police/agents/{agent_id}` | 更新配置 |
+| DELETE | `/api/police/agents/{agent_id}` | 删除 |
+| GET  | `/api/police/agents/{agent_id}/runs` | 运行记录 |
+| GET  | `/api/police/agents/sops/list` | SOP 列表 |
+| POST | `/api/police/agents/sops` | 新建 SOP |
+| GET  | `/api/police/agents/sops/{sop_id}` | SOP 详情 |
+| PUT  | `/api/police/agents/sops/{sop_id}` | 更新 SOP |
+| DELETE | `/api/police/agents/sops/{sop_id}` | 删除 SOP |
+| POST | `/api/police/agents/seed` | 植入预设数字警员/模板 |
 
+#### 7.2.6 证据与文档 `/api/police/evidence`
+
+| Method | Path | 说明 |
+|--------|------|------|
+| POST | `/api/police/evidence/case/{case_id}` | 上传证据材料 |
+| GET  | `/api/police/evidence/case/{case_id}` | 证据列表 |
+| GET  | `/api/police/evidence/{evidence_id}` | 证据详情 |
+| POST | `/api/police/evidence/{evidence_id}/review` | 审核证据（计算 signed_hash，见 §9.5）|
+| GET  | `/api/police/evidence/case/{case_id}/chain` | 证据链 |
+| GET  | `/api/police/evidence/{evidence_id}/download` | 下载证据文件 |
+| GET  | `/api/police/evidence/{evidence_id}/preview` | 在线预览 |
+| 📋 POST | `/api/police/evidence/{evidence_id}/ocr` | 触发 OCR 识别（规划中，代码暂无路由）|
+
+#### 7.2.7 案件工作区 `/api/police/workspaces`
+
+| Method | Path | 说明 |
+|--------|------|------|
+| POST | `/api/police/workspaces/{case_id}/init` | 初始化案件工作区 |
+| GET  | `/api/police/workspaces/{case_id}` | 工作区信息 |
+| GET  | `/api/police/workspaces/{case_id}/nodes` | 文件树节点 |
+| GET  | `/api/police/workspaces/{case_id}/folders` | 文件夹列表 |
+| POST | `/api/police/workspaces/{case_id}/upload` | 上传文件到工作区 |
+| GET  | `/api/police/workspaces/{case_id}/download` | 下载 |
+| POST | `/api/police/workspaces/{case_id}/move` | 移动 |
+| POST | `/api/police/workspaces/{case_id}/rename` | 重命名 |
+
+#### 7.2.8 侦查任务模板 `/api/police/task-templates`
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET  | `/api/police/task-templates/meta` | 元数据（枚举等）|
+| POST | `/api/police/task-templates/seed` | 植入内置模板 |
+| GET  | `/api/police/task-templates` | 模板列表 |
+| POST | `/api/police/task-templates` | 新建模板 |
+| GET  | `/api/police/task-templates/{template_id}` | 模板详情 |
+| PUT  | `/api/police/task-templates/{template_id}` | 更新模板 |
+| DELETE | `/api/police/task-templates/{template_id}` | 删除模板 |
+| POST | `/api/police/task-templates/{template_id}/toggle` | 启用/停用 |
+| GET  | `/api/police/task-templates/{template_id}/preview` | 预览 |
+
+#### 7.2.9 工作台 `/api/police/dashboard`
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET  | `/api/police/dashboard/stats` | 工作台统计数据 |
+| GET  | `/api/police/dashboard/my-tasks` | 我的待办任务 |
+| GET  | `/api/police/dashboard/review-tasks` | 待审核任务 |
+
+#### 7.2.10 知识库与图谱 📋 规划中
+
+> Neo4j / Milvus 在所有 `police_*` 代码中**均无调用**，知识图谱与图谱检索接口目前**不存在**。v1.4 列出的 `/api/v1/cases/{id}/graph/*` 与 `/knowledge/search` 端点代码暂无对应路由，保留为 §4.4 设计目标。
 ### 7.3 API 响应格式
 
 ```json
@@ -1993,23 +2342,26 @@ class CaseAgent:
 │ [最短路径]│     (可拖拽/缩放/点击节点查看详情)        │
 └──────────┴──────────────────────────────────────────┘
 
-#### 8.4.6 数字警员广场（一级入口）
+#### 8.4.6 数字警员（统一智能体管理页，🔀 已按代码修正）
+
+> v1.4 规划的独立「一级入口：数字警员广场 `/police/officers`」**代码未采用**。真实路由中 `/police/officers` 与 `/police/officers/:id` 均为**重定向**，实际承载数字警员画廊/档案/技能/成长的是 yuxi 原生「智能体管理」页（`/agent-manage`）。前端 `web/src/router/index.js` 中 `officers` 路由 `redirect → /agent-manage`。
+
+数字警员画廊与档案（统一在 `/agent-manage` 呈现，StaffDeck 风格）：
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  数字警员广场                           [搜索] [筛选▼] │
+│  智能体管理 (/agent-manage)            [搜索] [筛选▼] │
 ├──────┬──────┬──────┬──────┬──────┬──────────────────┤
-│ 🧑 笔录│ 🕵 资金│ ⚖ 法制│ 📝 调证│ 🗂 编排│  ...            │
+│ 🧑 笔录│ 🕵 资金│ ⚖ 法制│ 📝 调证│ 🗂 编排│  ...(DA-006/007)│
 │ 分析师│ 追踪师│ 审核官│ 生成师│ 官    │                 │
 │ 在线  │ 忙碌  │ 在线  │ 在线  │ 在线  │                 │
-│ 专长: │ 专长: │ 专长: │ 专长: │ 专长: │                 │
-│ 笔录  │ 资金  │ 法律  │ 文书  │ 调度  │                 │
-│ 提取  │ 追踪  │ 审核  │ 生成  │ 编排  │                 │
 │ 本月12│ 本月8 │ 本月5 │ 本月6 │ 本月3 │                 │
 │ 次工作│ 次工作│ 次工作│ 次工作│ 次工作│                 │
 └──────┴──────┴──────┴──────┴──────┴──────────────────┘
   [点击卡片 → 进入数字警员档案]
 ```
+
+> 注：§8.4.7「数字警员档案」的卡片字段（`工号 PO-001`、`好评率/差评率`）中，「好评率/差评率」依赖 `officer_feedback` 表，**该表未实现**（见 §5.2.4 / §5.2.6），目前无数据支撑；工号字段实际为 `badge_number`（如 `DA-001`），非 `PO-001`。
 
 #### 8.4.7 数字警员档案
 
@@ -2232,7 +2584,7 @@ class CaseAgent:
 | 哈希字段 | 计算时机 | 计算内容 | 存储位置 | 用途 |
 |----------|----------|----------|----------|------|
 | `file_hash` (SHA-256) | 文件上传/生成时 | 文件二进制内容 | evidence.file_hash | 证明文件本身未被篡改 |
-| `signed_hash` (SHA-256) | 民警审核确认时 | `SHA-256(police_id + reviewed_at + file_hash)` | evidence.signed_hash / tasks.signed_hash | 证明"该民警在该时间确认了该文件" |
+| `signed_hash` (SHA-256) | 民警审核确认时 | `SHA-256(reviewer_police_id + 审核时间戳ISO + 内容哈希)`，三者直接拼接无分隔符（证据=file_hash，任务=result_hash） | evidence.signed_hash / tasks.signed_hash | 证明"该民警（警号）在该时间确认了该文件/成果" |
 
 #### 9.5.2 签名流程
 
@@ -2243,35 +2595,44 @@ class CaseAgent:
 文件上传至 MinIO → 计算 file_hash (SHA-256) → 落库 evidence.file_hash
     │
     ▼
-民警在工作台审核 → 点击"审核通过"
+民警在工作台审核证据 → 点击"审核通过"
     │
     ▼
-系统自动计算 signed_hash = SHA-256(民警警号 + 审核时间戳ISO + file_hash)
+系统自动计算:
+  hash_input = f"{reviewer_police_id}{reviewed_at.isoformat()}{file_hash}"
+  signed_hash = SHA-256(hash_input)   # 注意：用警号(reviewer_police_id)，非 users.id
     │
     ▼
-落库: evidence.reviewed_by = 民警ID
-      evidence.reviewed_at = 审核时间
-      evidence.signed_hash = 签名哈希
+落库 (evidence_repository.review):
+  evidence.reviewed_by   = reviewer_id       # users.id（冗余展示用）
+  evidence.reviewed_at   = reviewed_at
+  evidence.signed_hash   = signed_hash
     │
     ▼
 审计日志记录: "民警XXX于YYYY-MM-DD HH:MM:SS 审核确认文件YYY (hash:zzz)"
 ```
 
-#### 9.5.3 验证流程（诉讼阶段/监督检查）
+> ⚠️ **只签名、不验证**：代码中只有"写入 signed_hash"的 `evidence_repository.review()` 与 `police_service.review_task()`，**没有**对应的"读取并校验 signed_hash"的验证函数（§9.5.3 的 `verify_evidence_integrity` 当前仅存在于本文档，代码未实现）。这是 §0.2 列明的技术债——诉讼阶段/监督检查时无法在系统内自证完整性与签名真实性，需补一个验证端点。
+
+
+#### 9.5.3 验证流程（📋 规划中 — 代码未实现，见 §0.2 技术债）
 
 ```python
-import hashlib
-
-def verify_evidence_integrity(evidence_record, original_file_bytes):
-    """验证证据完整性"""
+# ⚠️ 以下为"规划中"的验证函数（v1.5 标注）：代码目前只有写入 signed_hash 的
+#    evidence_repository.review() 与 police_service.review_task()，但没有读取并校验的
+#    等价实现。下方伪代码仅作为未来验证端点的设计参考，且已按代码修正为使用
+#    reviewer_police_id（警号），而非 reviewed_by（users.id）。
+def verify_evidence_integrity(evidence_record, reviewer_police_id, original_file_bytes):
+    """验证证据完整性（规划中，代码未实现）"""
     # 1. 验证文件哈希（文件未被篡改）
     current_hash = hashlib.sha256(original_file_bytes).hexdigest()
     if current_hash != evidence_record.file_hash:
         return False, "文件已被篡改: file_hash 不匹配"
 
     # 2. 验证签名哈希（审核记录未被伪造）
+    #    注意：签名时用的是 reviewer_police_id（警号），不是 reviewed_by（users.id）
     expected_signed = hashlib.sha256(
-        f"{evidence_record.reviewed_by}"
+        f"{reviewer_police_id}"
         f"{evidence_record.reviewed_at.isoformat()}"
         f"{evidence_record.file_hash}".encode()
     ).hexdigest()
@@ -2643,22 +3004,22 @@ Phase 2: 笔录分析智能体 + 案件智能创建 (3周)
 
 Phase 2.5: 数字警员平台（StaffDeck 融合）(进行中)
 ├── 数字警员实体化：PoliceAgent 扩展工号/警衔/部门/头像/成长记录（police_agents）
-├── 数字警员广场 + 档案页（前端 StaffDeck 风格画廊/详情，手绘风）
+├── 数字警员画廊/档案（统一在 yuxi 原生 /agent-manage 呈现；/police/officers 为重定向，非独立广场）
 ├── 技能体系：把各专业能力沉淀为 Yuxi Skill，支持民警对话直接调用
-├── SOP / 办案规程框架：police_sops + sop_instances，落地为 LangGraph 状态机
-├── 专案组模型：case_members 支持民警 + 数字警员混合成员
+├── SOP / 办案规程框架：police_sops（状态机三件套已落地，但无执行器、无 sop_instances 表，LangGraph 状态机未实现）
+├── 专案组模型：case_members 仅存民警；数字警员经 police_task_assignees 以执行人身份参与（人机协作）
 └── 人机协作审核默认化：数字警员产出经民警签字(signed_hash)入卷
 
 Phase 3: 多智能体协作与看板重构 (5周)
 ├── 案件推进智能体（原案件编排官，重定位）
-│   ├── 任务完成事件推送（ARQ case_advancement 队列）
-│   ├── 推进智能体 LangGraph 实现（analyze → match → generate → decide）
+│   ├── 审核通过事件触发（review_task 后 asyncio.create_task 进程内触发，非 ARQ 队列）
+│   ├── 推进智能体顺序管线实现（extract → match template → generate draft，非 LangGraph、非循环决策）
 │   ├── 任务草案生成（读取分析产出 → 提取要素 → 匹配模板 → 生成草案）
 │   ├── 主办民警审查确认流程（确认/驳回/修改/追加）
-│   └── 推进智能体实例化（案件创建时自动创建，police_case_advancement_agents 表）
+│   └── 推进服务为模块级单例（无每案件实例、无 police_case_advancement_agents 表，决策落 police_advancement_logs）
 ├── 任务状态机扩展
 │   ├── 新增 pending_confirmation / suspended / terminated / cancelled 状态
-│   ├── police_tasks 表补充 source_event_id / draft_reasoning / evidence_refs 字段
+│   ├── police_tasks 溯源信息存于 extra.advancement JSON（source_event_id/draft_reasoning/evidence_refs 三字段未实现）
 │   └── police_cases 表补充 investigation_direction / advancement_enabled 字段
 ├── 侦查方向变更机制
 │   ├── 方向调整 → 受影响任务清单生成 → 主办民警逐条确认
@@ -2709,16 +3070,18 @@ Phase 6: 测试与交付 (3周)
 
 ### 11.2 里程碑
 
-| 里程碑 | 时间 | 交付物 |
-|--------|------|--------|
-| M0: 语析底座跑通 | 第 2 周 | Fork 语析成功运行，用户/权限模型扩展完成 |
-| M1: 案件管理可用 | 第 6 周 | 案件-任务-证据管理 + 工作台 |
-| M1.5: 数字警员平台 | 第 8 周 | 数字警员广场/档案/技能体系/SOP框架/专案组模型（StaffDeck 融合，进行中）|
-| M2: 智能创建上线 | 第 10 周 | 笔录分析师 + 专案组智能创建流程 |
-| M3: 多智能体协作 + 看板升级 | 第 15 周 | 推进智能体 + 事件驱动 + 任务草案审查 + Multica 风格看板 + 个人工作台待办聚合 |
-| M4: 知识图谱上线 | 第 18 周 | 知识库+知识图谱+可视化+图谱分析 |
-| M5: 安全加固完成 | 第 21 周 | PII 脱敏+审计+隔离+渗透测试 |
-| M6: 正式交付 | 第 24 周 | 完整平台 + 部署文档 + 培训材料 |
+| 里程碑 | 原定时间 | 交付物 | 当前状态（v1.5） |
+|--------|----------|--------|------------------|
+| M0: 语析底座跑通 | 第 2 周 | Fork 语析成功运行，用户/权限模型扩展完成 | ✅ 已完成 |
+| M1: 案件管理可用 | 第 6 周 | 案件-任务-证据管理 + 工作台 | ✅ 已完成 |
+| M1.5: 数字警员平台 | 第 8 周 | 数字警员广场/档案/技能体系/SOP框架/专案组模型 | ⚠️ 部分实现（数字警员/档案/SOP 表结构已落地，但 SOP 无执行器、档案好评率无数据；广场已并入 /agent-manage）|
+| M2: 智能创建上线 | 第 10 周 | 笔录分析师 + 专案组智能创建流程 | ✅ 已完成（笔录分析 + 导入建案）|
+| M3: 多智能体协作 + 看板升级 | 第 15 周 | 推进智能体 + 任务模板 + 任务草案审查 + 工作台聚合 | ✅ 主体完成（推进管线+任务模板已落地，见 §4.9；非 LangGraph/ARQ 实现，见 §6.7）|
+| M4: 知识图谱上线 | 第 18 周 | 知识库+知识图谱+可视化+图谱分析 | 📋 未启动（Neo4j/Milvus 在 police 代码中无调用）|
+| M5: 安全加固完成 | 第 21 周 | PII 脱敏+审计+隔离+渗透测试 | ⚠️ 部分实现（审计/签名写入已落地；签名验证未实现、PII 脱敏待确认）|
+| M6: 正式交付 | 第 24 周 | 完整平台 + 部署文档 + 培训材料 | 📋 待启动 |
+
+> 📌 **v1.5 状态快照（截至 2026-08-03，仓库 HEAD = `41ba1555` "feat(police): 侦查任务模板配置化 + 推进智能体管线改造"）**：周数仍为规划排期，不代表实际日历。
 
 ### 11.3 项目目录结构
 

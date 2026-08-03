@@ -1,8 +1,8 @@
 # 智案协 — 项目进度与待办
 
-> **最后更新**: 2026-08-01
-> **当前里程碑**: M0 ✅ → M1 ✅ (待联调) → M1.5 ✅ (数字警员) → M2 ⏳
-> **开发文档**: [POLICE_REQUIREMENTS.md](./POLICE_REQUIREMENTS.md) v1.2
+> **最后更新**: 2026-08-03
+> **当前里程碑**: M0 ✅ → M1 ✅ → M1.5 ✅ → M2 ✅ (闭环) → M3 ✅ 主体 (推进管线+任务模板) → M4 ⬜ (图谱未启) → M5 ⚠️ (安全部分) → M6 ⬜
+> **开发文档**: [POLICE_REQUIREMENTS.md](./POLICE_REQUIREMENTS.md) **v1.5**（文档—代码对齐版，已修正此前与代码不符的描述）
 
 ---
 
@@ -64,6 +64,23 @@
 
 ## 待完成
 
+### v1.5 文档—代码对齐（2026-08-03 完成）
+
+- [x] **需求文档对齐代码**: `POLICE_REQUIREMENTS.md` 升到 **v1.5**（文档—代码对齐版）。修正了与代码严重不符的描述：数据模型主键/表名前缀、API 前缀 `/api/v1/*`→`/api/police/*`、推进智能体实现（非 LangGraph 状态机/非 ARQ，而是 `review_task` 后 `asyncio.create_task` 触发的顺序管线）、数字警员表结构、证据签名用 `reviewer_police_id` 而非 `reviewed_by` 等；补写了已实现但文档缺失的模块：侦查任务模板体系(§4.9)、案件工作区文件系统(§4.10)、数字警员市场与共享审批(§4.11)、任务多执行人(§5.2.3)。**换机后 `git pull` 即可看到最新文档。**
+- [ ] **补写 DA-006 / DA-007 PRD 小节**: 群聊分析专家、审讯辅助专家已在 `PRESET_AGENTS` 落地，但文档 §6 尚未为其单独成节（当前标「待补写」）。
+- [ ] **DA-005 命名冲突**: 代码内 `case_orchestrator`(案件编排官) 同时承担「推进智能体」职责，命名/职责需与文档统一（见文档 §0.2 技术债）。
+
+### 决策待确认
+
+- [ ] **证书类型字段 (evidence_type 补充)**: 证据/证书类型枚举待产品确认（如警官证、立案决定书、银行回执等专用类型），确认后补入 `EVIDENCE_TYPE` 与前端筛选。**⏰ 2026-08-04 前确认**（用户原话：证书类型明天再确认）。
+
+### 已知技术债（来自文档 §0.2，建议排入后续迭代）
+
+- [ ] **推进触发不可靠**: 推进智能体仅靠进程内单例 + 串行 `create_task` 近似幂等，无分布式锁；多副本部署存在并发重复触发风险。
+- [ ] **只签名不验证**: `evidence_repository.review()` 与 `review_task()` 写入 `signed_hash`，但无对应的校验端点；诉讼/监察时无法在系统内自证完整性与签名真实性（§9.5.3 验证函数未实现）。
+- [ ] **TaskEvent 无消费者**: `police_task_events` 仅用于时间线展示，任务流转规则并不由事件驱动。
+- [ ] **图谱/向量未接入**: Neo4j、Milvus 在所有 police 代码中无调用（M4 知识图谱尚未启动）。
+
 ### Phase 0 遗留
 
 - [ ] **权限模型扩展**: 实现 admin/chief/officer/legal 四级角色（当前使用 Yuxi 基础权限）
@@ -104,7 +121,7 @@
 | 数字警员详情页 (档案/能力/记录/SOP/成长) | ✅ | `DigitalOfficerDetailView.vue` | 4 Tab(档案/工作记录/SOP/成长) + 侧边栏统计 |
 | 路由 + 导航 | ✅ | `router/index.js` + `AppLayout.vue` | /police/agents + /police/agents/:agentId + 侧边栏菜单 |
 
-#### 5 名预设数字警员
+#### 7 名预设数字警员（PRESET_AGENTS，DA-001~DA-007）
 
 | 工号 | 名称 | 类型 | 专长 | 色系 |
 |------|------|------|------|------|
@@ -113,6 +130,8 @@
 | DA-003 | 调证生成师 | evidence_collector | 法律依据检索 · 调取通知书生成 | amber |
 | DA-004 | 法制审核官 | legal_reviewer | 程序审核 · 证据审核 · 定性审核 | coral |
 | DA-005 | 案件编排官 | case_orchestrator | 案件编排 · 子智能体调度 · 任务流转 | purple |
+| DA-006 | 群聊分析专家 | chat_analyst | 聊天记录/电子数据关联分析 | blue |
+| DA-007 | 审讯辅助专家 | interrogation_advisor | 基于笔录与证据的审讯策略 | green |
 
 #### 构建验证
 
@@ -227,7 +246,7 @@
 
 1. **复用 Yuxi Base**: `models_police.py` 导入 `models_business.py` 的 `Base`，确保 `create_tables()` 自动创建 police 表
 2. **运行时 SQL 迁移**: 无 Alembic，通过 `manager.py` 的 `ensure_business_schema()` 幂等建表
-3. **证据双哈希**: `file_hash` (SHA-256 文件内容) + `signed_hash` (SHA-256 of police_id + reviewed_at + file_hash)
+3. **证据双哈希**: `file_hash` (SHA-256 文件内容) + `signed_hash` (SHA-256 of reviewer_police_id[警号] + reviewed_at.isoformat() + 内容哈希；证据=file_hash，任务=result_hash)
 4. **单一 LLM Provider**: 仅保留 `custom-openai`，支持任何 OpenAI 兼容端点
 5. **前端 Ant Design Vue**: 使用 Yuxi 原生 UI 库，手绘风格 CSS 主题叠加
 6. **任务流转引擎**: `TaskFlowRule` 条件触发自动创建后续任务 (如资金分析完成 → 自动创建调证任务)
