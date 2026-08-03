@@ -30,7 +30,27 @@ from yuxi.utils.datetime_utils import format_utc_datetime, utc_now_naive
 # ── 案件状态枚举 ──────────────────────────────────────────────
 CASE_STATUS = ("draft", "investigation", "arrest", "handling", "prosecution", "closed")
 CASE_PHASE = ("research", "arrest", "handling", "prosecution")
-TASK_STATUS = ("pending", "in_progress", "review", "completed", "blocked")
+# 任务状态：
+#   pending_confirmation — 推进智能体生成的任务草案，等待主办民警审查确认
+#   pending             — 已确认通过，等待分配/领取
+#   in_progress         — 进行中
+#   review             — 已提交，等待主办民警审核
+#   completed          — 审核通过，已完成
+#   suspended          — 主办民警主动暂停（可恢复）
+#   terminated          — 侦查方向调整导致终止（已保留为历史记录）
+#   cancelled          — 待确认/待开始阶段被驳回或方向调整取消
+#   blocked            — 异常阻塞
+TASK_STATUS = (
+    "pending_confirmation",
+    "pending",
+    "in_progress",
+    "review",
+    "completed",
+    "suspended",
+    "terminated",
+    "cancelled",
+    "blocked",
+)
 TASK_PRIORITY = ("urgent", "high", "medium", "low")
 ASSIGNEE_TYPE = ("human", "agent")
 ASSIGNEE_ROLE = ("executor", "reviewer")  # executor=执行人, reviewer=审核人
@@ -63,6 +83,8 @@ class PoliceCase(Base):
     status = Column(String(20), default="draft", index=True)
     phase = Column(String(30), default="research", index=True)
     priority = Column(String(10), default="medium")
+    advancement_enabled = Column(Integer, default=1)  # 1=启用案件推进智能体 0=手动模式
+    investigation_direction = Column(Text, nullable=True)  # 当前侦查方向（主办民警可调整）
     incident_date = Column(DateTime, nullable=True)
     incident_location = Column(Text, nullable=True)
     total_amount = Column(Float, nullable=True)  # 涉案金额
@@ -90,6 +112,8 @@ class PoliceCase(Base):
             "status": self.status,
             "phase": self.phase,
             "priority": self.priority,
+            "advancement_enabled": self.advancement_enabled or 0,
+            "investigation_direction": self.investigation_direction,
             "incident_date": format_utc_datetime(self.incident_date),
             "incident_location": self.incident_location,
             "total_amount": self.total_amount,
@@ -186,6 +210,8 @@ class PoliceTask(Base):
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     signed_hash = Column(String(128), nullable=True)
+    # 关闭原因（cancelled/terminated 状态填写：驳回意见 / 方向调整说明）
+    close_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -219,6 +245,7 @@ class PoliceTask(Base):
             "reviewed_by": self.reviewed_by,
             "reviewed_at": format_utc_datetime(self.reviewed_at),
             "signed_hash": self.signed_hash,
+            "close_reason": self.close_reason,
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
             "assignees": _safe_assignees(self),
@@ -700,4 +727,45 @@ class PoliceWorkspaceNode(Base):
             "extra": self.extra or {},
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
+        }
+
+
+class PoliceAdvancementLog(Base):
+    """★ 案件推进智能体决策日志
+
+    记录推进智能体每一次推进决策的完整上下文，满足 POLICE_REQUIREMENTS §6.7
+    的可审计与可解释要求：
+      - 触发事件（哪个任务完成 / 方向变更）
+      - 输入上下文摘要（案件阶段、当前侦查方向、已有任务状态）
+      - 输出决策（生成了哪些任务草案 / 是否推进阶段 / 原因）
+      - 时间戳与执行耗时
+
+    decision_type 取值：
+      task_draft       — 根据完成任务生成任务草案
+      direction_change — 侦查方向调整，重新规划任务
+      phase_summary    — 阶段全部完成，生成阶段小结与下一阶段建议
+      no_action        — 评估后认为暂不需要新任务（附 reasoning）
+    """
+
+    __tablename__ = "police_advancement_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    case_id = Column(Integer, ForeignKey("police_cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    trigger_task_id = Column(Integer, ForeignKey("police_tasks.id"), nullable=True, index=True)
+    decision_type = Column(String(30), nullable=False, index=True)
+    summary = Column(Text, nullable=True)  # 决策摘要（一句话）
+    details = Column(JSON, default=dict)  # {source_task, direction, generated_tasks, reasoning, model, duration_ms}
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # 触发人（主办民警）；后台自动触发为 None
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "case_id": self.case_id,
+            "trigger_task_id": self.trigger_task_id,
+            "decision_type": self.decision_type,
+            "summary": self.summary,
+            "details": self.details or {},
+            "created_by": self.created_by,
+            "created_at": format_utc_datetime(self.created_at),
         }

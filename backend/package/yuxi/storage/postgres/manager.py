@@ -1167,6 +1167,27 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE INDEX IF NOT EXISTS ix_police_workspace_nodes_workspace ON police_workspace_nodes(workspace_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_workspace_nodes_parent ON police_workspace_nodes(parent_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_workspace_nodes_task ON police_workspace_nodes(source_task_id)",
+            # ── ★ 多智能体协作架构 (POLICE_REQUIREMENTS §6.7) ──────────
+            # 案件表扩展: 推进智能体开关 + 侦查方向
+            "ALTER TABLE police_cases ADD COLUMN IF NOT EXISTS advancement_enabled INTEGER DEFAULT 1",
+            "ALTER TABLE police_cases ADD COLUMN IF NOT EXISTS investigation_direction TEXT",
+            # 任务表扩展: 关闭原因（cancelled/terminated 状态填写）
+            "ALTER TABLE police_tasks ADD COLUMN IF NOT EXISTS close_reason TEXT",
+            # 推进智能体决策日志（可审计 / 可解释）
+            """
+            CREATE TABLE IF NOT EXISTS police_advancement_logs (
+                id SERIAL PRIMARY KEY,
+                case_id INTEGER NOT NULL REFERENCES police_cases(id) ON DELETE CASCADE,
+                trigger_task_id INTEGER REFERENCES police_tasks(id),
+                decision_type VARCHAR(30) NOT NULL,
+                summary TEXT,
+                details JSON,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_advancement_logs_case ON police_advancement_logs(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_advancement_logs_type ON police_advancement_logs(decision_type)",
         ]
         async with self.async_engine.begin() as conn:
             # 历史未绑定用户的 API Key 会在下方迁移语句里被静默删除，先计数告警

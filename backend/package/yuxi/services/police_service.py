@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import select
 
 from yuxi.repositories.agent_repository import DEFAULT_AGENT_BACKEND_ID
+from yuxi.services.police_prompts import PRESET_AGENTS as _PRESET_AGENTS_UPGRADED
 from yuxi.repositories.police_agent_repository import police_agent_repository
 from yuxi.repositories.police_workspace_repository import police_workspace_repository
 from yuxi.repositories.case_repository import case_repository
@@ -414,7 +415,19 @@ class PoliceTaskService:
                 "event_data": {"approved": approved, "reviewer_id": reviewer_id}, "created_by": reviewer_id,
             })
             await self._audit("review" if approved else "reject", task_id, reviewer_id, task.case_id, {"approved": approved})
+            # 审核通过 → 任务真正完成 → 异步触发推进智能体（事件驱动，不阻塞响应）
+            if approved:
+                asyncio.create_task(self._trigger_advancement(task.case_id, task_id, reviewer_id))
         return task.to_dict() if task else None
+
+    async def _trigger_advancement(self, case_id: int, task_id: int, reviewer_id: int) -> None:
+        """懒加载推进智能体并触发推进（隔离导入，避免循环依赖）。"""
+        try:
+            from yuxi.services.police_advancement_service import police_advancement_service
+
+            await police_advancement_service.advance_after_task_completed(case_id, task_id, reviewer_id)
+        except Exception as e:
+            logger.error(f"Trigger advancement failed: {e}")
 
     async def _trigger_flow_rules(self, task) -> None:
         """★ 任务流转规则引擎 — 根据已完成任务自动创建后续任务"""
@@ -468,83 +481,9 @@ class PoliceAgentService:
     能力矩阵、工作统计和成长记录，像管理真实员工一样管理 AI。
     """
 
-    PRESET_AGENTS = [
-        {
-            "name": "笔录分析师",
-            "type": "transcript_analyst",
-            "category": "case_analysis",
-            "badge_number": "DA-001",
-            "rank": "一级警员",
-            "specialty": "笔录解析 · 实体识别 · 信息提取",
-            "avatar": "pencil",
-            "department": "情报分析科",
-            "color_theme": "blue",
-            "capabilities": ["笔录解析", "OCR", "实体识别", "信息提取", "结构化输出"],
-            "system_prompt": "你是一位专业的公安笔录分析师。你的任务是解析报案笔录，提取关键信息（涉案银行卡、微信号、嫌疑人信息等），并生成结构化的案件信息。",
-            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.3},
-            "is_template": 1,
-        },
-        {
-            "name": "资金追踪师",
-            "type": "fund_analyst",
-            "category": "fund_tracking",
-            "badge_number": "DA-002",
-            "rank": "一级警员",
-            "specialty": "银行流水解析 · 资金追踪 · 异常检测",
-            "avatar": "chart",
-            "department": "经侦科",
-            "color_theme": "green",
-            "capabilities": ["银行流水解析", "资金链路追踪", "异常交易检测", "可视化报告", "NetworkX"],
-            "system_prompt": "你是一位专业的资金分析智能体。你的任务是解析银行流水数据，追踪资金链路，发现异常交易模式，生成资金流向报告。记住：你只负责读摘要写报告，不做算数字。",
-            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.2},
-            "is_template": 1,
-        },
-        {
-            "name": "调证生成师",
-            "type": "evidence_collector",
-            "category": "evidence_mgmt",
-            "badge_number": "DA-003",
-            "rank": "二级警员",
-            "specialty": "法律依据检索 · 调取通知书生成",
-            "avatar": "file",
-            "department": "法制科",
-            "color_theme": "amber",
-            "capabilities": ["法律检索", "RAG", "文书生成", "调取通知书", "模板填充"],
-            "system_prompt": "你是一位专业的调证智能体。你的任务是根据案件信息检索法律依据，生成调取证据通知书。确保文书格式规范、法律引用准确。",
-            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.2},
-            "is_template": 1,
-        },
-        {
-            "name": "法制审核官",
-            "type": "legal_reviewer",
-            "category": "legal_review",
-            "badge_number": "DA-004",
-            "rank": "三级警员",
-            "specialty": "程序审核 · 证据审核 · 定性审核",
-            "avatar": "shield",
-            "department": "法制科",
-            "color_theme": "coral",
-            "capabilities": ["程序审核", "证据审核", "定性审核", "法律适用", "审批流程"],
-            "system_prompt": "你是一位专业的法制审核智能体。你的任务是从程序、证据、定性三个维度审核案件，确保办案程序合法、证据链完整、定性准确。",
-            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.1},
-            "is_template": 1,
-        },
-        {
-            "name": "案件编排官",
-            "type": "case_orchestrator",
-            "category": "case_analysis",
-            "badge_number": "DA-005",
-            "rank": "三级警员",
-            "specialty": "案件编排 · 子智能体调度 · 任务流转",
-            "avatar": "network",
-            "department": "指挥中心",
-            "color_theme": "purple",
-            "capabilities": ["案件编排", "子智能体调度", "任务流转", "事件监听", "自动决策"],
-            "system_prompt": "你是案件编排智能体。你的任务是监听案件事件，根据案件进展调度专业子智能体，自动创建后续任务。你是整个多智能体协作的大脑。",
-            "model_config": {"provider": "custom-openai", "model": "gpt-4o", "temperature": 0.3},
-            "is_template": 0,  # 编排官是特殊角色，不作为市场模板
-        },
-    ]
+    # 数字警员预设定义已抽到 yuxi.services.police_prompts（吸收 Hunter 猎人系列设计理念，
+    # 升级 DA-001~DA-005 并新增 DA-006/DA-007，模型统一 agnes-2.5-flash）。
+    PRESET_AGENTS = _PRESET_AGENTS_UPGRADED
 
     async def list_agents(
         self, *, type: str | None = None, status: str | None = None,
@@ -783,25 +722,37 @@ class PoliceAgentService:
                 )
                 created.append(agent.to_dict())
             else:
-                # 存量预设警员回填市场字段 (is_template/category)：
-                # 预设曾先于这两个字段入库，幂等 seed 跳过了内容写入，
-                # 此处仅补市场标记，不覆盖用户可能改过的对话内容。
+                # 存量预设警员：同步最新预设定义（system_prompt/模型/能力/档案字段），
+                # 使 Hunter 猎人系列升级方案在重新 seed 时可靠生效。
+                # 仅覆盖预设字段，保留用户新增的运行记录等非预设数据。
                 await police_agent_repository.update(
                     agent.id,
                     {
-                        "is_template": preset.get("is_template", 0),
+                        "name": preset["name"],
+                        "description": preset.get("description", ""),
+                        "type": preset["type"],
                         "category": preset.get("category"),
+                        "specialty": preset.get("specialty", ""),
+                        "rank": preset.get("rank", ""),
+                        "department": preset.get("department", ""),
+                        "avatar": preset.get("avatar", ""),
+                        "color_theme": preset.get("color_theme", "blue"),
+                        "capabilities": preset.get("capabilities", []),
+                        "system_prompt": preset["system_prompt"],
+                        "model_config": preset.get("model_config", {}),
+                        "is_template": preset.get("is_template", 0),
                     },
                 )
-            # 若尚未关联 yuxi 智能体，或 backend 非主对话后端（旧 SubAgentBackend 需迁移），
-            # 则创建/迁移 yuxi 智能体并回填，使数字警员可直接在对话页打开。
-            if not agent.agent_id or agent.backend_id != DEFAULT_AGENT_BACKEND_ID:
-                yuxi_agent = await self._sync_yuxi_agent(agent)
-                if yuxi_agent:
-                    await police_agent_repository.update(
-                        agent.id, {"agent_id": yuxi_agent.id, "backend_id": DEFAULT_AGENT_BACKEND_ID}
-                    )
-                    synced.append(agent.id)
+                # 重新读取，确保下面同步到 yuxi 时拿到最新字段
+                agent = await police_agent_repository.get_by_id(agent.id)
+            # 始终同步到 yuxi 主对话智能体（含升级后的 system_prompt/模型参数），
+            # 保证前端对话行为反映最新预设定义。
+            yuxi_agent = await self._sync_yuxi_agent(agent)
+            if yuxi_agent:
+                await police_agent_repository.update(
+                    agent.id, {"agent_id": yuxi_agent.id, "backend_id": DEFAULT_AGENT_BACKEND_ID}
+                )
+                synced.append(agent.id)
         return {"created": len(created), "synced": len(synced), "agents": created}
 
     async def _sync_yuxi_agent(self, agent: "PoliceAgent"):
