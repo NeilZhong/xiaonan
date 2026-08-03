@@ -3,7 +3,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { policeDashboardApi, policeCaseApi, policeTaskApi, policeAgentApi, policeWorkspaceApi, policeAdvancementApi } from '@/apis/police_api'
+import { policeDashboardApi, policeCaseApi, policeTaskApi, policeAgentApi, policeWorkspaceApi, policeAdvancementApi, policeTaskTemplateApi } from '@/apis/police_api'
 
 export const usePoliceStore = defineStore('police', () => {
   // ── 工作台统计 ──────────────────────────────────────────
@@ -163,6 +163,56 @@ export const usePoliceStore = defineStore('police', () => {
     return res.data
   }
 
+  // ── 侦查任务模板 ────────────────────────────────────────
+  const taskTemplates = ref([])
+  const taskTemplateMeta = ref(null)
+
+  async function loadTaskTemplates(params = {}) {
+    try {
+      const res = await policeTaskTemplateApi.list(params)
+      taskTemplates.value = res.data || []
+    } catch (e) { console.error('加载任务模板失败', e) }
+    return taskTemplates.value
+  }
+
+  async function loadTaskTemplateMeta() {
+    try {
+      const res = await policeTaskTemplateApi.meta()
+      taskTemplateMeta.value = res.data
+    } catch (e) { console.error('加载模板元数据失败', e) }
+    return taskTemplateMeta.value
+  }
+
+  async function createTaskTemplate(data) {
+    const res = await policeTaskTemplateApi.create(data)
+    return res.data
+  }
+
+  async function updateTaskTemplate(id, data) {
+    const res = await policeTaskTemplateApi.update(id, data)
+    return res.data
+  }
+
+  async function deleteTaskTemplate(id) {
+    const res = await policeTaskTemplateApi.remove(id)
+    return res.data
+  }
+
+  async function toggleTaskTemplate(id, enabled) {
+    const res = await policeTaskTemplateApi.toggle(id, enabled)
+    return res.data
+  }
+
+  async function seedTaskTemplates() {
+    const res = await policeTaskTemplateApi.seed()
+    return res.data
+  }
+
+  async function previewTaskTemplate(id, sampleValue) {
+    const res = await policeTaskTemplateApi.preview(id, sampleValue)
+    return res.data
+  }
+
   // ── 流程技能 (SOP) ─────────────────────────────────────
   const sops = ref([])
 
@@ -187,11 +237,13 @@ export const usePoliceStore = defineStore('police', () => {
   return {
     stats, myTasks, reviewTasks, myTasksTotal, reviewTasksTotal,
     cases, casesTotal, currentCase, tasks, tasksTotal, currentTask,
-    sops, workspace,
+    sops, workspace, taskTemplates, taskTemplateMeta,
     loadStats, loadMyTasks, loadReviewTasks,
     loadCases, loadCase, createCase, updateCase, updatePhase,
     loadTasks, loadTask, createTask, assignTask, startTask, completeTask, reviewTask,
     loadMyDrafts, loadDrafts, confirmDraft, rejectDraft, changeDirection, loadAdvancementLogs, toggleAdvancement,
+    loadTaskTemplates, loadTaskTemplateMeta, createTaskTemplate, updateTaskTemplate,
+    deleteTaskTemplate, toggleTaskTemplate, seedTaskTemplates, previewTaskTemplate,
     loadSops,
     loadWorkspace,
   }

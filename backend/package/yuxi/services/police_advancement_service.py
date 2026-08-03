@@ -4,10 +4,18 @@
 要素、生成任务草案，经主办民警审查确认后生效。每案件一个逻辑实例，由
 case.advancement_enabled 控制开关（1=启用，0=手动模式）。
 
+★ 生成管线（模板配置化改造后）：
+    ① 链式推进 —— 源任务若由模板生成，按其 next_template_codes 接续下一环
+                   （如「调流水」完成 → 自动接「资金分析」→ 再接「法制审核」）
+    ② 要素抽取 —— LLM 只负责从成果中抽出结构化涉案要素，不直接编任务
+    ③ 模板映射 —— 要素按 police_task_templates 匹配生成任务（确定性 / 可配置 / 可审计）
+    ④ LLM 兜底 —— 模板未覆盖的要素才交回 LLM 提建议，草案标注 origin=llm
+    ⑤ 去重落库 —— 按 (template_code, element_value) 与标题双重去重
+
 设计要点：
   - 事件驱动：仅在任务被主办民警审核通过（completed）时触发，不轮询。
   - 不替主办民警决策：生成的草案均为 pending_confirmation 状态，须逐条审查。
-  - 可审计可解释：每次推进写入 police_advancement_logs，附带完整上下文与 reasoning。
+  - 可审计可解释：每次推进写入 police_advancement_logs，记录命中的模板与要素。
   - 失败隔离：LLM 调用异常不影响主流程（best-effort + 异常捕获）。
 """
 
@@ -22,11 +30,17 @@ from yuxi.repositories.task_repository import task_repository
 from yuxi.services.police_prompts import (
     ADVANCEMENT_DRAFT_USER_PROMPT,
     ADVANCEMENT_SYSTEM_PROMPT,
+    ELEMENT_EXTRACTION_SYSTEM_PROMPT,
+    ELEMENT_EXTRACTION_USER_PROMPT,
 )
 from yuxi.services.police_service import write_audit_log
+from yuxi.services.police_task_template_service import police_task_template_service
 from yuxi.storage.postgres.manager import pg_manager
-from yuxi.storage.postgres.models_police import PoliceAdvancementLog
+from yuxi.storage.postgres.models_police import ELEMENT_TYPE_LABELS, PoliceAdvancementLog
 from yuxi.utils import logger
+
+# 推进智能体使用的模型（内网可用的 OpenAI 兼容端点）
+ADVANCEMENT_MODEL = "custom-openai:agnes-2.5-flash"
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -50,6 +64,11 @@ def _extract_json(text: str) -> dict[str, Any]:
     return {}
 
 
+def _norm_title(title: str | None) -> str:
+    """标题标准化（去空白/标点/大小写差异），用于跨来源去重。"""
+    return re.sub(r"[\s\u3000（）()【】\[\]、，,。.：:；;－\-—_/\\]+", "", (title or "").lower())
+
+
 def _build_case_context(case) -> str:
     return (
         f"案件：{case.title}（#{case.id}）\n"
@@ -70,8 +89,8 @@ class PoliceAdvancementService:
     ) -> None:
         """推进智能体主入口：任务完成（主办民警审核通过）后触发。
 
-        读取上下文 → LLM 生成任务草案 → 写入 pending_confirmation 任务 → 记录决策日志
-        → 阶段推进自检。作为后台任务调用，不阻塞审核响应。
+        链式推进 → 要素抽取 → 模板映射 → LLM 兜底 → 去重落库 → 决策日志 → 阶段自检。
+        作为后台任务调用，不阻塞审核响应。
         """
         try:
             case = await case_repository.get_by_id(case_id)
@@ -84,73 +103,169 @@ class PoliceAdvancementService:
             if not source_task:
                 return
 
-            drafts = await self._generate_drafts(case, source_task)
-            proposed = drafts.get("proposed_tasks") or []
-            reasoning = drafts.get("reasoning", "")
+            dedupe = await self._build_dedupe_index(case_id)
+            payloads: list[dict[str, Any]] = []
+            hit_templates: list[str] = []
 
-            created_ids: list[int] = []
-            for d in proposed:
-                title = (d.get("title") or "").strip()
-                if not title:
+            # ① 链式推进：源任务由模板生成 → 接续其后继模板
+            chain_payloads, chain_codes = await self._chain_payloads(case, source_task)
+            payloads.extend(chain_payloads)
+            hit_templates.extend(chain_codes)
+
+            # ② 要素抽取（LLM 只干这一件事）
+            extraction = await self._extract_elements(case, source_task)
+            elements = [e for e in (extraction.get("elements") or []) if isinstance(e, dict)]
+            reasoning = extraction.get("reasoning", "")
+
+            # ③ 模板映射
+            uncovered: list[dict[str, Any]] = []
+            for el in elements:
+                el_type = (el.get("type") or "").strip()
+                if not el_type or not str(el.get("value") or "").strip():
                     continue
-                new_task = await task_repository.create({
-                    "case_id": case_id,
-                    "title": title,
-                    "type": d.get("type") or "investigation",
-                    "status": "pending_confirmation",
-                    "creator_type": "agent",
-                    "creator_id": None,
-                    "assignee_type": "human",  # 草案默认未分配，确认后由民警分配
-                    "assignee_id": None,
-                    "priority": d.get("priority") or "medium",
-                    "phase": case.phase or source_task.phase,
-                    "instructions": d.get("basis") or "",
-                    "parent_task_id": completed_task_id,
-                    "extra": {
-                        "advancement": {
-                            "source_task_id": completed_task_id,
-                            "suggested_assignee": d.get("suggested_assignee"),
-                        }
-                    },
-                })
-                await task_repository.create_event({
-                    "case_id": case_id,
-                    "task_id": new_task.id,
-                    "event_type": "created",
-                    "event_data": {
-                        "auto_created": True,
-                        "creator_type": "agent",
-                        "parent_task_id": completed_task_id,
-                    },
-                    "created_by": None,
-                })
-                created_ids.append(new_task.id)
+                templates = await police_task_template_service.match_by_element(
+                    el_type, case=case, source_task=source_task
+                )
+                if not templates:
+                    uncovered.append(el)
+                    continue
+                for tpl in templates:
+                    payloads.append(
+                        police_task_template_service.build_task_payload(
+                            tpl, case=case, source_task=source_task, element=el, origin="template"
+                        )
+                    )
+                    hit_templates.append(tpl.code)
+
+            # ④ LLM 兜底：模板未覆盖的要素才让 LLM 提建议
+            llm_count = 0
+            if uncovered:
+                fallback = await self._generate_drafts(case, source_task, uncovered)
+                for d in fallback.get("proposed_tasks") or []:
+                    payload = self._llm_payload(case, source_task, d)
+                    if payload:
+                        payloads.append(payload)
+                        llm_count += 1
+
+            # ⑤ 去重落库
+            created_ids = await self._persist_drafts(case_id, completed_task_id, payloads, dedupe)
 
             await self._log_decision(
                 case_id=case_id,
                 trigger_task_id=completed_task_id,
-                decision_type="task_draft",
+                decision_type="task_draft" if created_ids else "no_action",
                 summary=(
-                    "生成 %d 条任务草案" % len(created_ids)
+                    f"提取 {len(elements)} 个要素，命中 {len(set(hit_templates))} 个模板，"
+                    f"生成 {len(created_ids)} 条任务草案"
                 )
                 if created_ids
-                else "评估后暂无需新任务",
+                else f"提取 {len(elements)} 个要素，均已被现有任务覆盖，暂无需新任务",
                 details={
                     "direction": getattr(case, "investigation_direction", None),
+                    "source_task_title": source_task.title,
+                    "extracted_elements": elements,
+                    "hit_templates": sorted(set(hit_templates)),
+                    "uncovered_elements": uncovered,
+                    "llm_fallback_count": llm_count,
                     "generated_task_ids": created_ids,
                     "reasoning": reasoning,
-                    "source_task_title": source_task.title,
+                    "model": ADVANCEMENT_MODEL,
                 },
             )
             await self._maybe_advance_phase(case)
         except Exception as e:
             logger.error(f"Advancement after task {completed_task_id} failed: {e}")
 
-    async def _generate_drafts(self, case, source_task) -> dict[str, Any]:
-        """调用 LLM 生成任务草案 JSON（基于单一完成任务）。"""
+    # ── ① 链式推进 ──────────────────────────────────────────
+    async def _chain_payloads(self, case, source_task) -> tuple[list[dict[str, Any]], list[str]]:
+        """源任务若由模板生成，按 next_template_codes 接续生成下一环任务草案。"""
+        meta = ((source_task.extra or {}).get("advancement") or {}) if source_task.extra else {}
+        codes = meta.get("next_template_codes") or []
+        if not codes:
+            return [], []
+        try:
+            templates = await police_task_template_service.chain_templates(
+                list(codes), case=case, source_task=source_task
+            )
+        except Exception as e:
+            logger.warning(f"Chain template lookup failed: {e}")
+            return [], []
+        el_type = meta.get("element_type")
+        element = {
+            "type": el_type,
+            "value": meta.get("element_value"),
+            "label": ELEMENT_TYPE_LABELS.get(el_type or "", el_type),
+            "basis": f"上游任务《{source_task.title}》已完成，按模板链自动接续",
+        }
+        payloads = [
+            police_task_template_service.build_task_payload(
+                tpl, case=case, source_task=source_task, element=element, origin="chain"
+            )
+            for tpl in templates
+        ]
+        return payloads, [t.code for t in templates]
+
+    # ── ② 要素抽取 ──────────────────────────────────────────
+    async def _extract_elements(self, case, source_task) -> dict[str, Any]:
+        """调用 LLM 从完成任务的成果中抽取结构化涉案要素。"""
         try:
             from yuxi.agents.models import load_chat_model
         except Exception as e:  # pragma: no cover - 模型不可用时不阻塞
+            logger.warning(f"load_chat_model unavailable: {e}")
+            return {}
+
+        known = await self._known_elements_text(case.id)
+        result_text = json.dumps(source_task.result or {}, ensure_ascii=False, indent=2)
+        if len(result_text) > 6000:
+            result_text = result_text[:6000] + "\n...（已截断）"
+
+        user_prompt = ELEMENT_EXTRACTION_USER_PROMPT.format(
+            case_context=_build_case_context(case),
+            direction=getattr(case, "investigation_direction", None) or "（未指定，按常规侦查逻辑）",
+            completed_task_title=source_task.title,
+            completed_task_type=source_task.type,
+            completed_result=result_text,
+            known_elements=known,
+        )
+        try:
+            model = load_chat_model(ADVANCEMENT_MODEL, temperature=0.1)
+            response = await model.ainvoke([
+                {"role": "system", "content": ELEMENT_EXTRACTION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ])
+            return _extract_json(getattr(response, "content", "") or "")
+        except Exception as e:
+            logger.error(f"Element extraction LLM call failed: {e}")
+            return {}
+
+    async def _known_elements_text(self, case_id: int) -> str:
+        """汇总本案已生成任务中记录过的要素，供 LLM 去重参考。"""
+        try:
+            tasks, _ = await task_repository.list_tasks(case_id=case_id, limit=500)
+        except Exception:
+            return "（暂无）"
+        lines: list[str] = []
+        seen: set[str] = set()
+        for t in tasks:
+            meta = ((t.extra or {}).get("advancement") or {}) if t.extra else {}
+            el_type, el_value = meta.get("element_type"), meta.get("element_value")
+            if not el_type or not el_value:
+                continue
+            key = f"{el_type}::{el_value}"
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(f"- [{ELEMENT_TYPE_LABELS.get(el_type, el_type)}] {el_value}")
+        return "\n".join(lines) if lines else "（暂无）"
+
+    # ── ④ LLM 兜底 ─────────────────────────────────────────
+    async def _generate_drafts(
+        self, case, source_task, uncovered: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        """模板未覆盖的要素回落到 LLM 直接提任务建议。"""
+        try:
+            from yuxi.agents.models import load_chat_model
+        except Exception as e:  # pragma: no cover
             logger.warning(f"load_chat_model unavailable: {e}")
             return {}
 
@@ -162,8 +277,13 @@ class PoliceAdvancementService:
         ]
         existing_text = "\n".join(existing_lines) if existing_lines else "（暂无）"
 
-        result = source_task.result or {}
-        result_text = json.dumps(result, ensure_ascii=False, indent=2)
+        if uncovered:
+            # 只把模板未覆盖的要素喂给 LLM，避免与模板生成的任务重复
+            result_text = json.dumps(
+                {"uncovered_elements": uncovered}, ensure_ascii=False, indent=2
+            )
+        else:
+            result_text = json.dumps(source_task.result or {}, ensure_ascii=False, indent=2)
         if len(result_text) > 4000:
             result_text = result_text[:4000] + "\n...（已截断）"
 
@@ -177,7 +297,7 @@ class PoliceAdvancementService:
         )
 
         try:
-            model = load_chat_model("custom-openai:agnes-2.5-flash", temperature=0.2)
+            model = load_chat_model(ADVANCEMENT_MODEL, temperature=0.2)
             response = await model.ainvoke([
                 {"role": "system", "content": ADVANCEMENT_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
@@ -187,6 +307,95 @@ class PoliceAdvancementService:
         except Exception as e:
             logger.error(f"Advancement LLM call failed: {e}")
             return {}
+
+    def _llm_payload(self, case, source_task, d: dict[str, Any]) -> dict[str, Any] | None:
+        """把 LLM 兜底产出的建议转成任务草案 payload。"""
+        title = (d.get("title") or "").strip()
+        if not title:
+            return None
+        basis = (d.get("basis") or "").strip()
+        return {
+            "case_id": case.id,
+            "title": title[:200],
+            "type": d.get("type") or "investigation",
+            "status": "pending_confirmation",
+            "creator_type": "agent",
+            "creator_id": None,
+            "assignee_type": "human",  # 草案默认未分配，确认后由民警分配
+            "assignee_id": None,
+            "priority": d.get("priority") or "medium",
+            "phase": case.phase or source_task.phase,
+            "instructions": f"【推进依据】{basis}" if basis else "",
+            "parent_task_id": source_task.id,
+            "extra": {
+                "advancement": {
+                    "origin": "llm",
+                    "source_task_id": source_task.id,
+                    "suggested_assignee": d.get("suggested_assignee"),
+                }
+            },
+        }
+
+    # ── ⑤ 去重落库 ─────────────────────────────────────────
+    async def _build_dedupe_index(self, case_id: int) -> dict[str, set]:
+        """构建案件内去重索引：模板+要素键、标准化标题。"""
+        index: dict[str, set] = {"keys": set(), "titles": set()}
+        try:
+            tasks, _ = await task_repository.list_tasks(case_id=case_id, limit=1000)
+        except Exception:
+            return index
+        for t in tasks:
+            index["titles"].add(_norm_title(t.title))
+            meta = ((t.extra or {}).get("advancement") or {}) if t.extra else {}
+            code, value = meta.get("template_code"), meta.get("element_value")
+            if code:
+                index["keys"].add(f"{code}::{value or ''}")
+        return index
+
+    async def _persist_drafts(
+        self,
+        case_id: int,
+        source_task_id: int | None,
+        payloads: list[dict[str, Any]],
+        dedupe: dict[str, set],
+    ) -> list[int]:
+        """去重后写入任务草案，返回新建任务 ID 列表。"""
+        created_ids: list[int] = []
+        for payload in payloads:
+            meta = (payload.get("extra") or {}).get("advancement") or {}
+            code, value = meta.get("template_code"), meta.get("element_value")
+            key = f"{code}::{value or ''}" if code else None
+            title_key = _norm_title(payload.get("title") or "")
+            if key and key in dedupe["keys"]:
+                continue
+            if title_key and title_key in dedupe["titles"]:
+                continue
+            try:
+                new_task = await task_repository.create(payload)
+            except Exception as e:
+                logger.warning(f"Create draft task failed: {e}")
+                continue
+            if key:
+                dedupe["keys"].add(key)
+            dedupe["titles"].add(title_key)
+            try:
+                await task_repository.create_event({
+                    "case_id": case_id,
+                    "task_id": new_task.id,
+                    "event_type": "created",
+                    "event_data": {
+                        "auto_created": True,
+                        "creator_type": "agent",
+                        "parent_task_id": source_task_id,
+                        "origin": meta.get("origin"),
+                        "template_code": code,
+                    },
+                    "created_by": None,
+                })
+            except Exception as e:
+                logger.warning(f"Create task event failed: {e}")
+            created_ids.append(new_task.id)
+        return created_ids
 
     async def confirm_draft(
         self, task_id: int, reviewer_id: int, edits: dict | None = None
@@ -267,36 +476,34 @@ class PoliceAdvancementService:
             affected.extend([t.to_dict() for t in tasks])
 
         new_drafts = await self._generate_drafts_from_direction(case, new_direction)
-        created_ids: list[int] = []
+        dedupe = await self._build_dedupe_index(case_id)
+        payloads: list[dict[str, Any]] = []
         for d in new_drafts.get("proposed_tasks", []):
             title = (d.get("title") or "").strip()
             if not title:
                 continue
-            new_task = await task_repository.create({
+            basis = (d.get("basis") or "").strip()
+            payloads.append({
                 "case_id": case_id,
-                "title": title,
+                "title": title[:200],
                 "type": d.get("type") or "investigation",
                 "status": "pending_confirmation",
                 "creator_type": "agent",
                 "creator_id": None,
                 "assignee_type": "human",
+                "assignee_id": None,
                 "priority": d.get("priority") or "medium",
-                "instructions": d.get("basis") or "",
+                "phase": case.phase,
+                "instructions": f"【推进依据】{basis}" if basis else "",
                 "extra": {
                     "advancement": {
+                        "origin": "llm",
                         "suggested_assignee": d.get("suggested_assignee"),
                         "direction_change": True,
                     }
                 },
             })
-            await task_repository.create_event({
-                "case_id": case_id,
-                "task_id": new_task.id,
-                "event_type": "created",
-                "event_data": {"auto_created": True, "creator_type": "agent", "direction_change": True},
-                "created_by": None,
-            })
-            created_ids.append(new_task.id)
+        created_ids = await self._persist_drafts(case_id, None, payloads, dedupe)
 
         await self._log_decision(
             case_id=case_id,

@@ -162,3 +162,33 @@ export const policeAdvancementApi = {
   // 启用 / 停用推进智能体
   toggle: (caseId, enabled) => apiPost(`/api/police/advancement/${caseId}/toggle`, { enabled }),
 }
+
+// ── 侦查任务模板 (POLICE_REQUIREMENTS §6.7 任务模板配置化) ──
+export const policeTaskTemplateApi = {
+  // 模板列表（首次访问且库为空会自动植入内置模板）
+  list: ({ element_type, enabled_only, keyword } = {}) => {
+    const params = new URLSearchParams()
+    if (element_type) params.set('element_type', element_type)
+    if (enabled_only) params.set('enabled_only', 'true')
+    if (keyword) params.set('keyword', keyword)
+    const qs = params.toString()
+    return apiGet(`/api/police/task-templates${qs ? `?${qs}` : ''}`)
+  },
+  // 表单元数据：要素类型 / 任务类型 / 优先级 / 数字警员 / 占位符 / 模板（用于链式后继选择）
+  meta: () => apiGet('/api/police/task-templates/meta'),
+  // 重新植入内置模板（幂等）
+  seed: () => apiPost('/api/police/task-templates/seed'),
+  // 新建自定义模板
+  create: (data) => apiPost('/api/police/task-templates', data),
+  // 模板详情
+  get: (id) => apiGet(`/api/police/task-templates/${id}`),
+  // 更新模板
+  update: (id, data) => apiPut(`/api/police/task-templates/${id}`, data),
+  // 删除自定义模板（内置模板只能停用）
+  remove: (id) => apiDelete(`/api/police/task-templates/${id}`),
+  // 启用 / 停用
+  toggle: (id, enabled) => apiPost(`/api/police/task-templates/${id}/toggle`, { enabled }),
+  // 预览渲染效果（用示例要素值填充占位符）
+  preview: (id, sampleValue = '示例值') =>
+    apiPost(`/api/police/task-templates/${id}/preview`, { sample_value: sampleValue }),
+}

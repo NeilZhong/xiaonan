@@ -12,7 +12,8 @@ import {
   MessageCirclePlus,
   Search,
   Shield,
-  Briefcase
+  Briefcase,
+  SlidersHorizontal
 } from 'lucide-vue-next'
 import { CheckSquareOutlined } from '@ant-design/icons-vue'
 
@@ -139,6 +140,14 @@ const mainList = computed(() => {
     icon: Briefcase,
     activeIcon: Briefcase,
     activePaths: ['/police/cases']
+  })
+
+  items.push({
+    name: '任务模板',
+    path: '/police/task-templates',
+    icon: SlidersHorizontal,
+    activeIcon: SlidersHorizontal,
+    activePaths: ['/police/task-templates']
   })
 
   items.push({

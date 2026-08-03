@@ -56,6 +56,40 @@ ASSIGNEE_TYPE = ("human", "agent")
 ASSIGNEE_ROLE = ("executor", "reviewer")  # executor=执行人, reviewer=审核人
 EVIDENCE_TYPE = ("transcript", "bank_flow", "screenshot", "audio", "video", "document", "report", "other")
 
+# ── 涉案要素类型（任务模板的触发键）────────────────────────────
+# 推进智能体从已完成任务的成果中提取要素，再按 element_type 匹配任务模板，
+# 把「要素 → 侦查任务」的映射从 prompt 里搬到可配置的模板表中。
+ELEMENT_TYPE = (
+    "bank_card",         # 涉案银行卡 / 账户
+    "phone",             # 手机号 / 固话
+    "wechat",            # 微信号 / QQ 号等社交账号
+    "person",            # 涉案人员（嫌疑人 / 关系人 / 受害人）
+    "address",           # 涉案地址 / 落脚点 / 案发地
+    "vehicle",           # 涉案车辆
+    "ip",                # IP 地址 / 设备指纹
+    "virtual_currency",  # 虚拟货币地址
+    "company",           # 涉案公司 / 商户
+    "express",           # 快递单号 / 物流信息
+    "device",            # 涉案手机 / 电脑等物证
+    "platform_account",  # 平台账号（电商 / 直播 / 游戏）
+    "other",
+)
+ELEMENT_TYPE_LABELS = {
+    "bank_card": "银行卡/账户",
+    "phone": "手机号/通联",
+    "wechat": "社交账号",
+    "person": "涉案人员",
+    "address": "涉案地址",
+    "vehicle": "涉案车辆",
+    "ip": "IP/设备指纹",
+    "virtual_currency": "虚拟货币地址",
+    "company": "涉案公司/商户",
+    "express": "快递物流",
+    "device": "涉案设备",
+    "platform_account": "平台账号",
+    "other": "其他要素",
+}
+
 
 def _safe_assignees(task: "PoliceTask") -> list[dict[str, Any]]:
     """安全读取任务执行人列表。
@@ -212,6 +246,11 @@ class PoliceTask(Base):
     signed_hash = Column(String(128), nullable=True)
     # 关闭原因（cancelled/terminated 状态填写：驳回意见 / 方向调整说明）
     close_reason = Column(Text, nullable=True)
+    # 扩展元数据：推进智能体溯源信息
+    #   {"advancement": {"source_task_id", "template_id", "template_code",
+    #                    "element_type", "element_value", "origin": "template|llm|chain",
+    #                    "suggested_assignee", "direction_change"}}
+    extra = Column(JSON, default=dict)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
@@ -246,6 +285,7 @@ class PoliceTask(Base):
             "reviewed_at": format_utc_datetime(self.reviewed_at),
             "signed_hash": self.signed_hash,
             "close_reason": self.close_reason,
+            "extra": self.extra or {},
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
             "assignees": _safe_assignees(self),
@@ -768,4 +808,80 @@ class PoliceAdvancementLog(Base):
             "details": self.details or {},
             "created_by": self.created_by,
             "created_at": format_utc_datetime(self.created_at),
+        }
+
+
+class PoliceTaskTemplate(Base):
+    """★ 侦查任务模板表 — 把「涉案要素 → 侦查任务」的映射规则配置化
+
+    背景：早期推进智能体把「银行卡就该调流水」这类侦查常识写死在 prompt 里，
+    民警无法干预、无法沉淀本单位的办案经验。本表将映射规则外置为可配置数据，
+    推进智能体先用 LLM 抽要素，再按模板确定性地生成任务草案。
+
+    两种触发方式（互不排斥）：
+      1. 要素触发 — element_type 命中新提取的涉案要素时生成任务
+      2. 链式触发 — 上游模板生成的任务完成后，按其 next_template_codes 接续生成
+
+    占位符（title / description / instructions 中可用）：
+      {element}       要素中文名（如「银行卡」）
+      {element_value} 要素值（如「6222***1234」）
+      {case_title}    案件名称
+      {case_number}   案件编号
+      {source_task}   触发源任务标题
+    """
+
+    __tablename__ = "police_task_templates"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(64), unique=True, nullable=False, index=True)  # 唯一标识，内置模板幂等植入用
+    name = Column(String(120), nullable=False)  # 模板名称，如「银行卡 → 调取流水」
+    description = Column(Text, nullable=True)  # 模板用途说明（给民警看）
+    # ── 触发条件 ──
+    element_type = Column(String(30), nullable=True, index=True)  # 命中的要素类型；NULL=仅链式触发
+    case_types = Column(JSON, default=list)  # 适用案件类型列表；空=全部
+    phases = Column(JSON, default=list)  # 适用案件阶段列表；空=全部
+    source_task_types = Column(JSON, default=list)  # 限定触发源任务类型；空=任意
+    # ── 生成的任务 ──
+    task_title = Column(String(200), nullable=False)  # 任务标题模板（支持占位符）
+    task_type = Column(String(50), nullable=False)  # 生成任务的 type
+    task_description = Column(Text, nullable=True)  # 任务说明模板
+    instructions = Column(Text, nullable=True)  # 依据/办理指引模板（展示在草案审查界面）
+    priority = Column(String(10), default="medium")
+    suggested_agent_type = Column(String(50), nullable=True)  # 建议召唤的数字警员 type，如 fund_analyst
+    due_days = Column(Integer, nullable=True)  # 相对期限（天）；NULL=不设期限
+    # ── 链式推进 ──
+    next_template_codes = Column(JSON, default=list)  # 本模板生成的任务完成后，接续触发的模板 code 列表
+    # ── 管理字段 ──
+    enabled = Column(Integer, default=1, index=True)  # 1=启用 0=停用
+    is_builtin = Column(Integer, default=0)  # 1=内置模板（不可删除，可停用/修改）
+    sort_order = Column(Integer, default=100)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=utc_now_naive)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "code": self.code,
+            "name": self.name,
+            "description": self.description,
+            "element_type": self.element_type,
+            "element_label": ELEMENT_TYPE_LABELS.get(self.element_type or "", self.element_type),
+            "case_types": self.case_types or [],
+            "phases": self.phases or [],
+            "source_task_types": self.source_task_types or [],
+            "task_title": self.task_title,
+            "task_type": self.task_type,
+            "task_description": self.task_description,
+            "instructions": self.instructions,
+            "priority": self.priority,
+            "suggested_agent_type": self.suggested_agent_type,
+            "due_days": self.due_days,
+            "next_template_codes": self.next_template_codes or [],
+            "enabled": self.enabled,
+            "is_builtin": self.is_builtin,
+            "sort_order": self.sort_order,
+            "created_by": self.created_by,
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
         }

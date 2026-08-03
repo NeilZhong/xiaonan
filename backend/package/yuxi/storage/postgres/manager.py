@@ -1188,6 +1188,37 @@ class PostgresManager(metaclass=SingletonMeta):
             """,
             "CREATE INDEX IF NOT EXISTS ix_police_advancement_logs_case ON police_advancement_logs(case_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_advancement_logs_type ON police_advancement_logs(decision_type)",
+            # 任务表扩展: 推进溯源元数据（template_code / element_value / origin 等）
+            "ALTER TABLE police_tasks ADD COLUMN IF NOT EXISTS extra JSON",
+            # ── ★ 侦查任务模板（要素 → 任务映射配置化）──────────────
+            """
+            CREATE TABLE IF NOT EXISTS police_task_templates (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(64) NOT NULL UNIQUE,
+                name VARCHAR(120) NOT NULL,
+                description TEXT,
+                element_type VARCHAR(30),
+                case_types JSON,
+                phases JSON,
+                source_task_types JSON,
+                task_title VARCHAR(200) NOT NULL,
+                task_type VARCHAR(50) NOT NULL,
+                task_description TEXT,
+                instructions TEXT,
+                priority VARCHAR(10) DEFAULT 'medium',
+                suggested_agent_type VARCHAR(50),
+                due_days INTEGER,
+                next_template_codes JSON,
+                enabled INTEGER DEFAULT 1,
+                is_builtin INTEGER DEFAULT 0,
+                sort_order INTEGER DEFAULT 100,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_task_templates_element ON police_task_templates(element_type)",
+            "CREATE INDEX IF NOT EXISTS ix_police_task_templates_enabled ON police_task_templates(enabled)",
         ]
         async with self.async_engine.begin() as conn:
             # 历史未绑定用户的 API Key 会在下方迁移语句里被静默删除，先计数告警

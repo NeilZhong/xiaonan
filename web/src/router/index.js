@@ -197,6 +197,12 @@ const router = createRouter({
           redirect: '/agent-manage'
         },
         {
+          path: 'task-templates',
+          name: 'PoliceTaskTemplates',
+          component: () => import('../views/police/TaskTemplateView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
           path: 'officers/:id',
           name: 'PoliceOfficerProfile',
           redirect: to => ({ name: 'AgentProfileComp', params: { id: to.params.id } })
