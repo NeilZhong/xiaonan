@@ -14,6 +14,7 @@ import {
   Shield,
   Briefcase
 } from 'lucide-vue-next'
+import { CheckSquareOutlined } from '@ant-design/icons-vue'
 
 import { useConfigStore } from '@/stores/config'
 import { useAgentStore } from '@/stores/agent'
@@ -122,6 +123,14 @@ const mainList = computed(() => {
     icon: Shield,
     activeIcon: Shield,
     exactActive: true
+  })
+
+  items.push({
+    name: '任务看板',
+    path: '/police/tasks',
+    icon: CheckSquareOutlined,
+    activeIcon: CheckSquareOutlined,
+    activePaths: ['/police/tasks'],
   })
 
   items.push({

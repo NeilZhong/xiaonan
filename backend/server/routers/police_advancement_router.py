@@ -90,6 +90,16 @@ async def change_direction(
     return {"code": 0, "message": "success", "data": result}
 
 
+@advancement_router.get("/my-drafts")
+async def my_drafts(
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """当前用户参与案件的待确认任务草案（个人工作台「待审查」分组）"""
+    drafts = await police_advancement_service.my_drafts(current_user.id)
+    return {"code": 0, "message": "success", "data": drafts}
+
+
 @advancement_router.get("/{case_id}/logs")
 async def list_logs(
     case_id: int,

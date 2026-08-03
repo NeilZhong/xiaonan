@@ -3,7 +3,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { policeDashboardApi, policeCaseApi, policeTaskApi, policeAgentApi, policeWorkspaceApi } from '@/apis/police_api'
+import { policeDashboardApi, policeCaseApi, policeTaskApi, policeAgentApi, policeWorkspaceApi, policeAdvancementApi } from '@/apis/police_api'
 
 export const usePoliceStore = defineStore('police', () => {
   // ── 工作台统计 ──────────────────────────────────────────
@@ -12,6 +12,8 @@ export const usePoliceStore = defineStore('police', () => {
   const reviewTasks = ref([])
   const myTasksTotal = ref(0)
   const reviewTasksTotal = ref(0)
+  const myDrafts = ref([])
+  const advancementLogs = ref([])
 
   async function loadStats() {
     try {
@@ -119,6 +121,48 @@ export const usePoliceStore = defineStore('police', () => {
     return res.data
   }
 
+  // ── 案件推进智能体 ──────────────────────────────────────
+  async function loadMyDrafts() {
+    try {
+      const res = await policeAdvancementApi.myDrafts()
+      myDrafts.value = res.data || []
+    } catch (e) { console.error('加载待审查草案失败', e) }
+  }
+
+  async function loadDrafts(caseId) {
+    try {
+      const res = await policeAdvancementApi.listDrafts(caseId)
+      myDrafts.value = res.data || []
+    } catch (e) { console.error('加载草案失败', e) }
+  }
+
+  async function confirmDraft(taskId, edits) {
+    const res = await policeAdvancementApi.confirmDraft(taskId, edits)
+    return res.data
+  }
+
+  async function rejectDraft(taskId, reason) {
+    const res = await policeAdvancementApi.rejectDraft(taskId, reason)
+    return res.data
+  }
+
+  async function changeDirection(caseId, direction) {
+    const res = await policeAdvancementApi.changeDirection(caseId, direction)
+    return res.data
+  }
+
+  async function loadAdvancementLogs(caseId) {
+    try {
+      const res = await policeAdvancementApi.listLogs(caseId)
+      advancementLogs.value = res.data || []
+    } catch (e) { console.error('加载推进日志失败', e) }
+  }
+
+  async function toggleAdvancement(caseId, enabled) {
+    const res = await policeAdvancementApi.toggle(caseId, enabled)
+    return res.data
+  }
+
   // ── 流程技能 (SOP) ─────────────────────────────────────
   const sops = ref([])
 
@@ -147,6 +191,7 @@ export const usePoliceStore = defineStore('police', () => {
     loadStats, loadMyTasks, loadReviewTasks,
     loadCases, loadCase, createCase, updateCase, updatePhase,
     loadTasks, loadTask, createTask, assignTask, startTask, completeTask, reviewTask,
+    loadMyDrafts, loadDrafts, confirmDraft, rejectDraft, changeDirection, loadAdvancementLogs, toggleAdvancement,
     loadSops,
     loadWorkspace,
   }

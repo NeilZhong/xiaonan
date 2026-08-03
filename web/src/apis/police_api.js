@@ -141,3 +141,24 @@ export const policeWorkspaceApi = {
   remove: (caseId, nodeId) =>
     apiDelete(`/api/police/workspaces/${caseId}/nodes`, { body: JSON.stringify({ node_id: nodeId }) }),
 }
+
+// ── 案件推进智能体 (POLICE_REQUIREMENTS §6.7) ──────────────
+export const policeAdvancementApi = {
+  // 某案件待确认任务草案
+  listDrafts: (caseId) => apiGet(`/api/police/advancement/${caseId}/drafts`),
+  // 当前用户跨案件待确认草案（个人工作台「待审查」）
+  myDrafts: () => apiGet('/api/police/advancement/my-drafts'),
+  // 主办民警确认草案 → pending（可附带编辑）
+  confirmDraft: (taskId, edits) =>
+    apiPost(`/api/police/advancement/tasks/${taskId}/confirm`, { edits: edits || null }),
+  // 主办民警驳回草案 → cancelled
+  rejectDraft: (taskId, reason) =>
+    apiPost(`/api/police/advancement/tasks/${taskId}/reject`, { reason: reason || null }),
+  // 侦查方向变更（重新规划）
+  changeDirection: (caseId, direction) =>
+    apiPost(`/api/police/advancement/${caseId}/direction`, { direction }),
+  // 推进决策日志（可解释性）
+  listLogs: (caseId, limit = 50) => apiGet(`/api/police/advancement/${caseId}/logs?limit=${limit}`),
+  // 启用 / 停用推进智能体
+  toggle: (caseId, enabled) => apiPost(`/api/police/advancement/${caseId}/toggle`, { enabled }),
+}

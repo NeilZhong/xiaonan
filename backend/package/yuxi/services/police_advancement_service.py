@@ -414,6 +414,28 @@ class PoliceAdvancementService:
         )
         return [t.to_dict() for t in tasks]
 
+    async def my_drafts(self, user_id: int) -> list[dict[str, Any]]:
+        """聚合当前用户参与（成员/主办）案件的待确认任务草案。
+
+        供个人工作台「待审查」分组使用：跨案件汇总所有 pending_confirmation 任务。
+        """
+        try:
+            cases, _ = await case_repository.list_cases(user_id=user_id, limit=500)
+            case_ids = [c.id for c in cases]
+            if not case_ids:
+                return []
+            drafts: list[dict[str, Any]] = []
+            for cid in case_ids:
+                tasks, _ = await task_repository.list_tasks(
+                    case_id=cid, status="pending_confirmation", limit=500
+                )
+                drafts.extend([t.to_dict() for t in tasks])
+            drafts.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+            return drafts
+        except Exception as e:
+            logger.warning(f"List my drafts failed: {e}")
+            return []
+
     async def list_logs(self, case_id: int, limit: int = 50) -> list[dict[str, Any]]:
         """列出某案件的推进决策日志（可解释性展示）。"""
         try:
