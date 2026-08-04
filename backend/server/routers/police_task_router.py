@@ -223,10 +223,10 @@ async def review_task(
     current_user: User = Depends(get_required_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """审核任务 (通过/驳回) — 通过时自动计算 signed_hash"""
+    """审核任务 (通过/驳回) — 权限校验：仅指定审核人或系统管理员；通过时以真实警号签署"""
     police_id = getattr(current_user, "police_id", None) or str(current_user.id)
     result = await police_task_service.review_task(
-        task_id, body.approved, current_user.id, police_id
+        task_id, body.approved, current_user.id, current_user.role, police_id, body.comment
     )
     if not result:
         raise HTTPException(status_code=404, detail="任务不存在")

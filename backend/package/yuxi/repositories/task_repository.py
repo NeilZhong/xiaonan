@@ -303,5 +303,57 @@ class TaskRepository:
             "total": len(assignees),
         }
 
+    # ── 审核人解析 (v2.1 §4.3 / §9.2) ────────────────────────
+
+    async def get_commander_id(self, case_id: int) -> int | None:
+        """返回案件指挥员(commander)的 users.id"""
+        async with pg_manager.get_async_session_context() as session:
+            from yuxi.storage.postgres.models_police import CaseMember
+
+            result = await session.execute(
+                select(CaseMember.user_id).where(
+                    CaseMember.case_id == case_id, CaseMember.role == "commander"
+                )
+            )
+            return result.scalar_one_or_none()
+
+    async def resolve_reviewer(self, task_id: int) -> tuple[int | None, int]:
+        """按 v2.1 §4.3 规则解算审核人，返回 (reviewer_id, require_approval)。
+
+        规则：
+          - 任务分配给「用户 + 数字警察」(both) → 审核人 = 指定的首个人类执行人
+          - 任务仅分配给「数字警察」(agent)   → 审核人 = 案件指挥员(commander)
+          - 任务仅分配给「用户」(user)        → 无需审核 (require_approval=0)
+        向后兼容：无 TaskAssignee 时退回 PoliceTask 冗余字段 assignee_type/assignee_id。
+        """
+        task = await self.get_task_with_assignees(task_id)
+        if not task:
+            return None, 0
+        assignees = task.assignees or []
+        if assignees:
+            humans = [a.assignee_id for a in assignees
+                      if a.assignee_type == "human" and (a.role or "executor") == "executor"]
+            agents = [a for a in assignees if a.assignee_type == "agent"]
+        else:
+            humans = [task.assignee_id] if task.assignee_type == "human" else []
+            agents = [task.assignee_id] if task.assignee_type == "agent" else []
+
+        if humans and agents:
+            return humans[0], 1
+        if agents and not humans:
+            commander_id = await self.get_commander_id(task.case_id)
+            return commander_id, 1
+        return None, 0
+
+    async def set_reviewer(self, task_id: int, reviewer_id: int | None, require_approval: int) -> None:
+        """落盘审核人解算结果（幂等，仅当列存在时写入）"""
+        async with pg_manager.get_async_session_context() as session:
+            task = await session.get(PoliceTask, task_id)
+            if not task:
+                return
+            task.reviewer_id = reviewer_id
+            task.require_approval = require_approval
+            await session.commit()
+
 
 task_repository = TaskRepository()

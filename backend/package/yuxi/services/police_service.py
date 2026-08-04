@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 from typing import Any
 
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from yuxi.repositories.agent_repository import DEFAULT_AGENT_BACKEND_ID
@@ -169,6 +170,8 @@ class PoliceTaskService:
         data["creator_id"] = creator_id
         data["creator_type"] = creator_type
         task = await task_repository.create(data)
+        # 若创建时即带执行人（向后兼容单执行人字段），解算并落审核人
+        await self._resolve_and_store_reviewer(task.id)
         # 记录事件
         await task_repository.create_event({
             "case_id": task.case_id,
@@ -220,6 +223,8 @@ class PoliceTaskService:
             return None
         # 写入多执行人关联表
         await task_repository.set_assignees(task_id, assignees)
+        # 重新解算并落审核人（v2.1 §4.3）
+        await self._resolve_and_store_reviewer(task_id)
         # 同步冗余字段（取第一个执行人作为主显示）
         first = assignees[0] if assignees else {}
         task = await task_repository.assign(
@@ -396,12 +401,62 @@ class PoliceTaskService:
         except Exception as e:
             logger.warning(f"Write task artifact to workspace failed: {e}")
 
-    async def review_task(self, task_id: int, approved: bool, reviewer_id: int, reviewer_police_id: str) -> dict[str, Any] | None:
-        """审核任务 — 通过时计算 signed_hash"""
-        # 获取任务结果哈希
+    async def _resolve_and_store_reviewer(self, task_id: int) -> None:
+        """解算并落盘任务的审核人（v2.1 §4.3）。幂等，失败 best-effort 不阻断主流程。"""
+        try:
+            reviewer_id, require_approval = await task_repository.resolve_reviewer(task_id)
+            await task_repository.set_reviewer(task_id, reviewer_id, require_approval)
+        except Exception as e:
+            logger.warning(f"Resolve reviewer for task {task_id} failed: {e}")
+
+    async def review_task(
+        self,
+        task_id: int,
+        approved: bool,
+        current_user_id: int,
+        current_user_role: str,
+        reviewer_police_id: str,
+        comment: str | None = None,
+    ) -> dict[str, Any] | None:
+        """审核任务（v2.1 权限加固）
+
+        - 审核前确保审核人已解算；若未解算（历史数据/分配前创建）则即时解算。
+        - 权限：require_approval=1 时，仅指定审核人(reviewer_id)或系统管理员(admin/superadmin)
+                可审核；其余账号返回 403（修复越权安全硬伤）。
+        - require_approval=0（仅人类执行、无 AI 产出）时，任务的执行人(人类)或管理员可标记完成。
+        - 通过时以真实审核人的警号签署 signed_hash，禁止冒充。
+        """
         task = await task_repository.get_by_id(task_id)
         if not task:
             return None
+        # 确保审核人已解算
+        if task.reviewer_id is None and task.require_approval is None:
+            await self._resolve_and_store_reviewer(task_id)
+            task = await task_repository.get_by_id(task_id)
+            if not task:
+                return None
+
+        is_admin = current_user_role in ("admin", "superadmin")
+        if task.require_approval:
+            # 需审核：仅指定审核人或管理员
+            if not is_admin and task.reviewer_id != current_user_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="无审核权限：仅指定审核人或系统管理员可审核该任务",
+                )
+        else:
+            # 无需审核（纯人类任务）：仅执行人或管理员可标记完成
+            summary = await task_repository.get_assignee_summary(task_id)
+            human_ids = [h["assignee_id"] for h in summary["humans"]]
+            if not is_admin and current_user_id not in human_ids:
+                raise HTTPException(
+                    status_code=403,
+                    detail="无权限：仅任务执行人或系统管理员可操作该任务",
+                )
+
+        # 真实审核人（用于署名与签名）
+        reviewer_id = current_user_id
+        # 获取任务结果哈希
         result_str = str(task.result) if task.result else ""
         result_hash = hashlib.sha256(result_str.encode()).hexdigest()
         signed_hash = None
@@ -412,9 +467,13 @@ class PoliceTaskService:
         if task:
             await task_repository.create_event({
                 "case_id": task.case_id, "task_id": task_id, "event_type": "reviewed",
-                "event_data": {"approved": approved, "reviewer_id": reviewer_id}, "created_by": reviewer_id,
+                "event_data": {"approved": approved, "reviewer_id": reviewer_id, "comment": comment},
+                "created_by": reviewer_id,
             })
-            await self._audit("review" if approved else "reject", task_id, reviewer_id, task.case_id, {"approved": approved})
+            await self._audit(
+                "review" if approved else "reject", task_id, reviewer_id, task.case_id,
+                {"approved": approved, "comment": comment},
+            )
             # 审核通过 → 任务真正完成 → 异步触发推进智能体（事件驱动，不阻塞响应）
             if approved:
                 asyncio.create_task(self._trigger_advancement(task.case_id, task_id, reviewer_id))

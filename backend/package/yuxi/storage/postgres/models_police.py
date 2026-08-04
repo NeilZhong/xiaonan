@@ -244,6 +244,11 @@ class PoliceTask(Base):
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     reviewed_at = Column(DateTime, nullable=True)
     signed_hash = Column(String(128), nullable=True)
+    # 审核人（v2.1 §4.3 / §9.2）：任务产出需由特定用户确认
+    #   reviewer_id  — 指定审核人 users.id（按规则自动解算：人机并存→首个人类；仅 agent→指挥员）
+    #   require_approval — 0=无需审核（仅人类执行，无 AI 产出） 1=需审核（含 agent 产出）
+    reviewer_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    require_approval = Column(Integer, default=0)
     # 关闭原因（cancelled/terminated 状态填写：驳回意见 / 方向调整说明）
     close_reason = Column(Text, nullable=True)
     # 扩展元数据：推进智能体溯源信息
@@ -284,6 +289,8 @@ class PoliceTask(Base):
             "reviewed_by": self.reviewed_by,
             "reviewed_at": format_utc_datetime(self.reviewed_at),
             "signed_hash": self.signed_hash,
+            "reviewer_id": self.reviewer_id,
+            "require_approval": self.require_approval or 0,
             "close_reason": self.close_reason,
             "extra": self.extra or {},
             "created_at": format_utc_datetime(self.created_at),

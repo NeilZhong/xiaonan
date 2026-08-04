@@ -947,6 +947,9 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE INDEX IF NOT EXISTS ix_police_tasks_type ON police_tasks(type)",
             "CREATE INDEX IF NOT EXISTS ix_police_tasks_status ON police_tasks(status)",
             "CREATE INDEX IF NOT EXISTS ix_police_tasks_assignee ON police_tasks(assignee_type, assignee_id)",
+            # v2.1 §4.3 / §9.2 审核人字段（幂等加列）
+            "ALTER TABLE IF EXISTS police_tasks ADD COLUMN IF NOT EXISTS reviewer_id INTEGER REFERENCES users(id)",
+            "ALTER TABLE IF NOT EXISTS police_tasks ADD COLUMN IF NOT EXISTS require_approval INTEGER DEFAULT 0",
             # 任务流转规则表
             """
             CREATE TABLE IF NOT EXISTS police_task_flow_rules (

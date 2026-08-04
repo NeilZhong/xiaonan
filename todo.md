@@ -124,9 +124,9 @@
 ### 🔴 P0：权限与安全地基（合规硬缺口，优先排期）
 
 **P0-1 平台角色体系 `system_admin` / `user`**
-- [ ] 后端：`police_users` 增 `platform_role` 字段（`system_admin`/`user`，默认 `user`）；`ensure_business_schema()` 增列 — 设计见 §7.2.1
-- [ ] 后端：鉴权依赖新增 `require_admin`，读取 `current_user.platform_role`
-- [ ] 前端：管理员专属入口（运行时控制台 / 审计台 / 数字警员管理）按 `platform_role` 显隐；普通用户不可见
+- [~] 后端：**决策：复用 yuxi 既有 `users.role`（`admin`/`superadmin`=系统管理员）＋ 既有 `get_admin_user` 依赖作为 `require_admin`**，不新增 `platform_role` 列（避免改动 yuxi 核心 User 模型；如确需独立 `system_admin/user` 枚举再补）。运行时控制台/审计台入口将挂载此依赖。
+- [~] 后端：`require_admin` 已就绪（= `get_admin_user`，`role in [admin, superadmin]`）
+- [ ] 前端：管理员专属入口（运行时控制台 / 审计台 / 数字警员管理）按 `role` 显隐；普通用户不可见
 
 **P0-2 案件成员模型（用户 + 数字警察并列为一等成员）**
 - [ ] 后端：确认 `police_case_members` 的 `member_type`(`user`/`agent`) + `case_role`(`commander`/`executor`/`reviewer`/`observer`) 在创建/查询/鉴权链路生效
@@ -134,16 +134,13 @@
 - [ ] 前端：案件成员管理面板（区分人/警，显示案件角色与状态）
 
 **P0-3 任务审核人判定规则代码化**（§4.3 / §9.2，必须代码层实现）
-- [ ] 后端：`create_task` / 分配时按 `assignee_type` 自动解算 `reviewer_id`：
-  - `user` → `reviewer_id=NULL`，`require_approval=FALSE`
-  - `both` → `reviewer_id=assignee_user_id`（指挥员可改派）
-  - `agent` → `reviewer_id=commander_id`（指挥员可另行指定）
-- [ ] 后端：指挥员改派审核人必须写审计记录
+- [x] 后端：`create_task` / `assign_task_multi` 时按规则自动解算 `reviewer_id` + `require_approval`（`task_repository.resolve_reviewer` + `set_reviewer`）：both→首个人类执行人；agent→案件指挥员；user→NULL / 无需审核
+- [ ] 后端：指挥员改派审核人必须写审计记录（后续增强）
 
-**P0-4 审批端点补 reviewer RBAC 校验**（修复越权安全硬伤）
-- [ ] 后端：`POST /tasks/{tid}/review` 严格校验 `current_user.id == reviewer_id` 或 `system_admin`，否则 403
-- [ ] 后端：`approval_signature` 用真实审核人警号签署（禁止任意登录账号冒充审核人）
-- [ ] 后端（可选）：`GET /tasks/{tid}/verify-signature` 校验签名真实性
+**P0-4 审批端点补 reviewer RBAC 校验**（修复越权安全硬伤 ✅ 已落地）
+- [x] 后端：`POST /tasks/{tid}/review` 严格校验（`require_approval=1` 时仅 `reviewer_id` 或 `admin/superadmin`，否则 403）；纯人类任务仅执行人或管理员可标记完成
+- [x] 后端：签名 `signed_hash` 用真实审核人警号签署（`current_user.police_id`），禁止任意账号冒充审核人
+- [ ] 后端（可选）：`GET /tasks/{tid}/verify-signature` 校验签名真实性（待 P0-6 后做）
 
 **P0-5 审计中间件自动捕获 ip/ua + 查询接口**
 - [ ] 后端：统一 `write_audit_log` 中间件/依赖自动捕获 `ip_address`、`user_agent`（替换当前手写调用点，消除永远 NULL）
