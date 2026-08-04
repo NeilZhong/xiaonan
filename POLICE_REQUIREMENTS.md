@@ -2,9 +2,9 @@
 
 > **产品品牌**: 小南 / Xiaonan（前端 UI 与对外物料统一使用此品牌名）  
 > **内部代号**: 智案协  
-> **版本**: v1.5  
-> **日期**: 2026-08-03  
-> **状态**: **文档—代码对齐版**。本次修订不新增设计，只做三件事：①把与代码不符的描述改成代码实际的样子（数据模型主键/表名、API 路径、事件驱动实现方式）；②把已实现但文档缺失的功能补写进来（侦查任务模板体系、案件工作区文件系统、数字警员市场与共享审批、任务多执行人）；③为每一节标注实现状态，区分「已实现」与「规划中」  
+> **版本**: v1.6  
+> **日期**: 2026-08-04  
+> **状态**: **v1.5 文档—代码对齐版** 的增量修订。v1.5 做了三件事：①把与代码不符的描述改成代码实际的样子（数据模型主键/表名、API 路径、事件驱动实现方式）；②把已实现但文档缺失的功能补写进来（侦查任务模板体系、案件工作区文件系统、数字警员市场与共享审批、任务多执行人）；③为每一节标注实现状态。**v1.6 增量**：新增「案件记忆（Case Memory）」体系设计（§4.12 / §5.2.12 / §7.2.11 / Phase 3.5），确立「记忆主体是案件而非用户」的方向；同步记录 2026-08-04 的代码变更（移除全局任务看板、任务模板配置权限收敛至超管）  
 > **基础底座**: 语析 Yuxi v0.7.1 (https://github.com/xerrors/Yuxi, MIT 协议)  
 > **产品形态参考**: StaffDeck (https://github.com/OpenBMB/StaffDeck，数字员工广场 / 员工档案 / SOP / 工作记录交互语言)  
 > **看板交互参考**: Multica (https://github.com/multica-ai/multica，卡片式看板 / 优先级标签 / 多列拖拽 / Agent 队友呈现)  
@@ -54,6 +54,7 @@
 | §4.9 | 侦查任务模板配置体系 | ✅ 已实现 | **v1.5 补写**，此前文档完全未记录 |
 | §4.10 | 案件工作区文件系统 | ✅ 已实现 | **v1.5 补写**，此前文档完全未记录 |
 | §4.11 | 数字警员市场与共享审批 | ✅ 已实现 | **v1.5 补写**，此前文档完全未记录 |
+| §4.12 | 案件记忆（Case Memory） | 📋 规划中 | **v1.6 新增**，代码 0 行。当前仅有 Yuxi 原生按用户维度的 `workspace/agents/*.md` 全文注入，且 `enable_memory` 开关不生效（见 §0.2 技术债 5） |
 | §5.2 | 核心表结构 | 🔀 已按代码重写 | 原文用 UUID 主键 / 无前缀表名，**与代码完全不符**；v1.5 已全量替换为真实 17 张表 |
 | §6.1–§6.5 | 各执行智能体 | ⚠️ 部分实现 | 预设警员已扩到 **DA-001~DA-007**；执行为单轮 LLM 调用，`tools`/`skills`/`knowledge_base_ids` 字段暂未参与执行 |
 | §6.6 | 案件推进智能体 | 🔀 已按代码修正 | 实际为**顺序管线**而非 LangGraph StateGraph；任务模板已配置化落库 |
@@ -76,6 +77,7 @@
 2. **证据只签不验** — `verify_evidence_integrity` 全库未实现，签名链无法在诉讼阶段被校验，§9.5 的合规目标尚未闭环。
 3. **`TaskEvent` 无自动化消费者** — 该表仅用于任务详情页时间线展示，任务流转规则并不由它驱动。
 4. **DA-005 命名冲突** — 代码中该警员仍名为「案件编排官 / case_orchestrator」，职责写作"多Agent调度"，与 §6.6 重定位后的「案件推进智能体（建议者，非指挥者）」定位不一致，需统一。
+5. **记忆机制不可用且维度错位（v1.6 新增）** — 沿用 Yuxi 原生 `workspace/agents/` 三文件（`AGENTS.md` / `USER.md` / `MEMORY.md`）全文注入 `system_prompt` 的机制，存在三处硬伤：①`enable_memory` 开关**只存不生效**，记忆实际不参与推理；②**无结构化写入入口**，只能手工编辑文件，前端 viewer 只读；③单文件注入受 `WORKSPACE_AGENTS_PROMPT_MAX_BYTES`（约 64KB）限制，长案件被静默截断。更根本的问题是**记忆维度错位**：现机制只按「用户」隔离（`USER.md` 按 uid、`{agent_slug}/MEMORY.md` 按 uid×agent），而小南是案件驱动平台，记忆主体应是**案件**。解决方案见 §4.12。
 
 ---
 
@@ -742,6 +744,53 @@ SOP（办案规程）是连接「数字警员技能」与「复杂专案协同�
 - **共享链路**：民警将自有数字警员 `POST /agents/{agent_id}/share` 发布到市场 → 状态 `pending` → 管理员 `POST /agents/{agent_id}/approve` 审批 → `approved` 后可被他人 `POST /agents/templates/{template_id}/install` 安装（详见 §7.2.5）。
 - **系统预设 vs 用户创建**：`PRESET_AGENTS`（DA-001~DA-007）由 `POST /agents/seed` 幂等植入，`is_builtin=1` 不可删除（可停用/修改）；用户自建模板 `is_builtin=0`。
 
+### 4.12 案件记忆 Case Memory（v1.6 新增，📋 规划中）
+
+> **完整 PRD 见 `docs/vibe/2026-08-04-case-memory-prd.md`（v1.0 草稿）**，本节只保留纲要与关键决策，避免两处描述漂移。
+>
+> **代码 0 行**，不可用于联调或验收。
+
+#### 4.12.1 为什么记忆主体是「案件」而不是「用户」
+
+小南是**案件驱动**的多智能体协作平台：民警与多个数字警员围绕一个案件完成特定任务。案件中持续产生、且跨会话必须被记住的，是「这个案子查到哪了」——证据、线索、决策、状态——而不是某位民警的个人偏好。民警是流动的参与者（一个案子会换多拨人、多个智能体），**案件才是唯一稳定、有边界、有生命周期（立案→办案→结案）的记忆载体**。
+
+因此 v1.6 确立：**案件记忆为中央记忆层，用户记忆降级为薄静态「警员画像」**（角色/单位/权限/编制，来自警员档案，不做偏好学习）。该结构对应 TencentDB-Agent-Memory 的 **L2 Scenario（任务 / 项目 / 流程经验块）**——仅借鉴其「分层精炼 + 可逆白盒 + BM25+向量+RRF 混合检索」理念，**不整包引入**任何开源 Agent Memory 运行时。
+
+#### 4.12.2 双层结构
+
+| 层 | 键 | 内容 | 可见范围 |
+|---|---|---|---|
+| **共享层** | `case_id` | 案件骨架、事实、线索、决策轨迹（全案共用的事实底座） | 全部参案智能体 + 有该案访问权限的民警 |
+| **个案层** | `case_id` × `agent_id` | 某数字警员在本案干了什么、产出什么、遗留什么 | 同上，但归属可追溯到具体智能体 |
+
+个案层中的事实可由确认人勾选「上提」为共享层。权限复用案件成员/编制关系，随案件访问控制联动。
+
+#### 4.12.3 写入：事件驱动抽取 → 人工确认 → 落盘
+
+不允许智能体自由写记忆。抽取只在**已有生命周期节点**触发，产出草稿后走既有 `pending_confirmation` 确认模式（呼应 §6.7.3 任务草案审查），确认后才落盘并写入 `provenance`。
+
+| 触发点 | 主写入层 | 说明 |
+|---|---|---|
+| 建案 | 共享层 | 案件骨架（类型/目标/法律依据/关键人/时空）**结构化种子化，跳过人工确认**（不依赖 LLM 发明，风险低） |
+| 笔录分析完成 | 共享层 | 事实主源：人物/时间线/线索/物证，笔录分析师（DA-001）已在结构化抽取 |
+| 任务完成 | 个案层 | **主触发点**：某 agent 的贡献、产出与遗留项 |
+| 推进 / 审核 | 共享层 | 决策轨迹与状态变更 |
+| 结案 | 归档 / 反哺 | 不抽取新记忆，做 consolidate + 跨案泛化反哺 |
+
+#### 4.12.4 召回、归档与反哺
+
+- **召回**：禁止再走「单文件全量注入」。案件记忆结构化分块存储，按当前任务语义检索 Top-K 注入（P2 阶段引入 BM25 + 向量 RRF 融合，复用既有 Milvus）。这同时解决 §0.2 技术债 5 的 64KB 截断问题。
+- **归档**：案件结案后全部记忆块转 `archived` **只读**，归入案卷长期可查、可审计。
+- **反哺**：结案时抽取**可泛化**经验（如某类案件常见线索、取证易漏项）写入数字警员自身记忆 / 已学 SOP（`police_sops`），形成「越办越聪明」的闭环；**不沉淀本案隐私事实**。
+
+#### 4.12.5 公安场景的三条硬约束
+
+1. **可靠性 > 智能**：记忆涉及证据与决策，每个 `confirmed` 记忆块必须带 `provenance`（创建人 / 来源事件 / 来源引用 / 时间戳），落盘前人工确认，**v1 不做无确认的全自动写入**。
+2. **可逆白盒**：人工编辑后仅保存确认版本，但保留原始来源索引，任何一条记忆都能回溯到原始产物。
+3. **权限隔离**：案件记忆含敏感信息，只对参案角色可见，`confidential` 敏感度仅限案件编制内角色；归档后全局只读，仅超管可导出。
+
+> 分期：**P1**（双层存储 / 事件抽取 / 确认落盘 / 权限隔离 / 结案归档 / 分块不截断）；**P2**（检索召回替代单文件注入 / RRF 混合检索 / 跨案反哺）。任务拆解 T1–T10 见 PRD §13。
+
 ---
 
 
@@ -804,6 +853,7 @@ SOP（办案规程）是连接「数字警员技能」与「复杂专案协同�
 | 15 | `PoliceWorkspaceNode` | `police_workspace_nodes` | 工作区文件树节点 |
 | 16 | `PoliceAdvancementLog` | `police_advancement_logs` | 推进智能体决策日志 |
 | 17 | `PoliceTaskTemplate` | `police_task_templates` | 侦查任务模板 |
+| 18 | `PoliceCaseMemoryBlock` | `police_case_memory_blocks` | 📋 **规划中** — 案件记忆块（v1.6 新增，见 §4.12 / §5.2.12） |
 
 > **用户表 `users` 属于 yuxi 底座**（`models_business.py`），公安侧仅扩展了警号/警衔/真实姓名等字段，不在本节展开。所有指向用户的外键均为 `users.id`（Integer）。
 
@@ -1291,6 +1341,46 @@ CREATE TABLE police_audit_logs (
 (:Person)-[:MEMBER_OF {role}]->(:Organization)
 (:Person)-[:RELATED_TO {type: 'family|accomplice|friend'}]->(:Person)
 ```
+
+#### 5.2.12 案件记忆块（v1.6 新增）
+
+> 📋 **规划中** — 代码 0 行。设计依据 §4.12，完整字段与取舍见 `docs/vibe/2026-08-04-case-memory-prd.md` §8。
+>
+> ⚠️ PRD 草稿中该表用 `uuid` 主键、表名 `case_memory_blocks`，**与本项目约定不符**；以本节为准：`Integer` 自增主键 + `police_` 前缀 + `ensure_business_schema()` 运行时建表。
+
+```sql
+-- 以「案件」为主体的记忆载体，替代按用户维度的单文件注入（详见 §4.12）
+CREATE TABLE police_case_memory_blocks (
+    id            SERIAL PRIMARY KEY,
+    case_id       INTEGER NOT NULL REFERENCES police_cases(id),  -- 索引
+    agent_id      INTEGER REFERENCES police_agents(id),          -- 个案层归属；共享层为 NULL（索引）
+    layer         VARCHAR(10) NOT NULL,   -- shared | agent
+    block_type    VARCHAR(20) NOT NULL,   -- fact | decision | lead | task_result | profile
+    title         VARCHAR(200),
+    content       JSON NOT NULL,          -- 结构化记忆内容（分块存储，规避 64KB 单文件截断）
+    status        VARCHAR(20) DEFAULT 'draft',  -- draft | confirmed | archived | rejected（索引）
+    -- 可逆白盒：任何一条记忆都能回溯到原始产物
+    provenance    JSON,                   -- {created_by, source_event, source_ref, created_at}
+    original_ref  JSON,                   -- 人工编辑后保留的原始抽取内容索引
+    sensitivity   VARCHAR(20) DEFAULT 'internal',  -- public | internal | confidential
+    embedding_ref VARCHAR(64),            -- Milvus 向量索引引用（P2）
+    confirmed_by  INTEGER REFERENCES users(id),
+    confirmed_at  TIMESTAMP,
+    created_at    TIMESTAMP DEFAULT NOW(),
+    updated_at    TIMESTAMP DEFAULT NOW()
+);
+```
+
+**关键约束**：
+
+| 约束 | 说明 |
+|---|---|
+| 隔离 | 按 `case_id` 严格隔离，v1 不做跨案件语义检索共享 |
+| 参与召回 | 仅 `confirmed` / `archived` 参与召回；`draft` 不注入推理 |
+| 结案 | 案件结案后全部块 `status → archived`，转只读 |
+| 并发 | 同一案件多事件并发抽取需按 `case_id` 串行合入或按块 upsert，避免互相覆盖 |
+| 智能体移出案件 | 其个案层记忆保留为只读归档，不再更新；共享层不受影响 |
+
 ---
 
 ## 6. 数字警员设计
@@ -2064,6 +2154,23 @@ class CaseAgent:
 #### 7.2.10 知识库与图谱 📋 规划中
 
 > Neo4j / Milvus 在所有 `police_*` 代码中**均无调用**，知识图谱与图谱检索接口目前**不存在**。v1.4 列出的 `/api/v1/cases/{id}/graph/*` 与 `/knowledge/search` 端点代码暂无对应路由，保留为 §4.4 设计目标。
+
+#### 7.2.11 案件记忆 `/api/police/cases/{case_id}/memory` 📋 规划中
+
+> **v1.6 新增设计，代码 0 行**。挂在案件路由下，天然继承案件权限校验（§4.12.5）。以下为设计意图，落地时以实现为准。
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET  | `/api/police/cases/{case_id}/memory` | 案件记忆块列表（按 `layer` / `block_type` / `status` 筛选）|
+| GET  | `/api/police/cases/{case_id}/memory/drafts` | 待确认草稿列表（`pending_confirmation` 入口）|
+| POST | `/api/police/cases/{case_id}/memory/{block_id}/confirm` | 确认草稿（可携带编辑后内容，保留 `original_ref`）|
+| POST | `/api/police/cases/{case_id}/memory/{block_id}/reject` | 驳回草稿（丢弃，不写入记忆）|
+| POST | `/api/police/cases/{case_id}/memory/{block_id}/promote` | 个案层事实上提为共享层 |
+| GET  | `/api/police/cases/{case_id}/memory/search` | 语义检索召回（P2：BM25 + 向量 RRF）|
+| POST | `/api/police/cases/{case_id}/memory/archive` | 结案归档：全部块转 `archived` 只读 |
+
+> **权限**：读取与确认操作限「参案智能体 + 具该案件访问权限的民警」；`sensitivity=confidential` 仅限案件编制内角色；归档后全局只读，仅超管可导出。**抽取为系统内部行为，不开放外部写入端点**。
+
 ### 7.3 API 响应格式
 
 ```json
@@ -2160,13 +2267,16 @@ class CaseAgent:
   - 全部案件（专案组）
   - 我参与的
   - 按阶段筛选
-- 全部任务 (All Tasks) — 看板视图
+  - 案件详情内置 表格 / 看板 双视图 ★ 承载该案全部任务
+- 任务模板 (Task Templates) — 菜单对所有登录用户可见，配置操作仅超管（§4.9）
 - 知识库 (Knowledge)
   - 案件知识库
   - 知识图谱
   - 法律知识库
 - 统计分析 (Analytics)
 - 系统管理 (Admin) [仅管理员]
+
+> **v1.6 修订（2026-08-04，commit `1f4145a3`）**：**移除独立的「全部任务」全局看板页**（`TaskBoardView.vue` 已删除）。理由是职责重复——跨案待办由「个人工作台」四组待办聚合承载（点击跳转到具体案件的任务详情），单案全部任务由「案件详情内置的表格/看板双视图」承载，二者已覆盖全部场景。§8.4.10 描述的多列看板交互规范**继续有效，作用于案件内看板**。
 
 ### 8.4 核心页面设计
 
@@ -3045,6 +3155,20 @@ Phase 3: 多智能体协作与看板重构 (5周)
 │   └── 导航新增「个人工作台」「我的任务」入口
 └── SOP 驱动的任务自动流转（police_sops + task_flow_rules 降级为基础规则，推进智能体作为智能规则引擎）
 
+Phase 3.5: 案件记忆 Case Memory (3周，v1.6 新增 📋 未启动)
+├── P1 最小闭环
+│   ├── T1 数据模型 police_case_memory_blocks + ensure_business_schema 建表
+│   ├── T2 案件记忆服务：共享层/个案层双层读写 + provenance 可逆白盒
+│   ├── T3 事件接入：建案(种子化) / 笔录分析 / 任务完成 / 推进审核 四类触发抽取
+│   ├── T4 确认 UI：草稿 pending_confirmation 确认 / 编辑确认 / 驳回（复用任务草案审查交互）
+│   ├── T5 权限隔离：跟随案件成员与编制关系，sensitivity 分级
+│   ├── T6 结案归档：status → archived 只读入案卷
+│   └── T10 警员画像薄层（uid 静态，来自警员档案，不做偏好学习）
+└── P2 智能与规模
+    ├── T7 召回引擎：结构化分块 + BM25 + 向量 RRF（复用 Milvus）
+    ├── T8 注入改造：以检索召回替代 workspace/agents 单文件全量注入（解 64KB 截断）
+    └── T9 跨案反哺：结案泛化经验 → 数字警员自身记忆 / 已学 SOP
+
 Phase 4: 知识库与知识图谱 (3周)
 ├── 按案件隔离知识库 (复用语析多租户)
 ├── 定义公安知识图谱 Schema (人员/账户/通讯/事件)
@@ -3080,11 +3204,14 @@ Phase 6: 测试与交付 (3周)
 | M1.5: 数字警员平台 | 第 8 周 | 数字警员广场/档案/技能体系/SOP框架/专案组模型 | ⚠️ 部分实现（数字警员/档案/SOP 表结构已落地，但 SOP 无执行器、档案好评率无数据；广场已并入 /agent-manage）|
 | M2: 智能创建上线 | 第 10 周 | 笔录分析师 + 专案组智能创建流程 | ✅ 已完成（笔录分析 + 导入建案）|
 | M3: 多智能体协作 + 看板升级 | 第 15 周 | 推进智能体 + 任务模板 + 任务草案审查 + 工作台聚合 | ✅ 主体完成（推进管线+任务模板已落地，见 §4.9；非 LangGraph/ARQ 实现，见 §6.7）|
+| M3.5: 案件记忆上线 | 待排期 | 案件记忆双层存储 + 事件抽取确认 + 结案归档（P1）；检索召回 + 跨案反哺（P2）| 📋 未启动（v1.6 新增，见 §4.12；PRD 待评审）|
 | M4: 知识图谱上线 | 第 18 周 | 知识库+知识图谱+可视化+图谱分析 | 📋 未启动（Neo4j/Milvus 在 police 代码中无调用）|
 | M5: 安全加固完成 | 第 21 周 | PII 脱敏+审计+隔离+渗透测试 | ⚠️ 部分实现（审计/签名写入已落地；签名验证未实现、PII 脱敏待确认）|
 | M6: 正式交付 | 第 24 周 | 完整平台 + 部署文档 + 培训材料 | 📋 待启动 |
 
-> 📌 **v1.5 状态快照（截至 2026-08-03，仓库 HEAD = `41ba1555` "feat(police): 侦查任务模板配置化 + 推进智能体管线改造"）**：周数仍为规划排期，不代表实际日历。
+> 📌 **v1.6 状态快照（截至 2026-08-04，仓库 HEAD = `81c8067d` "chore: 运行环境修复（Docker 构建 / provider 默认值）"）**：周数仍为规划排期，不代表实际日历。
+>
+> 2026-08-04 已合入的代码变更：`30daa967` 任务模板配置权限收敛至超管（§4.9 / §7.2.8）、`1f4145a3` 移除全局任务看板仅保留案件内看板（§8.3）、`3c488f08` 修复数字警员档案返回列表空白与 404 噪音、`81c8067d` 运行环境修复。
 
 ### 11.3 项目目录结构
 
