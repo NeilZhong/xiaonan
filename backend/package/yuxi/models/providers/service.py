@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import logging
 import os
 import re
 from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from yuxi.models.providers.builtin import BUILTIN_PROVIDERS
 from yuxi.models.providers.repository import (
@@ -303,15 +306,29 @@ async def ensure_builtin_model_providers_in_db(db: AsyncSession) -> None:
                 await db.flush()
             continue
 
-        payload = {key: value for key, value in provider_def.items() if value is not None}
-        payload["enabled_models"] = provider_def.get("enabled_models", [])
-        payload["headers_json"] = payload.get("headers_json") or {}
-        payload["extra_json"] = payload.get("extra_json") or {}
-        payload["is_enabled"] = provider_id == "siliconflow-cn"
-        payload["is_builtin"] = True
-        payload["created_by"] = "system"
-        payload["updated_by"] = "system"
-        await create_model_provider(db, _normalize_payload(payload))
+        try:
+            payload = {key: value for key, value in provider_def.items() if value is not None}
+            # custom-openai 等模板 base_url 留空，运行时从 OPENAI_API_BASE 环境变量补全
+            if not payload.get("base_url"):
+                env_base_url = os.getenv("OPENAI_API_BASE", "")
+                if env_base_url:
+                    payload["base_url"] = env_base_url
+                else:
+                    payload.setdefault("provider_type", "openai")
+            payload["enabled_models"] = provider_def.get("enabled_models", [])
+            payload["headers_json"] = payload.get("headers_json") or {}
+            payload["extra_json"] = payload.get("extra_json") or {}
+            payload["is_enabled"] = provider_id == "siliconflow-cn"
+            payload["is_builtin"] = True
+            payload["created_by"] = "system"
+            payload["updated_by"] = "system"
+            # base_url 仍为空（未配置 OPENAI_API_BASE）时放宽校验，仅写入模板占位
+            await create_model_provider(
+                db, _normalize_payload(payload, partial=not payload.get("base_url"))
+            )
+        except Exception as e:
+            logger.warning(f"跳过内置供应商 {provider_id} 初始化失败: {e}")
+            continue
 
 
 async def create_provider_config(db: AsyncSession, data: dict[str, Any], username: str) -> ModelProvider:

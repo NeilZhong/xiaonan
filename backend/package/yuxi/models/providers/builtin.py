@@ -8,9 +8,9 @@ BUILTIN_PROVIDERS: list[dict[str, Any]] = [
     {
         "provider_id": "custom-openai",
         "display_name": "OpenAI 兼容接口 (自定义)",
-        "base_url": "",  # 从 OPENAI_API_BASE 环境变量读取
+        "base_url": "http://localhost:11434/v1",  # 默认 Ollama；实际使用时在面板中修改
         "api_key_env": "OPENAI_API_KEY",
-        "models_endpoint": "",  # 动态拼接
+        "models_endpoint": "/models",
         "capabilities": ["chat", "embedding", "rerank"],
         "is_custom": True,
     },

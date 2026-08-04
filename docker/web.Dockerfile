@@ -13,6 +13,10 @@ COPY ./web/pnpm-lock.yaml* ./
 # 安装依赖
 RUN pnpm install --registry=https://registry.npmmirror.com
 
+# pnpm 10 默认拦截非安全依赖的 build script（esbuild/core-js），会导致
+# vite 启动报错“esbuild 二进制缺失”。显式 rebuild 触发其 postinstall 生成原生二进制。
+RUN pnpm rebuild esbuild core-js
+
 # 复制源代码
 COPY ./web .
 
@@ -34,6 +38,9 @@ COPY ./web/pnpm-lock.yaml* ./
 
 # 安装依赖
 RUN pnpm install --frozen-lockfile --registry=https://registry.npmmirror.com
+
+# pnpm 10 拦截 build script，显式 rebuild 触发 esbuild/core-js 原生二进制生成
+RUN pnpm rebuild esbuild core-js
 
 # 复制源代码并构建
 COPY ./web .
