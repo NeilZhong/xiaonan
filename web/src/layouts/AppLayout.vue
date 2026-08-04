@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, provide, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
+  Activity,
   BarChart3,
   ClipboardList,
   LibraryBig,
@@ -10,6 +11,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   MessageCirclePlus,
+  ScrollText,
   Search,
   Shield,
   Briefcase,
@@ -171,6 +173,24 @@ const mainList = computed(() => {
       path: '/dashboard',
       icon: BarChart3,
       activeIcon: BarChart3
+    })
+  }
+
+  // ★ 管理员专属入口：仅系统管理员可见，普通用户不可见（v2.1 §9.2）
+  if (userStore.isAdmin) {
+    items.push({
+      name: '运行时控制台',
+      path: '/police/runtime-console',
+      icon: Activity,
+      activeIcon: Activity,
+      activePaths: ['/police/runtime-console']
+    })
+    items.push({
+      name: '审计台',
+      path: '/police/audit',
+      icon: ScrollText,
+      activeIcon: ScrollText,
+      activePaths: ['/police/audit']
     })
   }
 

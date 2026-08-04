@@ -6,6 +6,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePoliceStore } from '@/stores/police'
+import { useUserStore } from '@/stores/user'
 import { policeTaskApi, policeAgentApi, policeCaseApi } from '@/apis/police_api'
 import { message } from 'ant-design-vue'
 import {
@@ -27,6 +28,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const policeStore = usePoliceStore()
+const userStore = useUserStore()
 
 const task = computed(() => policeStore.currentTask)
 const events = ref([])
@@ -102,7 +104,17 @@ const assigneeDisplayText = computed(() => {
 // ── 按钮权限（核心业务逻辑） ──────────────────────────
 const canStart = computed(() => task.value?.status === 'pending')
 const canComplete = computed(() => task.value?.status === 'in_progress')
-const canReview = computed(() => task.value?.status === 'review')
+const canReview = computed(() => {
+  if (task.value?.status !== 'review') return false
+  const rid = task.value?.reviewer_id
+  // 指定了审核人时，仅审核人或系统管理员可审核（P0-4 权限前置显隐）
+  if (rid != null && rid !== userStore.userId && !userStore.isAdmin) return false
+  return true
+})
+const isCurrentUserReviewer = computed(() => {
+  const rid = task.value?.reviewer_id
+  return rid == null || rid === userStore.userId || userStore.isAdmin
+})
 const canAssign = computed(() => !!task.value && task.value.status !== 'completed')
 
 /** 开始任务按钮文案：根据是否有智能体显示不同提示 */
@@ -200,7 +212,8 @@ async function handleReview() {
     await loadTask()
     await loadEvents()
   } catch (e) {
-    message.error('操作失败')
+    // 后端越权时 message 已由 base.js 设为「没有权限执行此操作」
+    message.error(e?.message || '操作失败')
   } finally {
     reviewLoading.value = false
   }
@@ -412,7 +425,8 @@ onMounted(() => {
             </div>
             <div class="review-hint" v-if="task.status === 'review'">
               <FileCheck :size="13" />
-              <span v-if="hasHumanAssignee">由以上民警审核成果</span>
+              <span v-if="isCurrentUserReviewer">由你审核成果（点击下方按钮）</span>
+              <span v-else-if="hasHumanAssignee">等待指定审核人审核（你无审核权限）</span>
               <span v-else>由案件指挥员审核成果（纯智能体任务）</span>
             </div>
           </div>

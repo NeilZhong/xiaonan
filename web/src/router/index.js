@@ -200,6 +200,18 @@ const router = createRouter({
           path: 'officers/:id',
           name: 'PoliceOfficerProfile',
           redirect: to => ({ name: 'AgentProfileComp', params: { id: to.params.id } })
+        },
+        {
+          path: 'runtime-console',
+          name: 'PoliceRuntimeConsole',
+          component: () => import('../views/police/RuntimeConsoleView.vue'),
+          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
+        },
+        {
+          path: 'audit',
+          name: 'PoliceAuditConsole',
+          component: () => import('../views/police/AuditConsoleView.vue'),
+          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
         }
       ]
     },

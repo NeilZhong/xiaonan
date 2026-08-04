@@ -1223,6 +1223,14 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE INDEX IF NOT EXISTS ix_police_task_templates_element ON police_task_templates(element_type)",
             "CREATE INDEX IF NOT EXISTS ix_police_task_templates_enabled ON police_task_templates(enabled)",
         ]
+        # v2.1 §4.3 / §9.2 审核人字段：独立事务加列，确保不被共享 stmts 事务回滚影响
+        try:
+            async with self.async_engine.begin() as conn:
+                await conn.execute(text("ALTER TABLE IF EXISTS police_tasks ADD COLUMN IF NOT EXISTS reviewer_id INTEGER REFERENCES users(id)"))
+                await conn.execute(text("ALTER TABLE IF EXISTS police_tasks ADD COLUMN IF NOT EXISTS require_approval INTEGER DEFAULT 0"))
+        except Exception as e:
+            logger.warning(f"加列 police_tasks.reviewer_id/require_approval 失败（可安全重试）: {e}")
+
         async with self.async_engine.begin() as conn:
             # 历史未绑定用户的 API Key 会在下方迁移语句里被静默删除，先计数告警
             # 便于运维凭据失效时回溯；DELETE 之后无法再查询这些 Key。
