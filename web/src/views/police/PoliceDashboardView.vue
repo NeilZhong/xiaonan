@@ -52,21 +52,23 @@ const notifications = computed(() => {
   }))
 })
 
-function goTask(taskId) {
-  router.push(`/police/tasks/${taskId}`)
+// 任务详情路由保留（/police/tasks/:taskId）；全局任务看板已移除，
+// “查看看板/查看全部”统一跳转到案件详情（案件内自带该案件的任务看板）。
+function goTask(task) {
+  router.push(`/police/tasks/${task.id}`)
 }
 function goDraft(task) {
-  router.push(`/police/tasks?case_id=${task.case_id}&draft_id=${task.id}`)
+  router.push(`/police/tasks/${task.id}`)
 }
 function goCaseTasks(caseId) {
-  router.push(`/police/tasks?case_id=${caseId}`)
+  router.push(`/police/cases/${caseId}`)
 }
 
-// ── 准实时刷新 ────────────────────────────────────────────
-useRealtime(() => policeStore.loadMyDrafts(), { interval: 30000 })
-useRealtime(() => policeStore.loadReviewTasks(1, 6), { interval: 30000 })
-useRealtime(() => policeStore.loadMyTasks(1, 10), { interval: 30000 })
-useRealtime(() => policeStore.loadStats(), { interval: 60000 })
+// ── 准实时刷新（后台轮询，遇 401 静默处理、不触发全局登出）────────────
+useRealtime(() => policeStore.loadMyDrafts(true), { interval: 30000 })
+useRealtime(() => policeStore.loadReviewTasks(1, 6, true), { interval: 30000 })
+useRealtime(() => policeStore.loadMyTasks(1, 10, true), { interval: 30000 })
+useRealtime(() => policeStore.loadStats(true), { interval: 60000 })
 
 onMounted(() => {
   // 初次加载已通过 useRealtime immediate 触发，这里补充案件列表用于跳转上下文
@@ -112,7 +114,7 @@ onMounted(() => {
       <div class="dashboard-panel">
         <div class="panel-header">
           <h3><InboxOutlined class="panel-icon" /> 待审查</h3>
-          <a-button type="link" size="small" @click="router.push('/police/tasks')">查看看板</a-button>
+          <a-button type="link" size="small" @click="router.push('/police/cases')">查看案件</a-button>
         </div>
         <div class="panel-body">
           <div v-if="policeStore.myDrafts.length === 0" class="empty-state">
@@ -131,7 +133,7 @@ onMounted(() => {
       <div class="dashboard-panel">
         <div class="panel-header">
           <h3><ExclamationCircleOutlined class="panel-icon" /> 待审核</h3>
-          <a-button type="link" size="small" @click="router.push('/police/tasks?status=review')">查看全部</a-button>
+          <a-button type="link" size="small" @click="router.push('/police/cases')">查看全部</a-button>
         </div>
         <div class="panel-body">
           <div v-if="policeStore.reviewTasks.length === 0" class="empty-state">
@@ -141,7 +143,7 @@ onMounted(() => {
             v-for="task in policeStore.reviewTasks"
             :key="task.id"
             class="task-item"
-            @click="goTask(task.id)"
+            @click="goTask(task)"
           >
             <div class="task-item-main">
               <div class="task-item-title">{{ task.title }}</div>
@@ -151,7 +153,7 @@ onMounted(() => {
               </div>
             </div>
             <div class="task-item-due">
-              <a-button type="primary" size="small" @click.stop="goTask(task.id)">审核</a-button>
+              <a-button type="primary" size="small" @click.stop="goTask(task)">审核</a-button>
             </div>
           </div>
         </div>
@@ -161,7 +163,7 @@ onMounted(() => {
       <div class="dashboard-panel">
         <div class="panel-header">
           <h3><ClockCircleOutlined class="panel-icon" /> 待处理</h3>
-          <a-button type="link" size="small" @click="router.push('/police/tasks')">查看全部</a-button>
+          <a-button type="link" size="small" @click="router.push('/police/cases')">查看全部</a-button>
         </div>
         <div class="panel-body">
           <div v-if="myActiveTasks.length === 0" class="empty-state">
@@ -206,9 +208,9 @@ onMounted(() => {
           <FileSearchOutlined class="quick-action-icon" />
           <span>案件管理</span>
         </div>
-        <div class="quick-action-card" @click="router.push('/police/tasks')">
+        <div class="quick-action-card" @click="router.push('/police/cases')">
           <CheckCircleOutlined class="quick-action-icon" />
-          <span>任务看板</span>
+          <span>案件任务</span>
         </div>
         <div class="quick-action-card" @click="router.push('/police/evidence')">
           <UploadOutlined class="quick-action-icon" />

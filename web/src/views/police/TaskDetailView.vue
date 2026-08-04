@@ -119,7 +119,7 @@ async function loadTask() {
     await policeStore.loadTask(taskId)
     if (!policeStore.currentTask) {
       message.error('任务不存在')
-      router.replace('/police/tasks')
+      router.replace('/police/cases')
     }
   } catch (e) {
     message.error('加载任务失败')
@@ -286,7 +286,11 @@ async function handleAssign() {
 }
 
 function goBack() {
-  router.push('/police/tasks')
+  if (task.value?.case_id) {
+    router.push(`/police/cases/${task.value.case_id}`)
+  } else {
+    router.push('/police/cases')
+  }
 }
 
 function goToCase() {

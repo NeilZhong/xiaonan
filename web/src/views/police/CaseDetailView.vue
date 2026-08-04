@@ -42,7 +42,7 @@ const taskColumns = [
 const taskStatusText = { pending: '待处理', in_progress: '进行中', review: '待审核', completed: '已完成', blocked: '已驳回' }
 const taskStatusColor = { pending: 'default', in_progress: 'processing', review: 'warning', completed: 'success', blocked: 'error' }
 
-// ── 看板视图常量（与 TaskBoardView 保持一致） ─────
+// ── 看板视图常量（案件内看板）─────
 const statusColumns = [
   { key: 'pending', title: '待处理', color: '#718096' },
   { key: 'in_progress', title: '进行中', color: '#3182CE' },
