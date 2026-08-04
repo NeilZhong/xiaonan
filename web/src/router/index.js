@@ -180,12 +180,6 @@ const router = createRouter({
           meta: { keepAlive: false, requiresAuth: true }
         },
         {
-          path: 'tasks',
-          name: 'PoliceTaskBoard',
-          component: () => import('../views/police/TaskBoardView.vue'),
-          meta: { keepAlive: false, requiresAuth: true }
-        },
-        {
           path: 'tasks/:taskId',
           name: 'PoliceTaskDetail',
           component: () => import('../views/police/TaskDetailView.vue'),

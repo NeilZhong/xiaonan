@@ -724,6 +724,7 @@ SOP（办案规程）是连接「数字警员技能」与「复杂专案协同�
 - **占位符**：`task_title` / `task_description` / `instructions` 支持 `{element}` `{element_value}` `{case_title}` `{case_number}` `{source_task}` 动态填充。
 - **触发逻辑**：推进智能体提取涉案要素后，按 `element_type` + 案件类型/阶段/源任务类型 命中模板；生成的任务草案进入 `pending_confirmation`，由主办民警审查（§6.7.3）。
 - **管理接口**：`/api/police/task-templates`（列表/新建/更新/删除/启用停用/预览）+ `/seed` 植入内置模板（见 §7.2.8）。
+- **权限控制**：配置类接口（新建 `POST`、更新 `PUT`、删除 `DELETE`、启用停用 `POST /toggle`、`/seed` 植入内置模板）**仅限超级管理员**（`role=superadmin`）调用，普通民警调用返回 `403 Forbidden`；列表/详情/元数据/预览为只读，登录即可访问。前端「任务模板」菜单对所有登录用户可见，但非超管执行配置操作会被后端拦截。
 
 ### 4.10 案件工作区文件系统（v1.5 补写，✅ 已实现）
 
@@ -2049,6 +2050,8 @@ class CaseAgent:
 | DELETE | `/api/police/task-templates/{template_id}` | 删除模板 |
 | POST | `/api/police/task-templates/{template_id}/toggle` | 启用/停用 |
 | GET  | `/api/police/task-templates/{template_id}/preview` | 预览 |
+
+> **权限**：配置类接口（`POST` 新建、`/seed` 植入、`PUT` 更新、`DELETE` 删除、`POST /toggle` 启用停用）仅超级管理员（`role=superadmin`）可调用，普通民警返回 `403`；`GET` 列表/详情/元数据/预览为只读，登录即可访问。
 
 #### 7.2.9 工作台 `/api/police/dashboard`
 

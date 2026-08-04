@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.utils.auth_middleware import get_db, get_required_user
+from server.utils.auth_middleware import get_db, get_required_user, get_superadmin_user
 from yuxi.services.police_task_template_service import police_task_template_service
 from yuxi.storage.postgres.models_business import User
 
@@ -75,7 +75,7 @@ async def template_meta(
 
 @task_template_router.post("/seed")
 async def seed_templates(
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_superadmin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """重新植入内置模板（幂等：已存在的只补空字段，不覆盖民警的定制）。"""
@@ -101,7 +101,7 @@ async def list_templates(
 @task_template_router.post("")
 async def create_template(
     body: TemplateCreate,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_superadmin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """新建自定义模板。"""
@@ -127,7 +127,7 @@ async def get_template(
 async def update_template(
     template_id: int,
     body: TemplateUpdate,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_superadmin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """更新模板（内置模板可改内容，但 code 不可变，以免破坏链式引用）。"""
@@ -143,7 +143,7 @@ async def update_template(
 @task_template_router.delete("/{template_id}")
 async def delete_template(
     template_id: int,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_superadmin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """删除自定义模板（内置模板只能停用，不能删除）。"""
@@ -157,7 +157,7 @@ async def delete_template(
 async def toggle_template(
     template_id: int,
     body: TemplateToggle,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_superadmin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """启用 / 停用模板。停用后推进智能体不再用它生成任务。"""

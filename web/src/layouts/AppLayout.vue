@@ -127,14 +127,6 @@ const mainList = computed(() => {
   })
 
   items.push({
-    name: '任务看板',
-    path: '/police/tasks',
-    icon: CheckSquareOutlined,
-    activeIcon: CheckSquareOutlined,
-    activePaths: ['/police/tasks'],
-  })
-
-  items.push({
     name: '案件管理',
     path: '/police/cases',
     icon: Briefcase,
@@ -417,12 +409,14 @@ provide('settingsModal', {
         </div>
       </div>
     </div>
-    <router-view v-slot="{ Component, route }" id="app-router-view">
-      <keep-alive v-if="route.meta.keepAlive !== false">
-        <component :is="Component" />
-      </keep-alive>
-      <component :is="Component" v-else />
-    </router-view>
+    <div id="app-router-view">
+      <router-view v-slot="{ Component, route }">
+        <keep-alive v-if="route.meta.keepAlive !== false">
+          <component :is="Component" />
+        </keep-alive>
+        <component :is="Component" v-else />
+      </router-view>
+    </div>
 
     <ConversationSearchModal
       v-model:open="conversationSearchOpen"

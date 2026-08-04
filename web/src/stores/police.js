@@ -15,24 +15,24 @@ export const usePoliceStore = defineStore('police', () => {
   const myDrafts = ref([])
   const advancementLogs = ref([])
 
-  async function loadStats() {
+  async function loadStats(silent = false) {
     try {
-      const res = await policeDashboardApi.getStats()
+      const res = await policeDashboardApi.getStats(silent)
       stats.value = res.data || stats.value
     } catch (e) { console.error('加载统计失败', e) }
   }
 
-  async function loadMyTasks(page = 1, pageSize = 20) {
+  async function loadMyTasks(page = 1, pageSize = 20, silent = false) {
     try {
-      const res = await policeDashboardApi.getMyTasks({ page, page_size: pageSize })
+      const res = await policeDashboardApi.getMyTasks({ page, page_size: pageSize }, silent)
       myTasks.value = res.data?.items || []
       myTasksTotal.value = res.data?.total || 0
     } catch (e) { console.error('加载我的任务失败', e) }
   }
 
-  async function loadReviewTasks(page = 1, pageSize = 20) {
+  async function loadReviewTasks(page = 1, pageSize = 20, silent = false) {
     try {
-      const res = await policeDashboardApi.getReviewTasks({ page, page_size: pageSize })
+      const res = await policeDashboardApi.getReviewTasks({ page, page_size: pageSize }, silent)
       reviewTasks.value = res.data?.items || []
       reviewTasksTotal.value = res.data?.total || 0
     } catch (e) { console.error('加载审核任务失败', e) }
@@ -122,9 +122,9 @@ export const usePoliceStore = defineStore('police', () => {
   }
 
   // ── 案件推进智能体 ──────────────────────────────────────
-  async function loadMyDrafts() {
+  async function loadMyDrafts(silent = false) {
     try {
-      const res = await policeAdvancementApi.myDrafts()
+      const res = await policeAdvancementApi.myDrafts(silent)
       myDrafts.value = res.data || []
     } catch (e) { console.error('加载待审查草案失败', e) }
   }
@@ -235,7 +235,7 @@ export const usePoliceStore = defineStore('police', () => {
   }
 
   return {
-    stats, myTasks, reviewTasks, myTasksTotal, reviewTasksTotal,
+    stats, myTasks, reviewTasks, myTasksTotal, reviewTasksTotal, myDrafts, advancementLogs,
     cases, casesTotal, currentCase, tasks, tasksTotal, currentTask,
     sops, workspace, taskTemplates, taskTemplateMeta,
     loadStats, loadMyTasks, loadReviewTasks,

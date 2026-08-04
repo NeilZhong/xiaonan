@@ -6,11 +6,12 @@ import { apiGet, apiPost, apiPut, apiDelete } from './base'
 
 // ── 工作台 ──────────────────────────────────────────────────
 export const policeDashboardApi = {
-  getStats: () => apiGet('/api/police/dashboard/stats'),
-  getMyTasks: ({ page = 1, page_size = 20 } = {}) =>
-    apiGet(`/api/police/dashboard/my-tasks?page=${page}&page_size=${page_size}`),
-  getReviewTasks: ({ page = 1, page_size = 20 } = {}) =>
-    apiGet(`/api/police/dashboard/review-tasks?page=${page}&page_size=${page_size}`),
+  getStats: (silent = false) =>
+    apiGet('/api/police/dashboard/stats', silent ? { silent: true } : {}),
+  getMyTasks: ({ page = 1, page_size = 20 } = {}, silent = false) =>
+    apiGet(`/api/police/dashboard/my-tasks?page=${page}&page_size=${page_size}`, silent ? { silent: true } : {}),
+  getReviewTasks: ({ page = 1, page_size = 20 } = {}, silent = false) =>
+    apiGet(`/api/police/dashboard/review-tasks?page=${page}&page_size=${page_size}`, silent ? { silent: true } : {}),
 }
 
 // ── 案件管理 ────────────────────────────────────────────────
@@ -147,7 +148,8 @@ export const policeAdvancementApi = {
   // 某案件待确认任务草案
   listDrafts: (caseId) => apiGet(`/api/police/advancement/${caseId}/drafts`),
   // 当前用户跨案件待确认草案（个人工作台「待审查」）
-  myDrafts: () => apiGet('/api/police/advancement/my-drafts'),
+  myDrafts: (silent = false) =>
+    apiGet('/api/police/advancement/my-drafts', silent ? { silent: true } : {}),
   // 主办民警确认草案 → pending（可附带编辑）
   confirmDraft: (taskId, edits) =>
     apiPost(`/api/police/advancement/tasks/${taskId}/confirm`, { edits: edits || null }),
