@@ -4,15 +4,16 @@
  * 待审查(推进智能体草案) / 待审核 / 待处理 / 通知
  * 通过 useRealtime 准实时刷新。
  */
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { message } from 'ant-design-vue'
 import { usePoliceStore } from '@/stores/police'
 import { useUserStore } from '@/stores/user'
 import { useRealtime } from '@/composables/useRealtime'
 import TaskCard from '@/components/police/TaskCard.vue'
 import {
   InboxOutlined, ClockCircleOutlined, FileSearchOutlined,
-  ExclamationCircleOutlined, CheckCircleOutlined, PlusOutlined, UploadOutlined, BellOutlined
+  ExclamationCircleOutlined, CheckCircleOutlined, PlusOutlined, UploadOutlined, BellOutlined, CloseCircleOutlined
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
@@ -62,6 +63,47 @@ function goDraft(task) {
 }
 function goCaseTasks(caseId) {
   router.push(`/police/cases/${caseId}`)
+}
+
+// ── 工作台内联审核（普通用户也可审核，无需跳转任务详情）────────────
+// 「待审核」列表由后端按 reviewer_id=当前用户 过滤，普通用户作为审核人时自然出现在此处。
+const reviewModalVisible = ref(false)
+const reviewTaskId = ref(null)
+const reviewApproved = ref(true)
+const reviewComment = ref('')
+const reviewLoading = ref(false)
+const reviewTaskDetail = ref(null)
+
+function openReview(task, approved) {
+  reviewTaskId.value = task.id
+  reviewApproved.value = approved
+  reviewComment.value = ''
+  reviewTaskDetail.value = null
+  reviewModalVisible.value = true
+  // 拉取完整任务（含 AI 产出 result）用于审核预览
+  policeStore.loadTask(task.id)
+    .then(() => { reviewTaskDetail.value = policeStore.currentTask })
+    .catch(() => {})
+}
+
+async function handleDashboardReview() {
+  if (!reviewTaskId.value) return
+  reviewLoading.value = true
+  try {
+    await policeStore.reviewTask(reviewTaskId.value, reviewApproved.value, reviewComment.value)
+    message.success(reviewApproved.value ? '审核通过' : '已驳回')
+    reviewModalVisible.value = false
+    // 刷新工作台：待审核 / 统计 / 我的任务
+    await Promise.all([
+      policeStore.loadReviewTasks(1, 6, true),
+      policeStore.loadStats(true),
+      policeStore.loadMyTasks(1, 10, true),
+    ])
+  } catch (e) {
+    message.error(e?.message || '审核失败')
+  } finally {
+    reviewLoading.value = false
+  }
 }
 
 // ── 准实时刷新（后台轮询，遇 401 静默处理、不触发全局登出）────────────
@@ -142,18 +184,19 @@ onMounted(() => {
           <div
             v-for="task in policeStore.reviewTasks"
             :key="task.id"
-            class="task-item"
-            @click="goTask(task)"
+            class="task-item review-item"
           >
             <div class="task-item-main">
               <div class="task-item-title">{{ task.title }}</div>
               <div class="task-item-meta">
-                <a-tag color="warning" size="small">待审核</a-tag>
+                <a-tag color="warning" size="small">待我审核</a-tag>
                 <span class="task-item-assignee">{{ task.assignee_name || '未分配' }}</span>
               </div>
             </div>
-            <div class="task-item-due">
-              <a-button type="primary" size="small" @click.stop="goTask(task)">审核</a-button>
+            <div class="task-item-actions">
+              <a-button size="small" @click="goTask(task)">查看</a-button>
+              <a-button type="primary" size="small" @click="openReview(task, true)">通过</a-button>
+              <a-button danger size="small" @click="openReview(task, false)">驳回</a-button>
             </div>
           </div>
         </div>
@@ -218,6 +261,46 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- 工作台内联审核弹窗（普通用户也可审核，无需跳转任务详情） -->
+    <a-modal
+      v-model:open="reviewModalVisible"
+      :title="reviewApproved ? '审核通过' : '驳回任务'"
+      :confirm-loading="reviewLoading"
+      :width="720"
+      ok-text="确认"
+      cancel-text="取消"
+      :ok-button-props="{ danger: !reviewApproved }"
+      @ok="handleDashboardReview"
+    >
+      <div v-if="reviewTaskDetail" class="review-modal-body">
+        <div class="rm-task-title">{{ reviewTaskDetail.title }}</div>
+        <div class="rm-section-label">执行结果（AI 产出）</div>
+        <div class="rm-result">
+          <template v-if="typeof reviewTaskDetail.result === 'string'">{{ reviewTaskDetail.result }}</template>
+          <template v-else>
+            <div v-if="reviewTaskDetail.result?.summary">{{ reviewTaskDetail.result.summary }}</div>
+            <details v-if="reviewTaskDetail.result?.agent_results?.length" style="margin-top: 8px">
+              <summary style="cursor: pointer; color: #24839b;">查看各智能体详细结果 ({{ reviewTaskDetail.result.agent_results.length }})</summary>
+              <div v-for="(ar, idx) in reviewTaskDetail.result.agent_results" :key="idx" style="margin-top: 8px; padding: 8px; background: #f6f8fa; border-radius: 6px;">
+                <strong>{{ ar.agent_name }}</strong>
+                <pre v-if="ar.result" style="white-space: pre-wrap; font-size: 12px; margin-top: 4px;">{{ ar.result }}</pre>
+                <span v-if="ar.error" style="color: #e53e3e;">执行错误: {{ ar.error }}</span>
+              </div>
+            </details>
+          </template>
+        </div>
+        <a-textarea
+          v-model:value="reviewComment"
+          :placeholder="reviewApproved ? '审核备注（可选）...' : '请输入驳回原因...'"
+          :rows="4"
+          :maxlength="500"
+          show-count
+          style="margin-top: 12px"
+        />
+      </div>
+      <div v-else style="padding: 24px; text-align: center; color: #999;">加载中...</div>
+    </a-modal>
   </div>
 </template>
 
@@ -411,5 +494,38 @@ onMounted(() => {
 }
 .quick-action-icon {
   font-size: 24px;
+}
+.review-item {
+  align-items: center;
+}
+.task-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.review-modal-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.rm-task-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.rm-section-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-600, #4a5568);
+  margin-bottom: 6px;
+}
+.rm-result {
+  background: var(--gray-10, #f7fafc);
+  border: 1px solid var(--gray-50, #e2e8f0);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>
