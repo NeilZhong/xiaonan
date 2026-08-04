@@ -206,12 +206,6 @@ const router = createRouter({
           name: 'PoliceRuntimeConsole',
           component: () => import('../views/police/RuntimeConsoleView.vue'),
           meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
-        },
-        {
-          path: 'audit',
-          name: 'PoliceAuditConsole',
-          component: () => import('../views/police/AuditConsoleView.vue'),
-          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
         }
       ]
     },

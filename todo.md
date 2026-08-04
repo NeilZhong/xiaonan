@@ -126,7 +126,7 @@
 **P0-1 平台角色体系 `system_admin` / `user`**
 - [~] 后端：**决策：复用 yuxi 既有 `users.role`（`admin`/`superadmin`=系统管理员）＋ 既有 `get_admin_user` 依赖作为 `require_admin`**，不新增 `platform_role` 列（避免改动 yuxi 核心 User 模型；如确需独立 `system_admin/user` 枚举再补）。运行时控制台/审计台入口将挂载此依赖。
 - [~] 后端：`require_admin` 已就绪（= `get_admin_user`，`role in [admin, superadmin]`）
-- [x] 前端：管理员专属入口（运行时控制台 / 审计台 / 数字警员管理）按 `role` 显隐；普通用户不可见
+- [x] 前端：管理员专属入口（运行时控制台 / 数字警员管理）按 `role` 显隐；普通用户不可见（审计台页面已取消，见 P0-5）
 
 **P0-2 案件成员模型（用户 + 数字警察并列为一等成员）**
 - [ ] 后端：确认 `police_case_members` 的 `member_type`(`user`/`agent`) + `case_role`(`commander`/`executor`/`reviewer`/`observer`) 在创建/查询/鉴权链路生效
@@ -147,7 +147,7 @@
 **P0-5 审计中间件自动捕获 ip/ua + 查询接口**
 - [ ] 后端：统一 `write_audit_log` 中间件/依赖自动捕获 `ip_address`、`user_agent`（替换当前手写调用点，消除永远 NULL）
 - [ ] 后端：补审计查询接口 `GET /audit/logs`（按 resource_type/action/时间/actor 过滤），鉴权 `system_admin`
-- [ ] 前端：审计台页面（admin-only），时间线 + 过滤 + 哈希链校验入口
+- [ ] 前端：审计台页面已取消（v2.1 决策：审核并入工作台，不再单独设审计台入口）；审计日志仅保留后端留痕 + 查询/校验接口（见 §10.7）
 
 **P0-6 审计哈希链（防篡改）**
 - [ ] 后端：`police_audit_logs` 增 `prev_hash` + `record_hash`（设计见 §7.2.9）；每条记录写入时链接前一条哈希
@@ -311,6 +311,6 @@
 
 10. **两大核心支柱**: ①数字警察为一等公民（与普通用户并列，可对话/可加入案件/可被审核）；②案件驱动协作（用户发起 → 编排智能体拆解 → 分配给人或数字警察 → 产出 → 用户审核 → 推进阶段）
 11. **协作模型本质差异**: 小南是「多个用户 + 多个数字警察共同围着一块案件任务板」，不同于 MateClaw「1 人类指挥 ↔ 1 纯 agent 团队」
-12. **权限分层**: 平台层 `system_admin` / `user` + 案件层 `commander`/`executor`/`reviewer`/`observer`；运行时控制台 / 全局审计台 / 数字警员管理 **仅 system_admin 可见**
+12. **权限分层**: 平台层 `system_admin` / `user` + 案件层 `commander`/`executor`/`reviewer`/`observer`；运行时控制台 / 数字警员管理 **仅 system_admin 可见**（审计台页面已取消）
 13. **审核人判定规则**: `both`→指定用户；`agent`→指挥员(可改派)；`user`→无需审核；改派必写审计
 14. **对照 MateClaw 取长补短**: 借鉴其团队编排/审批卡点/审计/运行时/工作流表达，保留小南公安特化（存证哈希/密级/内网私有化）

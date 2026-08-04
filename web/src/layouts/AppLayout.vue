@@ -11,7 +11,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   MessageCirclePlus,
-  ScrollText,
   Search,
   Shield,
   Briefcase,
@@ -184,13 +183,6 @@ const mainList = computed(() => {
       icon: Activity,
       activeIcon: Activity,
       activePaths: ['/police/runtime-console']
-    })
-    items.push({
-      name: '审计台',
-      path: '/police/audit',
-      icon: ScrollText,
-      activeIcon: ScrollText,
-      activePaths: ['/police/audit']
     })
   }
 
