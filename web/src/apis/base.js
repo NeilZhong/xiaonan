@@ -88,24 +88,31 @@ export async function apiRequest(url, options = {}, requiresAuth = true, respons
       }
 
       if (response.status === 401) {
-        // 如果是认证失败，可能需要重新登录
-        const userStore = useUserStore()
+        // 后台轮询类请求（如工作台准实时刷新）遇 401 时不应触发全局登出，
+        // 否则一次令牌过期就会把整个应用踢到登录页、连带其它页面全部不可用。
+        // 仅当用户主动操作触发的请求 401 时才登出跳登录。
+        if (!options.silent) {
+          // 如果是认证失败，可能需要重新登录
+          const userStore = useUserStore()
 
-        // 检查是否是token过期（errorMessage 已统一为字符串，避免对对象 detail 调用 includes 抛错）
-        const isTokenExpired =
-          errorMessage?.includes('令牌已过期') || errorMessage?.includes('token expired')
+          // 检查是否是token过期（errorMessage 已统一为字符串，避免对对象 detail 调用 includes 抛错）
+          const isTokenExpired =
+            errorMessage?.includes('令牌已过期') || errorMessage?.includes('token expired')
 
-        message.error(isTokenExpired ? '登录已过期，请重新登录' : '认证失败，请重新登录')
+          message.error(isTokenExpired ? '登录已过期，请重新登录' : '认证失败，请重新登录')
 
-        // 如果用户当前认为自己已登录，则登出
-        if (userStore.isLoggedIn) {
-          userStore.logout()
+          // 如果用户当前认为自己已登录，则登出
+          if (userStore.isLoggedIn) {
+            userStore.logout()
+          }
+
+          // 使用setTimeout确保消息显示后再跳转
+          setTimeout(() => {
+            window.location.href = '/login'
+          }, 1500)
+        } else {
+          console.warn('[silent] 后台请求 401，已静默处理，不登出:', url)
         }
-
-        // 使用setTimeout确保消息显示后再跳转
-        setTimeout(() => {
-          window.location.href = '/login'
-        }, 1500)
 
         throw error
       } else if (response.status === 403) {

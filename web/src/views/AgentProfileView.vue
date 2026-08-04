@@ -98,7 +98,9 @@ function runText(s) {
 // ============ 操作 ============
 
 function goBack() {
-  router.push({ name: 'agent-manage' })
+  // 必须用 path 导航：用 name 导航到父路由时 Vue Router 会保留当前子路由的 :id 参数，
+  // 导致仍命中 :id 子路由（档案页）而非列表页。path 导航不会携带 params。
+  router.push({ path: '/agent-manage' })
 }
 
 function goChat() {
@@ -138,7 +140,7 @@ async function handleDelete() {
           await agentApi.deleteAgent(agent.value.id)
         }
         message.success('已删除')
-        router.push({ name: 'agent-manage' })
+        router.push({ path: '/agent-manage' })
       } catch (e) {
         message.error('删除失败: ' + (e.message || e))
       }
@@ -209,9 +211,13 @@ async function load() {
   loading.value = true
   try {
     const id = route.params.id
-    // 路由参数可能是数字警员工号（如 DA-AE74CDAF）或 yuxi slug
+    // 路由参数可能是数字警员工号（格式 DA-xxx，如 DA-001）或 yuxi slug（如 da-003）
+    // 仅当形如警号时才走按工号查询，避免 yuxi slug 触发无谓的 404 噪音
+    const isBadge = /^DA-[\w-]+$/.test(id || '')
     // 先尝试按工号查 police 档案，拿到 yuxi agent_id 后再加载 yuxi 详情
-    const policeData = await policeAgentApi.getByBadgeNumber(id).catch(() => null)
+    const policeData = isBadge
+      ? await policeAgentApi.getByBadgeNumber(id).catch(() => null)
+      : null
     if (policeData?.agent_id) {
       // 数字警员路径：用 police 记录的 agent_id（yuxi 外键）加载 yuxi 详情
       officer.value = policeData
