@@ -126,7 +126,7 @@
 **P0-1 平台角色体系 `system_admin` / `user`**
 - [~] 后端：**决策：复用 yuxi 既有 `users.role`（`admin`/`superadmin`=系统管理员）＋ 既有 `get_admin_user` 依赖作为 `require_admin`**，不新增 `platform_role` 列（避免改动 yuxi 核心 User 模型；如确需独立 `system_admin/user` 枚举再补）。运行时控制台/审计台入口将挂载此依赖。
 - [~] 后端：`require_admin` 已就绪（= `get_admin_user`，`role in [admin, superadmin]`）
-- [ ] 前端：管理员专属入口（运行时控制台 / 审计台 / 数字警员管理）按 `role` 显隐；普通用户不可见
+- [x] 前端：管理员专属入口（运行时控制台 / 审计台 / 数字警员管理）按 `role` 显隐；普通用户不可见
 
 **P0-2 案件成员模型（用户 + 数字警察并列为一等成员）**
 - [ ] 后端：确认 `police_case_members` 的 `member_type`(`user`/`agent`) + `case_role`(`commander`/`executor`/`reviewer`/`observer`) 在创建/查询/鉴权链路生效
@@ -141,6 +141,8 @@
 - [x] 后端：`POST /tasks/{tid}/review` 严格校验（`require_approval=1` 时仅 `reviewer_id` 或 `admin/superadmin`，否则 403）；纯人类任务仅执行人或管理员可标记完成
 - [x] 后端：签名 `signed_hash` 用真实审核人警号签署（`current_user.police_id`），禁止任意账号冒充审核人
 - [ ] 后端（可选）：`GET /tasks/{tid}/verify-signature` 校验签名真实性（待 P0-6 后做）
+- [x] 前端：审核页 `canReview` 按 `reviewer_id` 前置显隐通过/驳回按钮 + 403 友好提示（TaskDetailView.vue）
+- [x] 后端（关键修复）：`ensure_business_schema` 共享 stmts 事务无 per-stmt try，任一 stmt 失败回滚整个事务，导致偏后的 `reviewer_id`/`require_approval` 加列被回滚、列始终不存在；改为独立事务+独立 try/except 加列（manager.py），api 现已正常启动并加载新列
 
 **P0-5 审计中间件自动捕获 ip/ua + 查询接口**
 - [ ] 后端：统一 `write_audit_log` 中间件/依赖自动捕获 `ip_address`、`user_agent`（替换当前手写调用点，消除永远 NULL）
@@ -154,7 +156,7 @@
 **P0-7 运行时控制台仅 `system_admin` 可见**
 - [ ] 后端：`/runtime/*` 全部接口加 `require_admin`
 - [ ] 后端：`police_runtime_sessions` 落库（运行态轮询数字警察当前节点/工具/状态）
-- [ ] 前端：运行时控制台入口仅 `system_admin` 显示；四档干预（暂停/回收/跳子会话/终止）均鉴权
+- [x] 前端：运行时控制台入口仅 `system_admin` 显示；四档干预（暂停/回收/跳子会话/终止）均鉴权
 
 ### 🟠 P1：协作深化（P0 完成后）
 
