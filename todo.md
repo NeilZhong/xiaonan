@@ -126,7 +126,7 @@
 **P0-1 平台角色体系 `system_admin` / `user`**
 - [~] 后端：**决策：复用 yuxi 既有 `users.role`（`admin`/`superadmin`=系统管理员）＋ 既有 `get_admin_user` 依赖作为 `require_admin`**，不新增 `platform_role` 列（避免改动 yuxi 核心 User 模型；如确需独立 `system_admin/user` 枚举再补）。运行时控制台/审计台入口将挂载此依赖。
 - [~] 后端：`require_admin` 已就绪（= `get_admin_user`，`role in [admin, superadmin]`）
-- [x] 前端：管理员专属入口（运行时控制台 / 数字警员管理）按 `role` 显隐；普通用户不可见（审计台页面已取消，见 P0-5）
+- [x] 前端：管理员专属入口（运行时控制台 / 数字警员管理 / 数据总览审计概览）按 `role` 显隐；普通用户不可见（审计独立页面已取消，审计能力并入数据总览，见 P0-5）
 
 **P0-2 案件成员模型（用户 + 数字警察并列为一等成员）**
 - [ ] 后端：确认 `police_case_members` 的 `member_type`(`user`/`agent`) + `case_role`(`commander`/`executor`/`reviewer`/`observer`) 在创建/查询/鉴权链路生效
@@ -144,14 +144,14 @@
 - [x] 前端：审核页 `canReview` 按 `reviewer_id` 前置显隐通过/驳回按钮 + 403 友好提示（TaskDetailView.vue）
 - [x] 后端（关键修复）：`ensure_business_schema` 共享 stmts 事务无 per-stmt try，任一 stmt 失败回滚整个事务，导致偏后的 `reviewer_id`/`require_approval` 加列被回滚、列始终不存在；改为独立事务+独立 try/except 加列（manager.py），api 现已正常启动并加载新列
 
-**P0-5 审计中间件自动捕获 ip/ua + 查询接口**
-- [ ] 后端：统一 `write_audit_log` 中间件/依赖自动捕获 `ip_address`、`user_agent`（替换当前手写调用点，消除永远 NULL）
-- [ ] 后端：补审计查询接口 `GET /audit/logs`（按 resource_type/action/时间/actor 过滤），鉴权 `system_admin`
-- [ ] 前端：审计台页面已取消（v2.1 决策：审核并入工作台，不再单独设审计台入口）；审计日志仅保留后端留痕 + 查询/校验接口（见 §10.7）
+**P0-5 审计中间件自动捕获 ip/ua + 查询/统计/校验接口**
+- [x] 后端：`AuditMetaMiddleware` 自动捕获 `ip_address`/`user_agent`（contextvars，复用 `_extract_client_ip`），消除永远 NULL；`write_audit_log` 统一收敛全部审计点（案件/任务/智能体/证据）
+- [x] 后端：§10.7 接口 `GET /police/audit/stats`、`GET /police/audit/logs`（过滤+分页）、`GET /cases/{id}/audit/logs`（指挥员/管理员）、`POST /police/audit/verify`，鉴权 `system_admin` / 案件指挥员
+- [x] 前端：审计能力并入通用数据总览（`DashboardView`）——「审计概览」卡片（今日/异常操作+最近事件）+「查看全部」抽屉（过滤/列表/哈希链校验），仅 `isAdmin` 可见；不另设独立审计台页面
 
 **P0-6 审计哈希链（防篡改）**
-- [ ] 后端：`police_audit_logs` 增 `prev_hash` + `record_hash`（设计见 §7.2.9）；每条记录写入时链接前一条哈希
-- [ ] 后端：`GET /audit/{id}/verify` 重算哈希验证完整性，返回是否被篡改
+- [x] 后端：`police_audit_logs` 增 `prev_hash` + `record_hash`（§7.2.9）；`write_audit_log` 每条记录链接前一条哈希，独立事务迁移加列
+- [x] 后端：`POST /police/audit/verify` 重算哈希并校验 `prev_hash` 链接连续性，返回 `ok/checked/legacy_count/broken_at`（历史遗留 NULL 记录计入 legacy）
 
 **P0-7 运行时控制台仅 `system_admin` 可见**
 - [ ] 后端：`/runtime/*` 全部接口加 `require_admin`
@@ -311,6 +311,6 @@
 
 10. **两大核心支柱**: ①数字警察为一等公民（与普通用户并列，可对话/可加入案件/可被审核）；②案件驱动协作（用户发起 → 编排智能体拆解 → 分配给人或数字警察 → 产出 → 用户审核 → 推进阶段）
 11. **协作模型本质差异**: 小南是「多个用户 + 多个数字警察共同围着一块案件任务板」，不同于 MateClaw「1 人类指挥 ↔ 1 纯 agent 团队」
-12. **权限分层**: 平台层 `system_admin` / `user` + 案件层 `commander`/`executor`/`reviewer`/`observer`；运行时控制台 / 数字警员管理 **仅 system_admin 可见**（审计台页面已取消）
+12. **权限分层**: 平台层 `system_admin` / `user` + 案件层 `commander`/`executor`/`reviewer`/`observer`；运行时控制台 / 数字警员管理 / 数据总览审计概览 **仅 system_admin 可见**（审计独立页面已取消，审计能力并入数据总览）
 13. **审核人判定规则**: `both`→指定用户；`agent`→指挥员(可改派)；`user`→无需审核；改派必写审计
 14. **对照 MateClaw 取长补短**: 借鉴其团队编排/审批卡点/审计/运行时/工作流表达，保留小南公安特化（存证哈希/密级/内网私有化）

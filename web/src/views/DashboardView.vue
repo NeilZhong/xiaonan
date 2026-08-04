@@ -48,10 +48,18 @@
           ref="knowledgeStatsRef"
         />
       </div>
+
+      <!-- 审计概览 - 仅系统管理员可见 -->
+      <div v-if="userStore.isAdmin" class="grid-item audit-overview">
+        <AuditOverviewComponent @open-audit="auditOpen = true" />
+      </div>
     </div>
 
     <!-- 反馈模态框 -->
     <FeedbackModalComponent ref="feedbackModal" />
+
+    <!-- 审计日志抽屉（仅系统管理员） -->
+    <AuditDetailDrawer v-if="userStore.isAdmin" v-model:open="auditOpen" />
   </div>
 </template>
 
@@ -69,9 +77,16 @@ import AgentStatsComponent from '@/components/dashboard/AgentStatsComponent.vue'
 import CallStatsComponent from '@/components/dashboard/CallStatsComponent.vue'
 import StatsOverviewComponent from '@/components/dashboard/StatsOverviewComponent.vue'
 import FeedbackModalComponent from '@/components/dashboard/FeedbackModalComponent.vue'
+import AuditOverviewComponent from '@/components/dashboard/AuditOverviewComponent.vue'
+import AuditDetailDrawer from '@/components/dashboard/AuditDetailDrawer.vue'
+import { useUserStore } from '@/stores/user'
 
 // 组件引用
 const feedbackModal = ref(null)
+
+// 审计概览（仅系统管理员可见）
+const userStore = useUserStore()
+const auditOpen = ref(false)
 
 // 统计数据 - 使用新的响应式结构
 const basicStats = ref({})
@@ -220,6 +235,12 @@ onUnmounted(() => {
     &.knowledge-stats {
       grid-column: 3 / 4;
       grid-row: 2 / 3;
+      min-height: 350px;
+    }
+
+    &.audit-overview {
+      grid-column: 1 / 2;
+      grid-row: 3 / 4;
       min-height: 350px;
     }
   }

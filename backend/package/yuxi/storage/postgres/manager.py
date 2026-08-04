@@ -1231,6 +1231,14 @@ class PostgresManager(metaclass=SingletonMeta):
         except Exception as e:
             logger.warning(f"加列 police_tasks.reviewer_id/require_approval 失败（可安全重试）: {e}")
 
+        # v2.1 §10.7 / P0-6 审计哈希链字段：独立事务加列，确保不被共享 stmts 事务回滚影响
+        try:
+            async with self.async_engine.begin() as conn:
+                await conn.execute(text("ALTER TABLE IF EXISTS police_audit_logs ADD COLUMN IF NOT EXISTS prev_hash VARCHAR(64)"))
+                await conn.execute(text("ALTER TABLE IF EXISTS police_audit_logs ADD COLUMN IF NOT EXISTS record_hash VARCHAR(64)"))
+        except Exception as e:
+            logger.warning(f"加列 police_audit_logs.prev_hash/record_hash 失败（可安全重试）: {e}")
+
         async with self.async_engine.begin() as conn:
             # 历史未绑定用户的 API Key 会在下方迁移语句里被静默删除，先计数告警
             # 便于运维凭据失效时回溯；DELETE 之后无法再查询这些 Key。

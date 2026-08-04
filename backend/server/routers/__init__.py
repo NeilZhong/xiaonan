@@ -29,6 +29,7 @@ from server.routers.police_workspace_router import workspace_router as police_wo
 from server.routers.police_import_router import import_router as police_import_router
 from server.routers.police_advancement_router import advancement_router as police_advancement_router
 from server.routers.police_task_template_router import task_template_router as police_task_template_router
+from server.routers.police_audit_router import audit_router as police_audit_router
 
 _LITE_MODE = os.environ.get("LITE_MODE", "").lower() in ("true", "1")
 
@@ -65,6 +66,7 @@ router.include_router(police_workspace_router)   # /api/police/workspaces/* 案�
 router.include_router(police_import_router)       # /api/police/import/* 笔录导入与智能建案
 router.include_router(police_advancement_router)   # /api/police/advancement/* 案件推进智能体
 router.include_router(police_task_template_router)  # /api/police/task-templates/* 侦查任务模板配置
+router.include_router(police_audit_router)           # /api/police/audit/* 审计统计/查询/校验 (§10.7)
 
 if not _LITE_MODE:
     from server.routers.external_kb_router import external_kb

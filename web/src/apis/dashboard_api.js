@@ -128,5 +128,38 @@ export const dashboardApi = {
    */
   getCallTimeseries: (type = 'models', timeRange = '14days') => {
     return apiAdminGet(`/api/dashboard/stats/calls/timeseries?type=${type}&time_range=${timeRange}`)
+  },
+
+  // ========== 审计概览 / 查询 / 校验 (§10.7, 管理员) ==========
+
+  /**
+   * 审计概览统计：今日操作数 / 异常操作数 / 最近事件
+   * @returns {Promise<Object>} - { today_ops, anomaly_ops, recent_events }
+   */
+  getAuditStats: () => {
+    return apiAdminGet('/api/police/audit/stats')
+  },
+
+  /**
+   * 审计日志查询（系统管理员），支持多维过滤与分页
+   * @param {Object} params - action / user_id / case_id / resource_type / from / to / limit / offset
+   * @returns {Promise<Object>} - { total, items }
+   */
+  getAuditLogs: (params = {}) => {
+    const queryParams = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') queryParams.append(k, v)
+    })
+    const qs = queryParams.toString()
+    return apiAdminGet(`/api/police/audit/logs${qs ? `?${qs}` : ''}`)
+  },
+
+  /**
+   * 审计哈希链校验（系统管理员）
+   * @param {number} limit - 校验的最大记录数
+   * @returns {Promise<Object>} - { ok, checked, legacy_count, broken_at }
+   */
+  verifyAuditChain: (limit = 5000) => {
+    return apiAdminPost(`/api/police/audit/verify?limit=${limit}`, {})
   }
 }

@@ -134,6 +134,22 @@ app.add_middleware(AccessLogMiddleware)
 # 添加登录限流中间件
 app.add_middleware(LoginRateLimitMiddleware)
 
+
+class AuditMetaMiddleware(BaseHTTPMiddleware):
+    """★ 在每个请求入口注入客户端 ip / user_agent 到审计上下文，
+    供审计写入自动捕获（P0-5 §10.7），不阻塞主流程。"""
+
+    async def dispatch(self, request: Request, call_next):
+        from yuxi.services.police_audit_context import set_request_meta
+
+        ua = request.headers.get("user-agent")
+        set_request_meta(_extract_client_ip(request), ua)
+        return await call_next(request)
+
+
+# 添加审计元数据中间件（注入 ip / user_agent 供审计自动捕获）
+app.add_middleware(AuditMetaMiddleware)
+
 if __name__ == "__main__":
     # uvicorn.run(app, host="0.0.0.0", port=5050, threads=10, workers=10, reload=True)
 

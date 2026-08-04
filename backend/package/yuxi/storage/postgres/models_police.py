@@ -676,6 +676,9 @@ class PoliceAuditLog(Base):
     details = Column(JSON, nullable=True)
     ip_address = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
+    # ★ 哈希链防篡改 (P0-6 / §10.7): prev_hash 指向上一条记录的 record_hash，record_hash 为本条规范化摘要
+    prev_hash = Column(String(64), nullable=True, index=True)
+    record_hash = Column(String(64), nullable=True, index=True)
     created_at = Column(DateTime, default=utc_now_naive)
 
     def to_dict(self) -> dict[str, Any]:
@@ -690,6 +693,8 @@ class PoliceAuditLog(Base):
             "details": self.details,
             "ip_address": self.ip_address,
             "user_agent": self.user_agent,
+            "prev_hash": self.prev_hash,
+            "record_hash": self.record_hash,
             "created_at": format_utc_datetime(self.created_at),
         }
 

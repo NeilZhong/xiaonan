@@ -24,6 +24,38 @@ from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils import logger
 
 
+def _canonical_audit_string(
+    *,
+    action: str,
+    resource_type: str,
+    resource_id: int | None,
+    case_id: int | None,
+    user_id: int | None,
+    details: dict | None,
+    ip: str | None,
+    ua: str | None,
+    created_at_iso: str,
+    prev_hash: str | None,
+) -> str:
+    """将一条审计记录规范化为待哈希字符串（用于哈希链 record_hash）。"""
+    import json
+
+    return "||".join(
+        [
+            str(action),
+            str(resource_type),
+            str(resource_id),
+            str(case_id),
+            str(user_id),
+            json.dumps(details or {}, sort_keys=True, ensure_ascii=False),
+            str(ip),
+            str(ua),
+            created_at_iso,
+            str(prev_hash),
+        ]
+    )
+
+
 async def write_audit_log(
     *,
     action: str,
@@ -38,12 +70,47 @@ async def write_audit_log(
 
     供案件、任务、证据、智能体等各业务操作统一调用，确保关键操作均可
     追溯到 (操作人, 动作, 资源, 案件, 时间)，满足 POLICE_REQUIREMENTS §9.4 全量覆盖要求。
+    自动捕获请求 ip/ua（P0-5），并计算哈希链 record_hash / prev_hash（P0-6 §10.7）。
     """
     try:
+        import hashlib
+        from sqlalchemy import select
+
+        from yuxi.services.police_audit_context import get_request_ip, get_request_ua
         from yuxi.storage.postgres.manager import pg_manager
         from yuxi.storage.postgres.models_police import PoliceAuditLog
 
+        ip = get_request_ip()
+        ua = get_request_ua()
+        created_at = utc_now_naive()
+        created_at_iso = created_at.isoformat()
+
         async with pg_manager.get_async_session_context() as session:
+            # 取上一条记录的 record_hash 作为本记录的 prev_hash（链头 prev_hash=None）
+            prev_hash = None
+            try:
+                prev_row = await session.execute(
+                    select(PoliceAuditLog.record_hash).order_by(PoliceAuditLog.id.desc()).limit(1)
+                )
+                prev_hash = prev_row.scalar_one_or_none()
+            except Exception:
+                prev_hash = None
+
+            record_hash = hashlib.sha256(
+                _canonical_audit_string(
+                    action=action,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    case_id=case_id,
+                    user_id=user_id,
+                    details=details,
+                    ip=ip,
+                    ua=ua,
+                    created_at_iso=created_at_iso,
+                    prev_hash=prev_hash,
+                ).encode("utf-8")
+            ).hexdigest()
+
             log = PoliceAuditLog(
                 user_id=user_id,
                 user_name=user_name,
@@ -52,6 +119,11 @@ async def write_audit_log(
                 resource_id=resource_id,
                 case_id=case_id,
                 details=details,
+                ip_address=ip,
+                user_agent=ua,
+                prev_hash=prev_hash,
+                record_hash=record_hash,
+                created_at=created_at,
             )
             session.add(log)
             await session.commit()
@@ -869,21 +941,13 @@ class PoliceAgentService:
             return yuxi_agent
 
     async def _audit_agent(self, agent_id: int, action: str, details: dict):
-        try:
-            from yuxi.storage.postgres.models_police import PoliceAuditLog
-            from yuxi.storage.postgres.manager import pg_manager
-
-            async with pg_manager.get_async_session_context() as session:
-                log = PoliceAuditLog(
-                    action=action,
-                    resource_type="agent",
-                    resource_id=agent_id,
-                    details=details,
-                )
-                session.add(log)
-                await session.commit()
-        except Exception as e:
-            logger.error(f"Failed to write audit log: {e}")
+        # 复用统一审计写入，自动捕获 ip/ua 并计算哈希链
+        await write_audit_log(
+            action=action,
+            resource_type="agent",
+            resource_id=agent_id,
+            details=details,
+        )
 
     # ── 共享与市场发布 ─────────────────────────────────────
 
