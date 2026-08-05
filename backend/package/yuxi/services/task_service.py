@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any
 
-from yuxi.repositories.task_repository import TaskRepository
+from yuxi.repositories.tasker_task_repository import TaskerTaskRepository
 from yuxi.utils.datetime_utils import coerce_any_to_utc_datetime, utc_isoformat
 from yuxi.utils.logging_config import logger
 
@@ -123,7 +123,7 @@ class Tasker:
         self._lifecycle_lock = asyncio.Lock()
         self._workers: list[asyncio.Task[Any]] = []
         self._started = False
-        self._repo = TaskRepository()
+        self._repo = TaskerTaskRepository()
         # 记录每个任务上次落库时的进度，用于进度节流
         self._last_persisted_progress: dict[str, float] = {}
 

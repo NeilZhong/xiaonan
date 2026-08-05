@@ -16,7 +16,7 @@ from yuxi.models import select_model
 from yuxi.repositories.evaluation_repository import EvaluationRepository
 from yuxi.repositories.knowledge_base_repository import KnowledgeBaseRepository
 from yuxi.repositories.knowledge_chunk_repository import KnowledgeChunkRepository
-from yuxi.repositories.task_repository import TaskRepository
+from yuxi.repositories.tasker_task_repository import TaskerTaskRepository
 from yuxi.services.task_service import TaskContext, tasker
 from yuxi.utils import logger
 from yuxi.utils.datetime_utils import format_utc_datetime, utc_now_naive
@@ -39,7 +39,7 @@ class EvaluationService:
         self.eval_repo = EvaluationRepository()
         self.kb_repo = KnowledgeBaseRepository()
         self.chunk_repo = KnowledgeChunkRepository()
-        self.task_repo = TaskRepository()
+        self.task_repo = TaskerTaskRepository()
 
     def _dataset_to_dict(self, row) -> dict[str, Any]:
         return {
