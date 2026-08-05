@@ -24,6 +24,35 @@ const OFFICE_EXTENSIONS = new Set([
   '.ods',
   '.odp'
 ])
+// preset-engineering 覆盖的格式（XMind / CAD / 3D / 压缩包 / PSD / Geo / Typst / EDA / Drawing）。
+// 与 office 共用"原样吐字节 + FileViewer 渲染"通道，后端 detect_preview_type 命中后会
+// 返回 preview_type="office"（见 backend/_ENGINEERING_EXTENSIONS）。
+const ENGINEERING_EXTENSIONS = new Set([
+  // XMind
+  '.xmind',
+  // 压缩包
+  '.zip', '.zipx', '.7z', '.rar', '.tar', '.gz', '.gzip', '.tgz',
+  '.bz2', '.bzip2', '.tbz', '.tbz2', '.xz', '.txz', '.lzma', '.zst',
+  '.tzst', '.cab', '.ar', '.cpio', '.iso', '.xar', '.lha', '.lzh',
+  '.jar', '.war', '.ear', '.apk', '.cbz', '.cbr',
+  // CAD
+  '.dxf', '.dwg', '.dwf', '.dwfx', '.xps',
+  // 3D 模型
+  '.glb', '.gltf', '.obj', '.stl', '.ply', '.fbx', '.dae', '.3ds',
+  '.3mf', '.amf', '.usd', '.usda', '.usdc', '.usdz', '.kmz',
+  '.step', '.stp', '.iges', '.igs', '.ifc', '.3dm', '.brep',
+  '.pcd', '.wrl', '.vrml', '.xyz', '.vtk', '.vtp',
+  // Geo
+  '.geojson', '.kml', '.gpx', '.shp',
+  // Typst
+  '.typ', '.typst',
+  // EDA
+  '.olb', '.dra', '.gds', '.oas', '.oasis',
+  // Drawing
+  '.excalidraw', '.drawio', '.dio', '.mermaid', '.mmd', '.plantuml', '.puml',
+  // PSD
+  '.psd', '.psb'
+])
 const TEXT_EXTENSIONS = new Set([
   '.txt',
   '.text',
@@ -145,7 +174,7 @@ export const getPreviewTypeByPath = (path) => {
   if (PDF_EXTENSIONS.has(extension)) return 'pdf'
   if (MARKDOWN_EXTENSIONS.has(extension)) return 'markdown'
   if (HTML_EXTENSIONS.has(extension)) return 'html'
-  if (OFFICE_EXTENSIONS.has(extension)) return 'office'
+  if (OFFICE_EXTENSIONS.has(extension) || ENGINEERING_EXTENSIONS.has(extension)) return 'office'
   if (TEXT_EXTENSIONS.has(extension)) return 'text'
   return 'unsupported'
 }
@@ -184,7 +213,10 @@ export const getPreviewTypeByContentType = (contentType) => {
 
 export const isOfficePreview = (path) => {
   const extension = getPreviewFileExtension(path)
-  return OFFICE_EXTENSIONS.has(extension)
+  // 名称沿用 isOfficePreview，但同时覆盖 preset-engineering 格式：
+  // 后端对二者都返回 preview_type="office" 并原样透传字节，
+  // 前端 FileViewer 合并了 office + engineering preset 后都能渲染。
+  return OFFICE_EXTENSIONS.has(extension) || ENGINEERING_EXTENSIONS.has(extension)
 }
 
 export const normalizePreviewResponse = async (response, baseFile = {}) => {

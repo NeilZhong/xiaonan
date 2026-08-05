@@ -24,6 +24,7 @@ import { computed, ref, watch } from 'vue'
 import { AlertTriangle } from 'lucide-vue-next'
 import { FileViewer } from '@file-viewer/vue3'
 import officePreset from '@file-viewer/preset-office'
+import engineeringPreset from '@file-viewer/preset-engineering'
 import { useThemeStore } from '@/stores/theme'
 
 const props = defineProps({
@@ -52,7 +53,12 @@ const buildFile = () => {
 watch([() => props.blob, () => props.filename], buildFile, { immediate: true })
 
 const viewerOptions = computed(() => ({
-  preset: officePreset,
+  // office + engineering 合并：覆盖 PDF/Word/Excel/PPT/OFD + CAD/3D/XMind/压缩包/PSD/Geo/Typst/EDA
+  preset: {
+    id: 'file-viewer-preset-office-engineering',
+    label: 'office + engineering renderer preset',
+    renderers: [...officePreset.renderers, ...engineeringPreset.renderers]
+  },
   rendererMode: 'replace',
   theme: themeStore.isDark ? 'dark' : 'light',
   toolbar: { position: 'bottom-right' },

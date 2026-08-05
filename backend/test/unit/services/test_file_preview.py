@@ -57,6 +57,27 @@ def test_office_preview_scope_covers_all_file_viewer_office_formats():
         assert (preview_type, supported) == ("office", True), name
 
 
+def test_detect_preview_type_marks_xmind_and_engineering_formats_as_office():
+    """preset-engineering 覆盖的格式（XMind / CAD / 3D / 压缩包 / PSD 等）必须早于 ZIP/二进制签名
+    判定命中后返回 office，否则 XMind/压缩包会被 PK\\x03\\x04 头误判为 unsupported。"""
+    # XMind (本质是 ZIP) + 各工程类扩展名
+    for name in (
+        "a.xmind",      # XMind
+        "a.zip",        # 压缩包
+        "a.7z", "a.rar", "a.tar", "a.gz",
+        "a.dwg", "a.dxf",  # CAD
+        "a.step", "a.stp", "a.iges",  # 3D
+        "a.glb", "a.gltf", "a.obj", "a.stl", "a.fbx",
+        "a.psd", "a.psb",  # PSD
+        "a.geojson", "a.kml",  # Geo
+        "a.typ", "a.typst",   # Typst
+        "a.mermaid", "a.plantuml",  # Drawing
+    ):
+        # 真实 XMind/ZIP 文件头含 \\x00（压缩条目），用真实场景头验证不会落进二进制分支
+        preview_type, supported, _message = detect_preview_type(name, b"PK\x03\x04\x00\x00")
+        assert (preview_type, supported) == ("office", True), name
+
+
 def test_detect_media_type_returns_office_mime_for_known_extensions():
     """File Viewer 依赖响应 Content-Type 辅助判型，办公格式不能退化成 octet-stream。"""
     assert detect_media_type("a.docx", b"PK\x03\x04") == (

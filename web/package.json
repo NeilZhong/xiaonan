@@ -17,6 +17,7 @@
     "@ant-design/icons-vue": "^7.0.1",
     "@antv/g6": "^5.1.1",
     "@file-viewer/preset-office": "^2.2.5",
+    "@file-viewer/preset-engineering": "^2.2.5",
     "@file-viewer/vue3": "^2.2.5",
     "@opencode-ai/models": "0.0.15",
     "@sigma/edge-curve": "^3.1.0",

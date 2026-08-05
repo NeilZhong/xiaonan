@@ -14,6 +14,38 @@ _HTML_EXTENSIONS = frozenset({".html", ".htm"})
 _OFFICE_EXTENSIONS = frozenset(
     {".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".odt", ".ods", ".odp"}
 )
+# preset-engineering 覆盖的格式（XMind / CAD / 3D / 压缩包 / PSD / Geo / Typst / EDA / Drawing）。
+# 复用 "office" 这条原始字节透传通道：前端 FileViewer 已在 preset 中合并 office + engineering，
+# 后端无需为它们单开 preview_type，只扩展白名单避免被 ZIP/二进制签名误判为 unsupported。
+# 需与前端 ENGINEERING_EXTENSIONS 保持一致。
+_ENGINEERING_EXTENSIONS = frozenset(
+    {
+        # XMind
+        ".xmind",
+        # 压缩包（archive）
+        ".zip", ".zipx", ".7z", ".rar", ".tar", ".gz", ".gzip", ".tgz",
+        ".bz2", ".bzip2", ".tbz", ".tbz2", ".xz", ".txz", ".lzma", ".zst",
+        ".tzst", ".cab", ".ar", ".cpio", ".iso", ".xar", ".lha", ".lzh",
+        ".jar", ".war", ".ear", ".apk", ".cbz", ".cbr",
+        # CAD
+        ".dxf", ".dwg", ".dwf", ".dwfx", ".xps",
+        # 3D 模型
+        ".glb", ".gltf", ".obj", ".stl", ".ply", ".fbx", ".dae", ".3ds",
+        ".3mf", ".amf", ".usd", ".usda", ".usdc", ".usdz", ".kmz",
+        ".step", ".stp", ".iges", ".igs", ".ifc", ".3dm", ".brep",
+        ".pcd", ".wrl", ".vrml", ".xyz", ".vtk", ".vtp",
+        # Geo
+        ".geojson", ".kml", ".gpx", ".shp",
+        # Typst
+        ".typ", ".typst",
+        # EDA
+        ".olb", ".dra", ".gds", ".oas", ".oasis",
+        # Drawing
+        ".excalidraw", ".drawio", ".dio", ".mermaid", ".mmd", ".plantuml", ".puml",
+        # PSD
+        ".psd", ".psb",
+    }
+)
 _OFFICE_MEDIA_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".doc": "application/msword",
@@ -107,6 +139,12 @@ def detect_preview_type(path: str, raw_content: bytes) -> tuple[str, bool, str |
     # 办公文档原样交给前端 File Viewer；必须早于下方的 ZIP/二进制签名判定，
     # 否则 OOXML（PK\x03\x04 开头）会被误判为不支持预览。
     if suffix in _OFFICE_EXTENSIONS:
+        return "office", True, None
+
+    # preset-engineering 覆盖的格式（XMind / CAD / 3D / 压缩包 / PSD / Geo / Typst / EDA / Drawing）：
+    # 同样原样交给前端 File Viewer 渲染。XMind/压缩包本质是 ZIP，必须在此早返回，
+    # 否则会被下方的 ZIP 签名分支误判为 unsupported。
+    if suffix in _ENGINEERING_EXTENSIONS:
         return "office", True, None
 
     if suffix in _MARKDOWN_EXTENSIONS:
