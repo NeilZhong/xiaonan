@@ -52,6 +52,7 @@ BUILTIN_PROVIDERS: list[dict[str, Any]] = [
         "api_key_env": "DASHSCOPE_API_KEY",
         "capabilities": ["chat", "embedding", "rerank"],
         "models_endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+        "embedding_models_endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings/models",
         "enabled_models": [
             {
                 "id": "text-embedding-v4",

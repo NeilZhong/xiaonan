@@ -12,7 +12,7 @@ const IMAGE_EXTENSIONS = new Set([
 ])
 const PDF_EXTENSIONS = new Set(['.pdf'])
 const HTML_EXTENSIONS = new Set(['.html', '.htm'])
-const OFFICE_EXTENSIONS = new Set(['.docx', '.pptx'])
+const OFFICE_EXTENSIONS = new Set(['.docx', '.pptx', '.xlsx', '.doc', '.ppt', '.odt', '.ods', '.odp'])
 const TEXT_EXTENSIONS = new Set([
   '.txt',
   '.text',
@@ -152,7 +152,28 @@ export const getPreviewTypeByContentType = (contentType) => {
   if (normalized.includes('text/html')) return 'html'
   if (normalized.startsWith('text/')) return 'text'
   if (normalized.includes('application/json')) return 'json'
+  // 办公文档（OOXML / ODF / RTF 等）：交给前端 File Viewer 渲染
+  if (
+    normalized.includes('officedocument') ||
+    normalized.includes('ms-word') ||
+    normalized.includes('ms-powerpoint') ||
+    normalized.includes('ms-excel') ||
+    normalized.includes('opendocument') ||
+    normalized.includes('wordprocessingml') ||
+    normalized.includes('spreadsheetml') ||
+    normalized.includes('presentationml') ||
+    normalized === 'application/rtf' ||
+    normalized.includes('application/msword') ||
+    normalized.includes('application/vnd.ms-')
+  ) {
+    return 'office'
+  }
   return 'unsupported'
+}
+
+export const isOfficePreview = (path) => {
+  const extension = getPreviewFileExtension(path)
+  return OFFICE_EXTENSIONS.has(extension)
 }
 
 export const normalizePreviewResponse = async (response, baseFile = {}) => {

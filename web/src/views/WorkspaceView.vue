@@ -218,7 +218,7 @@ import {
   saveWorkspaceFileContent,
   uploadWorkspaceFiles
 } from '@/apis/workspace_api'
-import { normalizePreviewResponse } from '@/utils/file_preview'
+import { normalizePreviewResponse, isOfficePreview } from '@/utils/file_preview'
 
 const userStore = useUserStore()
 
@@ -388,6 +388,23 @@ const finishPreviewRequest = (requestId) => {
 const loadWorkspacePreview = async (entry) => {
   const requestId = startPreviewRequest(entry)
   try {
+    // 办公文档（docx/pptx/xlsx 等）走前端 File Viewer 渲染，直接取原始字节，避免依赖 LibreOffice 转 PDF
+    if (isOfficePreview(entry.path || '')) {
+      const response = await downloadWorkspaceFile(entry.path)
+      const blob = await response.blob()
+      const previewUrl = window.URL.createObjectURL(blob)
+      const file = {
+        ...entry,
+        previewType: 'office',
+        rawBlob: blob,
+        previewUrl,
+        content: null,
+        supported: true,
+        message: ''
+      }
+      if (isCurrentPreviewEntry(requestId, entry)) applyPreviewFile(requestId, entry, file)
+      return
+    }
     const response = await getWorkspaceFileContent(entry.path)
     if (!isCurrentPreviewEntry(requestId, entry)) return
     const file = await normalizePreviewFile(entry, response)
@@ -406,6 +423,24 @@ const loadKnowledgePreview = async (
 ) => {
   const requestId = startPreviewRequest(entry, baseFile)
   try {
+    // 办公文档走前端 File Viewer 渲染：取原始字节而非经 LibreOffice 转换的 PDF
+    if (isOfficePreview(entry.filename || entry.name || entry.path || '')) {
+      const response = await downloadWorkspaceKnowledgeFile(entry.kb_id, entry.file_id)
+      const blob = await response.blob()
+      const previewUrl = window.URL.createObjectURL(blob)
+      const file = {
+        ...baseFile,
+        ...entry,
+        previewType: 'office',
+        rawBlob: blob,
+        previewUrl,
+        content: null,
+        supported: true,
+        message: ''
+      }
+      if (isCurrentPreviewEntry(requestId, entry)) applyPreviewFile(requestId, entry, file)
+      return
+    }
     const response = await getWorkspaceKnowledgeFileContent(entry.kb_id, entry.file_id)
     if (!isCurrentPreviewEntry(requestId, entry)) return
     const file = await normalizePreviewFile(entry, response)

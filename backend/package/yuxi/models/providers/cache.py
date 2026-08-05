@@ -42,7 +42,7 @@ class ModelInfo:
 
     # Embedding 专属
     dimension: int | None = None
-    batch_size: int = 40
+    batch_size: int = 10
 
     @property
     def spec(self) -> str:
@@ -78,7 +78,7 @@ class ModelInfo:
             extra=data.get("extra", {}),
             request_body_overrides=data.get("request_body_overrides", {}),
             dimension=data.get("dimension"),
-            batch_size=data.get("batch_size", 40),
+            batch_size=data.get("batch_size", 10),
         )
 
 
@@ -162,7 +162,7 @@ class ModelCache:
                     extra=dict(provider.extra_json or {}),
                     request_body_overrides=dict(model.get("request_body_overrides") or {}),
                     dimension=model.get("dimension"),
-                    batch_size=model.get("batch_size", 40),
+                    batch_size=model.get("batch_size", 10),
                 )
                 new_cache[info.spec] = info
 

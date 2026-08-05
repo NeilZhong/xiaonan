@@ -145,6 +145,9 @@
       <template v-else-if="file?.previewType === 'pdf' && file?.previewUrl">
         <iframe :src="file.previewUrl" class="pdf-preview" :title="filePath" />
       </template>
+      <template v-else-if="file?.previewType === 'office' && officeRawBlob">
+        <FileViewerPreview :blob="officeRawBlob" :filename="filePath" :full-height="fullHeight" />
+      </template>
       <template v-else-if="isHtmlFile && htmlPreviewMode === 'render'">
         <iframe
           :key="`embedded-${htmlPreviewRenderKey}`"
@@ -228,6 +231,9 @@
                 :title="filePath"
               />
             </template>
+            <template v-else-if="file?.previewType === 'office' && officeRawBlob">
+              <FileViewerPreview :blob="officeRawBlob" :filename="filePath" :full-height="true" />
+            </template>
             <template v-else-if="isHtmlFile && htmlPreviewMode === 'render'">
               <iframe
                 :key="`fullscreen-${htmlPreviewRenderKey}`"
@@ -279,6 +285,7 @@ import {
 } from 'lucide-vue-next'
 import hljs from 'highlight.js/lib/common'
 import MarkdownPreview from '@/components/common/MarkdownPreview.vue'
+import FileViewerPreview from '@/components/FileViewerPreview.vue'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
 import { useThemeStore } from '@/stores/theme'
 import { escapeHtml } from '@/utils/html'
@@ -375,6 +382,26 @@ const editMode = ref('preview')
 const draftContent = ref('')
 const fullscreenPreviewVisible = ref(false)
 const htmlPreviewRenderKey = ref(0)
+
+// 办公文档（docx/pptx/xlsx 等）走前端 File Viewer 渲染，需拿到原始文件字节
+const officeRawBlob = ref(null)
+const ensureOfficeBlob = async () => {
+  const f = props.file
+  if (f?.rawBlob && f.rawBlob instanceof Blob) {
+    officeRawBlob.value = f.rawBlob
+    return
+  }
+  if (typeof f?.previewUrl === 'string' && f.previewUrl.startsWith('blob:')) {
+    try {
+      officeRawBlob.value = await (await fetch(f.previewUrl)).blob()
+      return
+    } catch (error) {
+      console.warn('获取办公文档原始字节失败:', error)
+    }
+  }
+  officeRawBlob.value = null
+}
+watch(() => props.file, ensureOfficeBlob, { immediate: true })
 
 const isMarkdown = computed(() => isMarkdownPreview(props.filePath, props.file?.previewType))
 const canEdit = computed(() => {

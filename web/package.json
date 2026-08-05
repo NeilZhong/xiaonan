@@ -16,6 +16,8 @@
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",
     "@antv/g6": "^5.1.1",
+    "@file-viewer/preset-office": "^2.2.5",
+    "@file-viewer/vue3": "^2.2.5",
     "@opencode-ai/models": "0.0.15",
     "@sigma/edge-curve": "^3.1.0",
     "@sigma/node-border": "^3.0.0",
@@ -46,6 +48,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@file-viewer/vite-plugin": "^2.2.5",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/eslint-config-prettier": "^10.2.0",
     "esbuild": "0.28.1",

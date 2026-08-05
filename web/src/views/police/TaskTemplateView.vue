@@ -9,6 +9,7 @@
  */
 import { onMounted, ref, computed } from 'vue'
 import { usePoliceStore } from '@/stores/police'
+import { useUserStore } from '@/stores/user'
 import { message, Modal } from 'ant-design-vue'
 import {
   PlusOutlined, ReloadOutlined, EyeOutlined, EditOutlined, DeleteOutlined,
@@ -16,6 +17,7 @@ import {
 } from '@ant-design/icons-vue'
 
 const policeStore = usePoliceStore()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const filterElementType = ref(undefined)
@@ -270,7 +272,7 @@ onMounted(loadAll)
           把「涉案要素 → 侦查任务」的侦查常识配置化：推进智能体按模板确定性生成任务，可审计、可改、稳定。
         </span>
       </div>
-      <div class="tpl-actions">
+      <div v-if="userStore.isAdmin" class="tpl-actions">
         <a-button @click="onSeed">
           <ReloadOutlined /> 植入内置模板
         </a-button>
@@ -350,6 +352,7 @@ onMounted(loadAll)
           <a-switch
             :checked="record.enabled === 1"
             size="small"
+            :disabled="!userStore.isAdmin"
             @change="(val) => onToggle(record, val)"
           />
         </template>
@@ -365,18 +368,20 @@ onMounted(loadAll)
             <a-button type="link" size="small" @click="openPreview(record)">
               <EyeOutlined /> 预览
             </a-button>
-            <a-button type="link" size="small" @click="openEdit(record)">
-              <EditOutlined /> 编辑
-            </a-button>
-            <a-button
-              type="link"
-              size="small"
-              danger
-              :disabled="record.is_builtin"
-              @click="onDelete(record)"
-            >
-              <DeleteOutlined /> 删除
-            </a-button>
+            <template v-if="userStore.isAdmin">
+              <a-button type="link" size="small" @click="openEdit(record)">
+                <EditOutlined /> 编辑
+              </a-button>
+              <a-button
+                type="link"
+                size="small"
+                danger
+                :disabled="record.is_builtin"
+                @click="onDelete(record)"
+              >
+                <DeleteOutlined /> 删除
+              </a-button>
+            </template>
           </a-space>
         </template>
       </template>

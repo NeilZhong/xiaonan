@@ -30,14 +30,14 @@ class BaseEmbeddingModel(ABC):
         base_url=None,
         api_key=None,
         model_id=None,
-        batch_size=40,
+        batch_size=10,
     ):
         base_url = base_url or url
         self.model = model or name or model_id
         self.dimension = dimension
         self.base_url = get_docker_safe_url(base_url)
         self.api_key = os.getenv(api_key, api_key)
-        self.batch_size = int(batch_size or 40)
+        self.batch_size = int(batch_size or 10)
         self.embed_state = {}
 
     @abstractmethod

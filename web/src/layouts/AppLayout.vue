@@ -135,13 +135,15 @@ const mainList = computed(() => {
     activePaths: ['/police/cases']
   })
 
-  items.push({
-    name: '任务模板',
-    path: '/police/task-templates',
-    icon: SlidersHorizontal,
-    activeIcon: SlidersHorizontal,
-    activePaths: ['/police/task-templates']
-  })
+  if (userStore.isAdmin) {
+    items.push({
+      name: '任务模板',
+      path: '/police/task-templates',
+      icon: SlidersHorizontal,
+      activeIcon: SlidersHorizontal,
+      activePaths: ['/police/task-templates']
+    })
+  }
 
   items.push({
     name: '智能体',

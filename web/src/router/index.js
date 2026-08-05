@@ -194,7 +194,7 @@ const router = createRouter({
           path: 'task-templates',
           name: 'PoliceTaskTemplates',
           component: () => import('../views/police/TaskTemplateView.vue'),
-          meta: { keepAlive: false, requiresAuth: true }
+          meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
         },
         {
           path: 'officers/:id',

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from server.utils.auth_middleware import get_db, get_required_user, get_superadmin_user
+from server.utils.auth_middleware import get_admin_user, get_db, get_required_user, get_admin_user
 from yuxi.services.police_task_template_service import police_task_template_service
 from yuxi.storage.postgres.models_business import User
 
@@ -66,7 +66,7 @@ class TemplatePreview(BaseModel):
 
 @task_template_router.get("/meta")
 async def template_meta(
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """模板表单元数据：要素类型、任务类型、优先级、数字警员、占位符说明。"""
@@ -75,7 +75,7 @@ async def template_meta(
 
 @task_template_router.post("/seed")
 async def seed_templates(
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """重新植入内置模板（幂等：已存在的只补空字段，不覆盖民警的定制）。"""
@@ -88,7 +88,7 @@ async def list_templates(
     element_type: str | None = None,
     enabled_only: bool = False,
     keyword: str | None = None,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """模板列表（首次访问且库为空时自动植入内置模板）。"""
@@ -101,7 +101,7 @@ async def list_templates(
 @task_template_router.post("")
 async def create_template(
     body: TemplateCreate,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """新建自定义模板。"""
@@ -114,7 +114,7 @@ async def create_template(
 @task_template_router.get("/{template_id}")
 async def get_template(
     template_id: int,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     data = await police_task_template_service.get(template_id)
@@ -127,7 +127,7 @@ async def get_template(
 async def update_template(
     template_id: int,
     body: TemplateUpdate,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """更新模板（内置模板可改内容，但 code 不可变，以免破坏链式引用）。"""
@@ -143,7 +143,7 @@ async def update_template(
 @task_template_router.delete("/{template_id}")
 async def delete_template(
     template_id: int,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """删除自定义模板（内置模板只能停用，不能删除）。"""
@@ -157,7 +157,7 @@ async def delete_template(
 async def toggle_template(
     template_id: int,
     body: TemplateToggle,
-    current_user: User = Depends(get_superadmin_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """启用 / 停用模板。停用后推进智能体不再用它生成任务。"""
@@ -171,7 +171,7 @@ async def toggle_template(
 async def preview_template(
     template_id: int,
     body: TemplatePreview,
-    current_user: User = Depends(get_required_user),
+    current_user: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """预览模板渲染效果（用示例要素值填充占位符）。"""

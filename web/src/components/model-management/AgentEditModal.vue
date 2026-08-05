@@ -3,6 +3,7 @@ import { computed, nextTick, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   Bot,
+  Database,
   Info,
   Microscope,
   RefreshCw,
@@ -61,6 +62,7 @@ const agentModalMenuItems = computed(() => {
     items.push(
       { key: 'model', label: '模型配置', icon: SlidersHorizontal },
       { key: 'tools', label: '工具配置', icon: Wrench },
+      { key: 'knowledge', label: '知识库', icon: Database },
       { key: 'other', label: '其他配置', icon: Settings2 }
     )
   }
@@ -91,6 +93,22 @@ const selectedBackendLabel = computed(
 const selectedBackendIcon = computed(() => {
   const backendText = `${agentForm.backend_id} ${selectedBackendLabel.value}`.toLowerCase()
   return backendText.includes('deep') || backendText.includes('search') ? Microscope : Bot
+})
+
+const knowledgeBaseOptions = computed(() =>
+  (agentStore.availableKnowledgeBases || []).map((db) => ({
+    value: db.kb_id,
+    label: db.name || db.kb_id,
+    title: db.description || db.name || db.kb_id
+  }))
+)
+
+const knowledgeSkillWarningVisible = computed(() => {
+  const selected = agentStore.agentConfig?.knowledges
+  const hasKnowledge = Array.isArray(selected) ? selected.length > 0 : false
+  const skills = agentStore.agentConfig?.skills
+  const hasKnowledgeSkill = Array.isArray(skills) ? skills.includes('knowledge-base') : false
+  return hasKnowledge && !hasKnowledgeSkill
 })
 
 const resetAgentForm = () => {
@@ -146,6 +164,10 @@ const openEdit = async (agent) => {
     icon: detail.icon || ''
   })
   await agentStore.selectAgent(detail.id, { allowSubagent: true })
+  await agentStore.fetchMentionResources()
+  if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
+    agentStore.agentConfig.knowledges = []
+  }
   showAgentModal.value = true
 }
 
@@ -391,6 +413,40 @@ defineExpose({
                 placeholder="可选"
               />
             </label>
+          </div>
+        </section>
+
+        <section
+          v-if="editingAgentId"
+          v-show="agentModalActiveTab === 'knowledge'"
+          class="agent-modal-section"
+        >
+          <div class="agent-knowledge-section">
+            <h4 class="section-title">关联知识库</h4>
+            <p class="section-desc">
+              选择该智能体可检索的知识库。例如「法制数字警察」可绑定法律法规、办案规定等知识库。
+            </p>
+            <a-select
+              v-model:value="agentStore.agentConfig.knowledges"
+              mode="multiple"
+              placeholder="选择知识库"
+              style="width: 100%"
+              :options="knowledgeBaseOptions"
+              :loading="!agentStore.availableKnowledgeBases.length"
+              allow-clear
+            />
+            <a-alert
+              v-if="knowledgeSkillWarningVisible"
+              type="warning"
+              show-icon
+              class="knowledge-skill-warning"
+            >
+              <template #message>知识库 Skill 未启用</template>
+              <template #description>
+                已关联知识库，但当前智能体未启用 <code>knowledge-base</code> Skill，知识库检索不会生效。
+                请前往「工具配置」或「其他配置」启用该 Skill。
+              </template>
+            </a-alert>
           </div>
         </section>
 

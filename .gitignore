@@ -86,3 +86,15 @@ web/_build_check/
 
 .taskr/
 web/src/utils/__tests__/
+
+# 调试/重命名残留（沙箱外应清理，勿提交）
+web/node_modules_bak/
+web/dist_bak/
+web/_ps_test_file
+web/_rename_src/
+web/_tmp_*
+web/_tmptest_file
+web/_trashtest.txt
+web/_uz_test
+web/_uz_test2
+

@@ -1,12 +1,17 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig, loadEnv } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { fileViewerRenderers } from '@file-viewer/vite-plugin'
 
 export default defineConfig(({ mode }) => {
   // eslint-disable-next-line no-undef
   const env = loadEnv(mode, process.cwd(), '')
   return {
-    plugins: [vue()],
+    plugins: [
+      vue(),
+      // File Viewer：自动装配已安装的 @file-viewer/preset-* 渲染器，并拷贝 WASM/字体等静态资源
+      fileViewerRenderers({ copyAssets: true })
+    ],
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url))

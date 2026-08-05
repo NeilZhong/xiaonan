@@ -247,6 +247,22 @@ def _models_url(base_url: str, endpoint: str | None = None) -> str:
     return f"{base}/{endpoint.lstrip('/')}"
 
 
+def _infer_model_type_by_id(model_id: str, default_type: str) -> str:
+    """当远端 /models 未返回 type 时，用模型 id 做启发式分类。
+
+    DashScope /v1/models 等 OpenAI 兼容端点通常不带 type，导致 embedding/rerank
+    模型被误标为 chat。这里按常见命名规则兜底。
+    """
+    if default_type in VALID_MODEL_TYPES and default_type != "chat":
+        return default_type
+    lower_id = model_id.lower()
+    if "embedding" in lower_id or "-text-embed" in lower_id or "embed" in lower_id:
+        return "embedding"
+    if "rerank" in lower_id:
+        return "rerank"
+    return default_type
+
+
 def _normalize_remote_model(raw_model: dict[str, Any], model_type: str = "chat") -> dict[str, Any]:
     model_id = str(raw_model.get("id") or "").strip()
     if not model_id:
@@ -255,7 +271,7 @@ def _normalize_remote_model(raw_model: dict[str, Any], model_type: str = "chat")
     architecture = _normalize_dict(raw_model.get("architecture"))
     top_provider = _normalize_dict(raw_model.get("top_provider"))
     raw_type = raw_model.get("type")
-    normalized_type = raw_type if raw_type in VALID_MODEL_TYPES else model_type
+    normalized_type = raw_type if raw_type in VALID_MODEL_TYPES else _infer_model_type_by_id(model_id, model_type)
     normalized = {
         "id": model_id,
         "object": raw_model.get("object"),
