@@ -709,19 +709,20 @@ async def _resolve_agent_runtime(
     )
 
     # 数字警员兜底：若 yuxi Agent 的 config_json 中缺失 system_prompt，
-    # 从 police_agents 表直接读取，确保自定义角色提示词不丢失。
+    # 从 agents 表（统一数据源）按警号直接读取，确保自定义角色提示词不丢失。
     if not agent_config.get("system_prompt") and resolved_agent_slug.startswith("DA-"):
         try:
             from yuxi.storage.postgres.manager import pg_manager
-            from yuxi.storage.postgres.models_police import PoliceAgent
+            from yuxi.storage.postgres.models_business import Agent
             from sqlalchemy import select
             async with pg_manager.get_async_session_context() as inner_db:
-                result = await inner_db.execute(
-                    select(PoliceAgent.system_prompt).where(
-                        PoliceAgent.badge_number == resolved_agent_slug
+                row = (
+                    await inner_db.execute(
+                        select(Agent.system_prompt).where(
+                            Agent.badge_number == resolved_agent_slug
+                        )
                     )
-                )
-                row = result.scalar_one_or_none()
+                ).scalar_one_or_none()
                 if row:
                     agent_config["system_prompt"] = row
         except Exception:

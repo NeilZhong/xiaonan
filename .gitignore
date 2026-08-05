@@ -98,3 +98,13 @@ web/_trashtest.txt
 web/_uz_test
 web/_uz_test2
 
+# 进程检查/会话信息与依赖备份（含敏感 token，禁止提交）
+web/proc_check.txt
+web/node_modules_pnpm_bak/
+
+# 临时测试脚本与输出（非正式测试用例）
+backend/scripts/test_*.py
+backend/scripts/*_out.txt
+backend/scripts/_seed_out.txt
+backend/scripts/backup_police_agents_*.sql
+

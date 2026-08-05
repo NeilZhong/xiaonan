@@ -4,11 +4,12 @@
  * POLICE_REQUIREMENTS §8.4.2
  */
 import { onMounted, ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { usePoliceStore } from '@/stores/police'
 import { message, Modal } from 'ant-design-vue'
 import { PlusOutlined, SearchOutlined } from '@ant-design/icons-vue'
 
+const route = useRoute()
 const router = useRouter()
 const policeStore = usePoliceStore()
 
@@ -101,7 +102,13 @@ async function handleCreate() {
   }
 }
 
-onMounted(() => loadData(1))
+onMounted(() => {
+  loadData(1)
+  // 支持工作台/快捷入口 ?create=1 自动打开创建弹窗
+  if (route.query.create === '1') {
+    showCreateModal.value = true
+  }
+})
 </script>
 
 <template>

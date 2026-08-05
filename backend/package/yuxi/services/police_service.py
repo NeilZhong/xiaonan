@@ -12,6 +12,7 @@ from sqlalchemy import select
 from yuxi.repositories.agent_repository import DEFAULT_AGENT_BACKEND_ID
 from yuxi.services.police_prompts import PRESET_AGENTS as _PRESET_AGENTS_UPGRADED
 from yuxi.repositories.police_agent_repository import police_agent_repository
+from yuxi.repositories.police_agent_stats_repository import police_agent_stats_repository
 from yuxi.repositories.police_workspace_repository import police_workspace_repository
 from yuxi.repositories.case_repository import case_repository
 from yuxi.repositories.evidence_repository import evidence_repository
@@ -22,6 +23,26 @@ from yuxi.storage.postgres.models_business import User
 from yuxi.storage.postgres.models_police import Evidence
 from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils import logger
+
+
+def _normalize_agent_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """把前端/路由字段名映射为 Agent 模型列名，并剔除 None 值。
+
+    - type            → agent_type
+    - avatar          → icon
+    - model_settings   → model_config（Pydantic alias 别名，经 model_dump(by_alias=True) 已是 model_config）
+    """
+    out: dict[str, Any] = {}
+    for k, v in data.items():
+        if v is None:
+            continue
+        if k == "type":
+            out["agent_type"] = v
+        elif k == "avatar":
+            out["icon"] = v
+        else:
+            out[k] = v
+    return out
 
 
 def _canonical_audit_string(
@@ -616,12 +637,57 @@ class PoliceAgentService:
     # 升级 DA-001~DA-005 并新增 DA-006/DA-007，模型统一 agnes-2.5-flash）。
     PRESET_AGENTS = _PRESET_AGENTS_UPGRADED
 
+    async def _with_realtime_stats(self, agent, d: dict[str, Any]) -> dict[str, Any]:
+        """用真实业务表实时聚合覆盖 work_stats，并附加近 14 天对话/任务趋势。
+
+        agents.work_stats 字段为静态快照且从未有写入方（历史死数据根因），
+        读取时以 conversations/message_feedbacks/police_agent_runs 实时聚合覆盖，
+        保证档案页累计对话/今日对话/好评率/差评数为真实值。
+        """
+        try:
+            realtime = await police_agent_stats_repository.compute_agent_stats(agent.id, agent.slug)
+            merged = dict(agent.work_stats or {})
+            merged.update(realtime)
+            d["work_stats"] = merged
+        except Exception as e:
+            logger.warning(f"Compute agent realtime stats failed (agent={agent.slug}): {e}")
+        try:
+            d["daily_trend"] = await police_agent_stats_repository.compute_daily_trend(
+                agent.id, agent.slug, days=14
+            )
+        except Exception as e:
+            logger.warning(f"Compute agent daily trend failed (agent={agent.slug}): {e}")
+            d["daily_trend"] = []
+        return d
+
     async def list_agents(
         self, *, type: str | None = None, status: str | None = None,
-        keyword: str | None = None, page: int = 1, page_size: int = 50,
+        keyword: str | None = None, category: str | None = None,
+        page: int = 1, page_size: int = 50,
+        current_user: User | None = None,
     ) -> dict[str, Any]:
+        # 可见性过滤复用 yuxi 共享体系：直接把 User ORM 传给仓储（user_can_access_agent）
         agents, total = await police_agent_repository.list_agents(
-            type=type, status=status, keyword=keyword,
+            type=type, status=status, keyword=keyword, category=category,
+            page=page, page_size=page_size, current_user=current_user,
+        )
+        items = [a.to_dict() for a in agents]
+        # 批量注入实时工作统计（GROUP BY 聚合，仅 3 条 SQL，与列表规模无关）
+        try:
+            stats_map = await police_agent_stats_repository.compute_batch_stats(agents)
+            for item in items:
+                merged = dict(item.get("work_stats") or {})
+                merged.update(stats_map.get(item.get("id"), {}))
+                item["work_stats"] = merged
+        except Exception as e:
+            logger.warning(f"Batch compute agent stats failed: {e}")
+        return {"items": items, "total": total}
+
+    async def list_pending_agents(
+        self, *, page: int = 1, page_size: int = 50,
+    ) -> dict[str, Any]:
+        """待审批（全局共享申请）列表，供超级管理员工作台使用。"""
+        agents, total = await police_agent_repository.list_pending_agents(
             page=page, page_size=page_size,
         )
         return {"items": [a.to_dict() for a in agents], "total": total}
@@ -630,30 +696,30 @@ class PoliceAgentService:
         agent = await police_agent_repository.get_by_id(agent_id)
         if not agent:
             return None
-        d = agent.to_dict()
+        d = await self._with_realtime_stats(agent, agent.to_dict())
         # 聚合运行记录
         runs, run_total = await police_agent_repository.list_runs(agent_id=agent_id, page=1, page_size=5)
         d["recent_runs"] = [r.to_dict() for r in runs]
         d["run_total"] = run_total
         # 获取关联 SOP
-        sops = await police_agent_repository.list_sops(agent_type=agent.type)
+        sops = await police_agent_repository.list_sops(agent_type=agent.agent_type)
         d["sops"] = [s.to_dict() for s in sops]
         return d
 
     async def get_agent_by_yuxi(self, yuxi_agent_id: int) -> dict[str, Any] | None:
-        """按 yuxi 智能体主键 id 查询关联的数字警员档案（无关联返回 None）。
+        """按 yuxi 智能体主键 id 查询数字警员档案（单表化后 agents.id 即 yuxi 主键）。
 
         供统一智能体档案页使用：档案页路由携带 yuxi agent slug，先经 yuxi 接口
-        解析为 int 主键后再调用本方法，避免把 slug 当作 police 表 int 主键传入。
+        解析为 int 主键后再调用本方法。
         """
-        agent = await police_agent_repository.get_by_yuxi_agent_id(yuxi_agent_id)
+        agent = await police_agent_repository.get_by_id(yuxi_agent_id)
         if not agent:
             return None
-        d = agent.to_dict()
+        d = await self._with_realtime_stats(agent, agent.to_dict())
         runs, run_total = await police_agent_repository.list_runs(agent_id=agent.id, page=1, page_size=5)
         d["recent_runs"] = [r.to_dict() for r in runs]
         d["run_total"] = run_total
-        sops = await police_agent_repository.list_sops(agent_type=agent.type)
+        sops = await police_agent_repository.list_sops(agent_type=agent.agent_type)
         d["sops"] = [s.to_dict() for s in sops]
         return d
 
@@ -665,85 +731,42 @@ class PoliceAgentService:
         agent = await police_agent_repository.get_by_badge_number(badge_number)
         if not agent:
             return None
-        d = agent.to_dict()
+        d = await self._with_realtime_stats(agent, agent.to_dict())
         runs, run_total = await police_agent_repository.list_runs(agent_id=agent.id, page=1, page_size=5)
         d["recent_runs"] = [r.to_dict() for r in runs]
         d["run_total"] = run_total
-        sops = await police_agent_repository.list_sops(agent_type=agent.type)
+        sops = await police_agent_repository.list_sops(agent_type=agent.agent_type)
         d["sops"] = [s.to_dict() for s in sops]
         return d
 
-    async def list_templates(
-        self, *, category: str | None = None, keyword: str | None = None,
-        page: int = 1, page_size: int = 50, source: str | None = None,
-    ) -> dict[str, Any]:
-        """市场模板列表。
-
-        source='builtin' → 仅内置模板（is_template=1）
-        source='shared'  → 仅用户分享的智能体（is_public=1, is_template=0）
-        source=None      → 仅内置模板（向后兼容）
-        """
-        if source == "shared":
-            return await self.list_shared_agents(
-                keyword=keyword, page=page, page_size=page_size,
-            )
-
-        # 默认：内置模板
-        agents, total = await police_agent_repository.list_templates(
-            category=category, keyword=keyword, page=page, page_size=page_size,
-        )
-        installed_ids = await police_agent_repository.get_installed_template_ids()
-        return {
-            "items": [a.to_dict() for a in agents],
-            "total": total,
-            "installed_template_ids": installed_ids,
-        }
-
-    async def install_template(self, template_id: int) -> dict[str, Any] | None:
-        """一键安装模板：复制模板配置为新数字警员实例（自动生成工号并桥接 yuxi）。
-
-        失败时回滚 police 记录并返回 None。
-        """
-        template = await police_agent_repository.get_by_id(template_id)
-        if not template or not template.is_template:
-            return None
-        # 从模板复制核心配置（不继承 is_template/template 身份、badge_number/install_count）
-        new_data = {
-            "name": template.name,
-            "description": template.description,
-            "type": template.type,
-            "category": template.category,
-            "system_prompt": template.system_prompt,
-            "model_config": template.model_config or {},
-            "specialty": template.specialty,
-            "avatar": template.avatar,
-            "color_theme": template.color_theme,
-            "capabilities": template.capabilities or [],
-            "skills": template.skills or [],
-            "tools": template.tools or [],
-            "icon": template.icon,
-            "source_template_id": template_id,  # 记录来源模板，用于市场"已安装"状态判断
-            # 以下字段由 create_agent 自动处理：badge_number / backend_id / agent_id
-        }
-        try:
-            new_agent = await self.create_agent(new_data)
-            # 更新模板安装计数
-            await police_agent_repository.increment_install_count(template_id)
-            return new_agent
-        except Exception as e:
-            logger.error(f"安装模板 {template_id} 失败: {e}")
-            return None
-
     async def create_agent(self, data: dict[str, Any]) -> dict[str, Any]:
-        # 工号(badge_number)是 yuxi 桥接的 slug 来源，用户未提供时自动生成全局唯一值
-        if not data.get("badge_number"):
-            data["badge_number"] = await self._next_badge_number()
-        agent = await police_agent_repository.create(data)
-        # 桥接为 yuxi 一等可对话智能体（ChatbotAgent 后端），使新建数字警员可直接对话
-        yuxi_agent = await self._sync_yuxi_agent(agent)
+        # 单表化：数字警员即一等智能体，直接写入 agents 表（无独立 police 表）。
+        # 警号(badge_number)仅全局审核通过后才授予，创建时不自动生成。
+        # 新建默认私有（仅创建者可见），需显式分享（部门/指定人）或走全局审批后才对他人可见。
+        created_by = str(data.get("author_id") or "system-police")
+        fields = _normalize_agent_fields(data)
+        fields["created_by"] = created_by
+        fields.setdefault("backend_id", DEFAULT_AGENT_BACKEND_ID)
+        fields.setdefault("status", "active")
+        fields.setdefault("color_theme", "blue")
+        fields["share_config"] = {
+            "access_level": "user",
+            "department_ids": [],
+            "user_uids": [created_by],
+        }
+        agent = await police_agent_repository.create(fields)
+        # 同步对话配置到 config_json.context，使前端编辑的 system_prompt 即对话提示词
         await police_agent_repository.update(
             agent.id,
-            {"backend_id": DEFAULT_AGENT_BACKEND_ID, "agent_id": yuxi_agent.id},
+            {
+                "config_json": {
+                    "context": {
+                        "system_prompt": agent.system_prompt or "",
+                        "model": (agent.model_config or {}).get("model", "agnes-2.5-flash"),
+                        "temperature": (agent.model_config or {}).get("temperature", 0.3),
+                    }
+                }
+            },
         )
         agent = await police_agent_repository.get_by_id(agent.id)
         await self._audit_agent(agent.id, "create", data)
@@ -765,39 +788,31 @@ class PoliceAgentService:
         return f"DA-{uuid.uuid4().hex[:12].upper()}"
 
     async def update_agent(self, agent_id: int, data: dict[str, Any]) -> dict[str, Any] | None:
-        agent = await police_agent_repository.update(agent_id, data)
+        fields = _normalize_agent_fields(data)
+        if not fields:
+            agent = await police_agent_repository.get_by_id(agent_id)
+            return agent.to_dict() if agent else None
+        agent = await police_agent_repository.update(agent_id, fields)
         if not agent:
             return None
-        # 同步对话智能体：system_prompt / 模型参数 / 名称等编辑实时反映到 yuxi 侧
-        yuxi_agent = await self._sync_yuxi_agent(agent)
-        if yuxi_agent and agent.agent_id != yuxi_agent.id:
-            await police_agent_repository.update(
-                agent.id, {"backend_id": DEFAULT_AGENT_BACKEND_ID, "agent_id": yuxi_agent.id}
-            )
+        # 同步 system_prompt / 模型参数到对话配置，编辑实时反映到对话行为
+        cfg_ctx = (agent.config_json or {}).get("context", {}) or {}
+        if agent.system_prompt is not None:
+            cfg_ctx["system_prompt"] = agent.system_prompt
+        if agent.model_config:
+            cfg_ctx["model"] = agent.model_config.get("model", cfg_ctx.get("model"))
+            cfg_ctx["temperature"] = agent.model_config.get("temperature", cfg_ctx.get("temperature"))
+        await police_agent_repository.update(agent.id, {"config_json": {"context": cfg_ctx}})
         await self._audit_agent(agent_id, "update", data)
         agent = await police_agent_repository.get_by_id(agent_id)
         return agent.to_dict() if agent else None
 
     async def delete_agent(self, agent_id: int) -> bool:
+        # 单表化：agents 行即唯一数据源，直接删除（仓储内部已清理关联运行记录与留言）
         agent = await police_agent_repository.get_by_id(agent_id)
         if not agent:
             return False
-        yuxi_id = agent.agent_id
         ok = await police_agent_repository.delete(agent_id)
-        if ok and yuxi_id:
-            # 一并移除桥接的 yuxi 对话智能体，避免 /agent 列表中遗留孤儿智能体
-            try:
-                from yuxi.repositories.agent_repository import AgentRepository
-                from yuxi.storage.postgres.manager import pg_manager
-                from yuxi.storage.postgres.models_business import Agent
-
-                async with pg_manager.get_async_session_context() as session:
-                    repo = AgentRepository(session)
-                    yuxi_agent = await session.get(Agent, yuxi_id)
-                    if yuxi_agent:
-                        await repo.delete(agent=yuxi_agent)
-            except Exception as e:
-                logger.warning(f"删除数字警员关联的 yuxi 智能体失败（已保留 police 记录删除）: {e}")
         if ok:
             await self._audit_agent(agent_id, "delete", {})
         return ok
@@ -828,117 +843,50 @@ class PoliceAgentService:
         return sop.to_dict() if sop else None
 
     async def seed_preset_agents(self) -> dict[str, Any]:
-        """初始化预设数字警员，并与 yuxi 原生智能体体系打通（幂等）
+        """初始化预设数字警员（单表化，幂等）。
 
-        - 按 badge_number（警号）去重，已存在的数字警员跳过创建
-        - 每个数字警员在 yuxi.agents 表同步创建一条子智能体记录 (backend=SubAgentBackend)
-        - 回填 PoliceAgent.agent_id，建立双向关联，使其可被 yuxi 工作流调度
+        - 按 badge_number（警号）去重；已存在则刷新其预设定义（保留运行记录等非预设数据）
+        - 直接写入 agents 表，预设警员默认全局共享且审核通过（已授警号），全员可见
         """
         created = []
         synced = []
         for preset in self.PRESET_AGENTS:
-            # 查找已存在的同警号数字警员
-            existing_list, _ = await police_agent_repository.list_agents(
-                type=preset["type"], page=1, page_size=20,
-            )
-            agent = next(
-                (a for a in existing_list if a.badge_number == preset["badge_number"]), None
-            )
-            if not agent:
-                agent = await police_agent_repository.create(
-                    {**preset, "backend_id": DEFAULT_AGENT_BACKEND_ID}
-                )
+            existing = await police_agent_repository.get_by_badge_number(preset["badge_number"])
+            fields = {
+                "name": preset["name"],
+                "agent_type": preset["type"],
+                "category": preset["category"],
+                "badge_number": preset["badge_number"],
+                "rank": preset["rank"],
+                "specialty": preset["specialty"],
+                "icon": preset["avatar"],
+                "department": preset["department"],
+                "color_theme": preset["color_theme"],
+                "capabilities": preset["capabilities"],
+                "system_prompt": preset["system_prompt"],
+                "model_config": preset["model_config"],
+                "status": "active",
+                "backend_id": DEFAULT_AGENT_BACKEND_ID,
+                "share_config": {"access_level": "global", "department_ids": [], "user_uids": []},
+                "approval_status": "approved",
+                "created_by": "system-police",
+            }
+            if not existing:
+                agent = await police_agent_repository.create(fields)
                 await police_agent_repository.add_growth_event(
                     agent.id, "created", f"数字警员 {agent.name} 初始化完成"
                 )
                 created.append(agent.to_dict())
             else:
-                # 存量预设警员：同步最新预设定义（system_prompt/模型/能力/档案字段），
-                # 使 Hunter 猎人系列升级方案在重新 seed 时可靠生效。
-                # 仅覆盖预设字段，保留用户新增的运行记录等非预设数据。
-                await police_agent_repository.update(
-                    agent.id,
-                    {
-                        "name": preset["name"],
-                        "description": preset.get("description", ""),
-                        "type": preset["type"],
-                        "category": preset.get("category"),
-                        "specialty": preset.get("specialty", ""),
-                        "rank": preset.get("rank", ""),
-                        "department": preset.get("department", ""),
-                        "avatar": preset.get("avatar", ""),
-                        "color_theme": preset.get("color_theme", "blue"),
-                        "capabilities": preset.get("capabilities", []),
-                        "system_prompt": preset["system_prompt"],
-                        "model_config": preset.get("model_config", {}),
-                        "is_template": preset.get("is_template", 0),
-                    },
-                )
-                # 重新读取，确保下面同步到 yuxi 时拿到最新字段
-                agent = await police_agent_repository.get_by_id(agent.id)
-            # 始终同步到 yuxi 主对话智能体（含升级后的 system_prompt/模型参数），
-            # 保证前端对话行为反映最新预设定义。
-            yuxi_agent = await self._sync_yuxi_agent(agent)
-            if yuxi_agent:
-                await police_agent_repository.update(
-                    agent.id, {"agent_id": yuxi_agent.id, "backend_id": DEFAULT_AGENT_BACKEND_ID}
-                )
-                synced.append(agent.id)
+                # 存量预设警员：刷新最新预设定义，使 Hunter 猎人系列升级方案在重新 seed 时可靠生效
+                await police_agent_repository.update(existing.id, fields)
+                synced.append(existing.id)
         return {"created": len(created), "synced": len(synced), "agents": created}
 
-    async def _sync_yuxi_agent(self, agent: "PoliceAgent"):
-        """为数字警员创建/更新对应的 yuxi 主对话智能体记录，保持双向字段同步，返回该 Agent。
-
-        数字警员即一等智能体：使用 ChatbotAgent 主对话后端（is_subagent=False），
-        slug 直接使用数字警员工号（全局唯一），权限默认为 global（所有民警可见）。
-        新建时创建记录；已关联时同步桥接字段与对话配置（system_prompt / model / temperature），
-        使前端的编辑操作能实时反映到对话行为。
-        """
-        from yuxi.repositories.agent_repository import AgentRepository
-        from yuxi.storage.postgres.manager import pg_manager
-        from yuxi.storage.postgres.models_business import Agent
-
-        model_cfg = agent.model_config or {}
-        config_json = {
-            "context": {
-                "system_prompt": agent.system_prompt or "",
-                "model": model_cfg.get("model", "gpt-4o"),
-                "temperature": model_cfg.get("temperature", 0.3),
-            }
-        }
-        async with pg_manager.get_async_session_context() as session:
-            repo = AgentRepository(session)
-            yuxi_agent = None
-            # 已通过 agent_id 关联则直接取回，避免按 slug 大小写差异重复创建
-            if agent.agent_id:
-                yuxi_agent = await session.get(Agent, agent.agent_id)
-            # 已存在相同 slug (工号) 的智能体则直接复用
-            if not yuxi_agent:
-                yuxi_agent = await repo.get_by_slug(agent.badge_number)
-            if not yuxi_agent:
-                yuxi_agent = await repo.create(
-                    name=agent.name,
-                    backend_id=DEFAULT_AGENT_BACKEND_ID,
-                    slug=agent.badge_number,
-                    description=agent.description or agent.specialty or "",
-                    icon=agent.avatar,
-                    pics=[],
-                    config_json=config_json,
-                    share_config=None,  # 默认 global，所有民警可见
-                    is_subagent=False,
-                    created_by="system-police",
-                )
-            else:
-                # 已存在则同步桥接字段与对话配置（含编辑后的 system_prompt / 模型参数）
-                yuxi_agent.backend_id = DEFAULT_AGENT_BACKEND_ID
-                yuxi_agent.is_subagent = False
-                yuxi_agent.name = agent.name
-                yuxi_agent.description = agent.description or agent.specialty or ""
-                yuxi_agent.icon = agent.avatar
-                yuxi_agent.config_json = config_json
-                await session.commit()
-                await session.refresh(yuxi_agent)
-            return yuxi_agent
+    # ── _sync_yuxi_agent 已废弃 ─────────────────────────────
+    # 单表化后数字警员即 yuxi 一等智能体（agents 表唯一数据源），
+    # 不再需要把档案双写到独立的 yuxi Agent 记录。新建/编辑时由
+    # create_agent / update_agent 直接维护 agents 行（含 config_json.context）。
 
     async def _audit_agent(self, agent_id: int, action: str, details: dict):
         # 复用统一审计写入，自动捕获 ip/ua 并计算哈希链
@@ -949,43 +897,92 @@ class PoliceAgentService:
             details=details,
         )
 
+    # ── 留言板 ─────────────────────────────────────────────
+
+    async def list_comments(self, agent_id: int, *, page: int = 1, page_size: int = 50) -> dict[str, Any]:
+        """查询智能体的留言列表"""
+        comments, total = await police_agent_repository.list_comments(
+            agent_id=agent_id, page=page, page_size=page_size,
+        )
+        return {
+            "items": [c.to_dict() for c in comments],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    async def create_comment(self, agent_id: int, content: str, user_id: int | None = None) -> dict[str, Any] | None:
+        """创建留言"""
+        # 先校验智能体是否存在
+        agent = await police_agent_repository.get_by_id(agent_id)
+        if not agent:
+            return None
+        comment = await police_agent_repository.create_comment(
+            agent_id=agent_id, user_id=user_id, content=content,
+        )
+        await self._audit_agent(agent_id, "comment_create", {"comment_id": comment.id})
+        return comment.to_dict()
+
+    async def delete_comment(self, agent_id: int, comment_id: int) -> bool:
+        """删除留言（best-effort，不抛异常）"""
+        ok = await police_agent_repository.delete_comment(comment_id=comment_id, agent_id=agent_id)
+        if ok:
+            await self._audit_agent(agent_id, "comment_delete", {"comment_id": comment_id})
+        return ok
+
     # ── 共享与市场发布 ─────────────────────────────────────
 
     async def share_agent(
         self, agent_id: int, *,
-        scope: str,  # personal / department / global
+        scope: str,  # personal / department / user / global
         author_id: int | None = None,
         department_ids: list[int] | None = None,
         user_uids: list[str] | None = None,
     ) -> dict[str, Any] | None:
-        """设置智能体共享范围。
+        """设置智能体共享范围（单表化：直接写入 Agent.share_config + approval_status）。
 
-        - department / global: 标记 is_public=1，使其在市场中可见
-        - global: 额外设置 approval_status=pending，需管理员审批后上架
-        - personal: 取消公开，从市场撤回
+        - global:      access_level=global，approval_status=pending，需超级管理员审批后上架并授予警号
+        - department:  access_level=department，指定部门成员可见（直接生效，无需审批）
+        - user:        access_level=user，仅指定 uid 列表可见（直接生效，无需审批），不公开
+        - personal:    撤回公开 → access_level=user 仅自己可见（created_by 持有者）
         """
         agent = await police_agent_repository.get_by_id(agent_id)
         if not agent:
             return None
 
-        update_data: dict[str, Any] = {"share_scope": scope}
+        if scope == "global":
+            share_config = {
+                "access_level": "global",
+                "department_ids": department_ids or [],
+                "user_uids": user_uids or [],
+            }
+            approval_status = "pending"
+        elif scope == "department":
+            share_config = {
+                "access_level": "department",
+                "department_ids": department_ids or [],
+                "user_uids": [],
+            }
+            approval_status = None
+        elif scope == "user":
+            share_config = {
+                "access_level": "user",
+                "department_ids": [],
+                "user_uids": user_uids or [],
+            }
+            approval_status = None
+        else:  # personal → 撤回公开，仅创建者可见
+            owner = agent.created_by or (str(author_id) if author_id else None)
+            share_config = {
+                "access_level": "user",
+                "department_ids": [],
+                "user_uids": [owner] if owner else [],
+            }
+            approval_status = None
 
-        if scope in ("department", "global"):
-            update_data["is_public"] = 1
-            if author_id and not agent.author_id:
-                update_data["author_id"] = author_id
-            if scope == "global":
-                # 全局共享需审批
-                update_data["approval_status"] = "pending"
-            else:
-                # 部门分享直接生效
-                update_data["approval_status"] = None
-        else:
-            # personal → 撤回公开
-            update_data["is_public"] = 0
-            update_data["approval_status"] = None
-
-        ok = await police_agent_repository.update_share(agent_id, **update_data)
+        ok = await police_agent_repository.update_share(
+            agent_id, share_config=share_config, approval_status=approval_status
+        )
         if not ok:
             return None
 
@@ -997,42 +994,27 @@ class PoliceAgentService:
     ) -> dict[str, Any] | None:
         """管理员审批全局共享申请。
 
-        approved=True → approval_status=approved, 正式上架市场
-        approved=False → approval_status=rejected, 不上架
+        approved=True → approval_status=approved，正式上架（保持 access_level=global 全员可见）并授予警号
+        approved=False → approval_status=rejected，不上架
         """
-        from datetime import datetime as _dt
-
         agent = await police_agent_repository.get_by_id(agent_id)
         if not agent or agent.approval_status != "pending":
             return None
 
-        status = "approved" if approved else "rejected"
-        ok = await police_agent_repository.update_share(
-            agent_id,
-            approval_status=status,
-            approved_by=reviewer_id,
-            approved_at=_dt.utcnow() if approved else None,
-        )
+        update_data = {
+            "approval_status": "approved" if approved else "rejected",
+            "approved_by": reviewer_id,
+            "approved_at": utc_now_naive() if approved else None,
+        }
+        # 仅全局审核通过时授予警号（警号 = 正式编制，类比警察授警号）
+        if approved and not agent.badge_number:
+            update_data["badge_number"] = await self._next_badge_number()
+        ok = await police_agent_repository.update_share(agent_id, **update_data)
         if not ok:
             return None
 
         updated = await police_agent_repository.get_by_id(agent_id)
         return updated.to_dict() if updated else None
-
-    async def list_shared_agents(
-        self, *, keyword: str | None = None, page: int = 1, page_size: int = 50,
-    ) -> dict[str, Any]:
-        """查询「来自分享」的市场智能体列表"""
-        agents, total = await police_agent_repository.list_public_shared(
-            keyword=keyword, page=page, page_size=page_size,
-        )
-        installed_ids = await police_agent_repository.get_installed_template_ids()
-        return {
-            "items": [a.to_dict() for a in agents],
-            "total": total,
-            "installed_template_ids": installed_ids,
-        }
-
 
 class PoliceDashboardService:
     """工作台统计服务"""

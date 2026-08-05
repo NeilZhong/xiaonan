@@ -1019,58 +1019,35 @@ class PostgresManager(metaclass=SingletonMeta):
                 created_at TIMESTAMPTZ DEFAULT NOW()
             )
             """,
-            # 公安智能体定义 (数字警员)
-            """
-            CREATE TABLE IF NOT EXISTS police_agents (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(100) NOT NULL,
-                description TEXT,
-                type VARCHAR(50) NOT NULL,
-                system_prompt TEXT NOT NULL,
-                model_config JSON NOT NULL,
-                tools JSON DEFAULT '[]',
-                skills JSON DEFAULT '[]',
-                knowledge_base_ids JSON DEFAULT '[]',
-                capabilities JSON DEFAULT '[]',
-                icon VARCHAR(50),
-                status VARCHAR(20) DEFAULT 'active',
-                is_template INTEGER DEFAULT 0,
-                created_at TIMESTAMPTZ DEFAULT NOW(),
-                updated_at TIMESTAMPTZ DEFAULT NOW()
-            )
-            """,
-            "CREATE INDEX IF NOT EXISTS ix_police_agents_type ON police_agents(type)",
-            # 数字警员扩展列 (StaffDeck 数字员工概念)
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS badge_number VARCHAR(20)",
-            "CREATE INDEX IF NOT EXISTS ix_police_agents_badge ON police_agents(badge_number)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS rank VARCHAR(30)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS specialty VARCHAR(100)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS avatar VARCHAR(200)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS department VARCHAR(100)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS color_theme VARCHAR(20)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS sop_ids JSON DEFAULT '[]'",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS work_stats JSON DEFAULT '{}'",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS growth_log JSON DEFAULT '[]'",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS experience_level INTEGER DEFAULT 1",
-            # 与 yuxi 原生智能体体系融合: 数字警员 <-> agents 表双向关联
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS backend_id VARCHAR(64)",
-            "CREATE INDEX IF NOT EXISTS ix_police_agents_backend ON police_agents(backend_id)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS agent_id INTEGER",
-            "CREATE INDEX IF NOT EXISTS ix_police_agents_agent ON police_agents(agent_id)",
-            # 智能体市场: 分类与安装计数 (复用 police_agents 表, is_template=1 即市场模板)
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS category VARCHAR(50)",
-            "CREATE INDEX IF NOT EXISTS ix_police_agents_category ON police_agents(category)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS install_count INTEGER DEFAULT 0",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS source_template_id INTEGER",
-            "CREATE INDEX IF NOT EXISTS ix_police_agents_source_template ON police_agents(source_template_id)",
-            # 共享与市场发布: 作者、可见性、审批状态
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS author_id INTEGER",
-            "CREATE INDEX IF NOT EXISTS ix_police_agents_author ON police_agents(author_id)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS is_public INTEGER DEFAULT 0",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS share_scope VARCHAR(20) DEFAULT 'personal'",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20)",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS approved_by INTEGER",
-            "ALTER TABLE police_agents ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP",
+            # ── 单表化改造: agents 表并入数字警员档案 / 审批 / 统计字段 ──────
+            # 智能体唯一数据源为 agents 表；police_agents 已废弃并在迁移后删除。
+            # 可见性由 share_config.access_level 决定，全局共享需审批(approval_status)。
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS badge_number VARCHAR(20)",
+            "CREATE INDEX IF NOT EXISTS ix_agents_badge ON agents(badge_number)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS rank VARCHAR(30)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS specialty VARCHAR(100)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS department VARCHAR(100)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS color_theme VARCHAR(20)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS icon_key VARCHAR(50)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS category VARCHAR(50)",
+            "CREATE INDEX IF NOT EXISTS ix_agents_category ON agents(category)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_type VARCHAR(50)",
+            "CREATE INDEX IF NOT EXISTS ix_agents_agent_type ON agents(agent_type)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS experience_level INTEGER DEFAULT 1",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS system_prompt TEXT",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS model_config JSON",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS tools JSON DEFAULT '[]'",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS skills JSON DEFAULT '[]'",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS knowledge_base_ids JSON DEFAULT '[]'",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS sop_ids JSON DEFAULT '[]'",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS capabilities JSON DEFAULT '[]'",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS approval_status VARCHAR(20)",
+            "CREATE INDEX IF NOT EXISTS ix_agents_approval ON agents(approval_status)",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS approved_by INTEGER",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS work_stats JSON DEFAULT '{}'",
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS growth_log JSON DEFAULT '[]'",
             # SOP 流程技能定义表 (StaffDeck 状态机驱动 SOP 概念)
             """
             CREATE TABLE IF NOT EXISTS police_sops (
@@ -1095,7 +1072,7 @@ class PostgresManager(metaclass=SingletonMeta):
             """
             CREATE TABLE IF NOT EXISTS police_agent_runs (
                 id SERIAL PRIMARY KEY,
-                agent_id INTEGER REFERENCES police_agents(id),
+                agent_id INTEGER REFERENCES agents(id),
                 task_id INTEGER REFERENCES police_tasks(id),
                 case_id INTEGER REFERENCES police_cases(id) ON DELETE CASCADE,
                 status VARCHAR(20) DEFAULT 'queued',
@@ -1112,6 +1089,19 @@ class PostgresManager(metaclass=SingletonMeta):
             """,
             "CREATE INDEX IF NOT EXISTS ix_police_agent_runs_case ON police_agent_runs(case_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_runs_status ON police_agent_runs(status)",
+            # 数字警员留言板
+            """
+            CREATE TABLE IF NOT EXISTS police_agent_comments (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                user_id INTEGER REFERENCES users(id),
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_agent ON police_agent_comments(agent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_user ON police_agent_comments(user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_created ON police_agent_comments(created_at DESC)",
             # 审计日志
             """
             CREATE TABLE IF NOT EXISTS police_audit_logs (

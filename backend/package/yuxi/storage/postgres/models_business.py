@@ -186,7 +186,17 @@ class UserConfig(Base):
 
 
 class Agent(Base):
-    """用户可管理、可授权、可切换的智能体。"""
+    """用户可管理、可授权、可切换的智能体（即"数字警员"）。
+
+    本表是平台智能体的唯一数据源：既承载 yuxi 原生的对话运行配置
+    （backend_id / config_json / share_config），也承载数字警员的身份档案
+    （警号 / 警衔 / 专业领域 / 功能分类）与全局共享审批状态。
+
+    可见性完全由 share_config.access_level 决定（user / department / global），
+    配合 approval_status 实现"全局共享需超级管理员审核"的门槛：
+    只有 access_level=global 且 approval_status=approved 才真正全员可见，
+    并在审核通过时授予唯一警号 badge_number。
+    """
 
     __tablename__ = "agents"
 
@@ -205,12 +215,49 @@ class Agent(Base):
     is_default = Column(Boolean, nullable=False, default=False, index=True)
     is_subagent = Column(Boolean, nullable=False, default=False, index=True)
 
+    # ── 数字警员身份档案 ──────────────────────────────────────
+    # badge_number 为警号，仅在全局共享审核通过时授予（类比警察授予警号），
+    # 普通创建与部门共享一律留空。对话 slug 与警号解耦，互不影响。
+    badge_number = Column(String(20), nullable=True, index=True)
+    rank = Column(String(30), nullable=True)  # 警衔: 一级/二级/三级警员
+    specialty = Column(String(100), nullable=True)  # 专业领域
+    department = Column(String(100), nullable=True)  # 所属部门（展示用文本）
+    color_theme = Column(String(20), nullable=True)  # 主题色: blue/green/coral/purple/amber
+    icon_key = Column(String(50), nullable=True)  # 图标标识: pencil/chart/shield/...
+    category = Column(String(50), nullable=True, index=True)  # 功能分类: case_analysis/fund_tracking/...
+    agent_type = Column(String(50), nullable=True, index=True)  # 业务类型: transcript_analyst/fund_analyst/...
+    status = Column(String(20), nullable=True, default="active")  # active/offline/training
+    experience_level = Column(Integer, nullable=True, default=1)  # 经验等级 1-5
+
+    # ── 运行配置（权威源，写入时同步派生到 config_json.context）──
+    system_prompt = Column(Text, nullable=True)
+    model_config = Column(JSON, nullable=True)  # {provider, model, temperature}
+    tools = Column(JSON, nullable=True, default=list)
+    skills = Column(JSON, nullable=True, default=list)
+    knowledge_base_ids = Column(JSON, nullable=True, default=list)
+    sop_ids = Column(JSON, nullable=True, default=list)
+    capabilities = Column(JSON, nullable=True, default=list)  # 能力标签
+
+    # ── 全局共享审批 ──────────────────────────────────────────
+    approval_status = Column(String(20), nullable=True, index=True)  # NULL/pending/approved/rejected
+    approved_by = Column(Integer, nullable=True)  # 审批人 users.id
+    approved_at = Column(DateTime, nullable=True)
+
+    # ── 工作统计与成长记录 ────────────────────────────────────
+    work_stats = Column(JSON, nullable=True, default=dict)
+    growth_log = Column(JSON, nullable=True, default=list)
+
     created_by = Column(String(64), nullable=True, index=True)
     updated_by = Column(String(64), nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
 
     __table_args__ = (Index("uq_agents_default", "is_default", unique=True, postgresql_where=is_default.is_(True)),)
+
+    @property
+    def is_global_approved(self) -> bool:
+        """是否已通过全局共享审核（全员可见 + 已授警号）。"""
+        return (self.share_config or {}).get("access_level") == "global" and self.approval_status == "approved"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -226,6 +273,33 @@ class Agent(Base):
             "share_config": self.share_config or {},
             "is_default": bool(self.is_default),
             "is_subagent": bool(self.is_subagent),
+            # ── 数字警员档案 ──
+            "badge_number": self.badge_number,
+            "rank": self.rank,
+            "specialty": self.specialty,
+            "department": self.department,
+            "color_theme": self.color_theme,
+            "icon_key": self.icon_key,
+            "category": self.category,
+            "type": self.agent_type,
+            "status": self.status or "active",
+            "experience_level": self.experience_level or 1,
+            # ── 运行配置 ──
+            "system_prompt": self.system_prompt,
+            "model_config": self.model_config or {},
+            "tools": self.tools or [],
+            "skills": self.skills or [],
+            "knowledge_base_ids": self.knowledge_base_ids or [],
+            "sop_ids": self.sop_ids or [],
+            "capabilities": self.capabilities or [],
+            # ── 审批 ──
+            "approval_status": self.approval_status,
+            "approved_by": self.approved_by,
+            "approved_at": format_utc_datetime(self.approved_at) if self.approved_at else None,
+            "is_global_approved": self.is_global_approved,
+            # ── 统计 ──
+            "work_stats": self.work_stats or {},
+            "growth_log": self.growth_log or [],
             "created_by": self.created_by,
             "updated_by": self.updated_by,
             "created_at": format_utc_datetime(self.created_at),

@@ -1,16 +1,7 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { message, Modal } from 'ant-design-vue'
-import {
-  Plus,
-  RefreshCw,
-  Trash2,
-  SquarePen,
-  Bot,
-  MessageCirclePlus,
-  UserCircle,
-  Eye
-} from 'lucide-vue-next'
+import { Plus, RefreshCw } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 import { agentApi } from '@/apis/agent_api'
@@ -18,15 +9,28 @@ import { policeAgentApi } from '@/apis/police_api'
 import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import PageShoulder from '@/components/shared/PageShoulder.vue'
-import InfoCard from '@/components/shared/InfoCard.vue'
-import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
+import AgentCard from '@/components/police/AgentCard.vue'
 import ExtensionCardGrid from '@/components/extensions/ExtensionCardGrid.vue'
-import { generatePixelAvatar } from '@/utils/pixelAvatar'
 
 const agentStore = useAgentStore()
 const router = useRouter()
 const agentLoading = ref(false)
 const searchQuery = ref('')
+
+/** 9 大功能分类（用于列表顶部筛选，直接映射到 police_agents.category） */
+const AGENT_CATEGORIES = [
+  { key: '', label: '全部' },
+  { key: 'case_analysis', label: '案件分析' },
+  { key: 'fund_tracking', label: '资金追踪' },
+  { key: 'intelligence', label: '情报研判' },
+  { key: 'evidence_mgmt', label: '调证取证' },
+  { key: 'legal_review', label: '法制审核' },
+  { key: 'interrogation', label: '审讯辅助' },
+  { key: 'image_recon', label: '图像侦查' },
+  { key: 'anti_fraud', label: '反诈劝阻' },
+  { key: 'command', label: '指挥调度' }
+]
+const activeCategory = ref('')
 
 const agentBackendOptions = ref([])
 const managedAgents = ref([])
@@ -43,19 +47,64 @@ const normalizeAgent = (agent) => {
 }
 
 /**
- * 将数字警员（police_agents）数据合并到智能体（agents）列表上。
- * 匹配键：police_agent.agent_id（int 外键）=== agent.yuxi_id（yuxi 智能体 int 主键）。
- * 合并后每条 agent 记录会携带 _officer 附加字段（含 badge_number / rank / department 等）。
+ * 以 police_agents（数字警员）为列表主源：后端已按当前用户做可见性过滤，
+ * 并按 category 做功能分类筛选。每条记录携带 _officer（police 档案）与对话侧字段。
+ * 为保证不遗漏通过对话系统新建的普通智能体（非 police 档案），再联合未被 police 覆盖的 yuxi 智能体。
  */
-const mergePoliceData = (agents, policeList) => {
-  const policeMap = new Map()
-  for (const p of policeList || []) {
-    if (p.agent_id != null) policeMap.set(p.agent_id, p)
+const buildManagedAgents = (policeList, yuxiAgents) => {
+  const yuxiById = new Map()
+  for (const a of yuxiAgents || []) {
+    const na = normalizeAgent(a)
+    if (na.yuxi_id != null) yuxiById.set(na.yuxi_id, na)
   }
-  return (agents || []).map((a) => {
-    const officer = policeMap.get(a.yuxi_id)
-    return officer ? { ...a, _officer: officer } : a
+  // 单表化：policeList 即 agents 表中带 category 的数字警员（完整 Agent 记录）。
+  // 后端 police_agent_repository.list_agents 已按当前用户做可见性过滤并按 category 筛选。
+  const policeIds = new Set(
+    (policeList || []).map((p) => p.id).filter((v) => v != null)
+  )
+
+  const fromPolice = (policeList || []).map((p) => {
+    const yuxi = yuxiById.get(p.id) || {}
+    const sc = p.share_config || {}
+    return {
+      ...yuxi,
+      // 单表化后直接用 Agent 记录字段（agents 表为唯一数据源）
+      id: p.slug || `officer-${p.id}`,
+      yuxi_id: p.id,
+      agent_id: p.id,
+      police_id: p.id,
+      slug: p.slug,
+      icon: p.icon || yuxi.icon || '',
+      avatar: p.icon,
+      name: p.name,
+      description: p.description,
+      category: p.category,
+      type: p.type,
+      capabilities: p.capabilities,
+      tools: p.tools,
+      status: p.status,
+      // 派生兼容别名：AgentCard / AgentProfileView / 统计 仍引用旧字段名，
+      // 这里从 share_config.access_level / badge_number / created_by 推导。
+      share_scope: sc.access_level,
+      is_public: sc.access_level === 'global',
+      approval_status: p.approval_status,
+      is_global_approved: p.is_global_approved,
+      badge_number: p.badge_number,
+      author_id: p.created_by,
+      created_by: p.created_by,
+      rank: p.rank,
+      specialty: p.specialty,
+      department: p.department,
+      color_theme: p.color_theme,
+      _officer: p
+    }
   })
+
+  const fromYuxi = (yuxiAgents || [])
+    .map(normalizeAgent)
+    .filter((a) => a.yuxi_id != null && !policeIds.has(a.yuxi_id))
+
+  return [...fromPolice, ...fromYuxi]
 }
 
 const filteredAgents = computed(() => {
@@ -90,10 +139,8 @@ const filteredAgents = computed(() => {
 
 const groupedAgents = computed(() => {
   const agents = filteredAgents.value.filter((agent) => !agent.is_subagent)
-  const subagents = filteredAgents.value.filter((agent) => agent.is_subagent)
   return [
-    { key: 'agents', title: '智能体', agents },
-    { key: 'subagents', title: '子智能体', agents: subagents }
+    { key: 'agents', title: '智能体', agents }
   ].filter((group) => group.agents.length > 0)
 })
 
@@ -101,9 +148,8 @@ const agentStats = computed(() => ({
   total: managedAgents.value.length,
   builtin: managedAgents.value.filter(isBuiltinAgent).length,
   officers: managedAgents.value.filter((a) => !!a._officer).length,
-  manageable: managedAgents.value.filter((agent) => agent.can_manage).length,
-  global: managedAgents.value.filter((agent) => agent.share_config?.access_level === 'global')
-    .length
+  manageable: managedAgents.value.filter((agent) => agent.can_manage || !!agent._officer).length,
+  global: managedAgents.value.filter((agent) => agent.share_scope === 'global').length
 }))
 
 const canManageAgent = (agent) => {
@@ -111,7 +157,16 @@ const canManageAgent = (agent) => {
   return !!agent?.can_manage || !!agent?._officer || isBuiltinAgent(agent)
 }
 const isOfficer = (agent) => !!agent?._officer
-const getAgentDefaultIconSrc = (agent) => (agent.id ? generatePixelAvatar(agent.id) : '')
+const getAgentStatus = (agent) => {
+  if (!isOfficer(agent)) return { text: '内置', color: 'blue' }
+  const s = agent._officer?.status
+  const map = {
+    active: { text: '在线', color: 'green' },
+    training: { text: '训练中', color: 'orange' },
+    offline: { text: '离线', color: 'red' }
+  }
+  return map[s] || { text: '离线', color: 'red' }
+}
 
 // ============ 导航操作 ============
 
@@ -121,8 +176,9 @@ const openProfile = (agent) => {
 }
 
 const openAgentChat = (agent) => {
-  if (!agent?.id || agent.is_subagent) return
-  router.push({ name: 'AgentComp', query: { agent_id: agent.id } })
+  const chatId = agent?.yuxi_id || agent?.agent_id || agent?.id
+  if (!chatId || agent.is_subagent) return
+  router.push({ name: 'AgentComp', query: { agent_id: chatId } })
 }
 
 // ============ 编辑 / 删除（统一使用 AgentEditModal） ============
@@ -194,17 +250,16 @@ const loadAgents = async () => {
   agentLoading.value = true
   try {
     const [agentRes, policeRes] = await Promise.all([
-      agentApi.getAgents({ includeSubagents: true }),
-      policeAgentApi.list({ page_size: 200 }).catch(() => ({ items: [] }))
+      agentApi.getAgents({ includeSubagents: false }),
+      policeAgentApi
+        .list({ page_size: 200, category: activeCategory.value || undefined })
+        .catch(() => ({ items: [] }))
     ])
     const policeList = (policeRes.items || policeRes.agents || [])
       // 过滤市场模板（is_template=1），模板不应出现在智能体管理列表中
       .filter((p) => !p.is_template)
     policeAgentsRaw.value = policeList
-    managedAgents.value = mergePoliceData(
-      (agentRes.agents || []).map(normalizeAgent),
-      policeList
-    )
+    managedAgents.value = buildManagedAgents(policeList, agentRes.agents || [])
   } catch (error) {
     message.error(error.message || '加载智能体失败')
   } finally {
@@ -214,6 +269,10 @@ const loadAgents = async () => {
 
 onMounted(async () => {
   await Promise.all([loadAgentBackends(), loadAgents()])
+})
+
+watch(activeCategory, () => {
+  loadAgents()
 })
 
 defineExpose({
@@ -237,6 +296,20 @@ defineExpose({
       </template>
     </PageShoulder>
 
+    <!-- 功能维度筛选（9 大类） -->
+    <div class="agent-category-filter">
+      <button
+        v-for="cat in AGENT_CATEGORIES"
+        :key="cat.key"
+        type="button"
+        class="category-chip"
+        :class="{ active: activeCategory === cat.key }"
+        @click="activeCategory = cat.key"
+      >
+        {{ cat.label }}
+      </button>
+    </div>
+
     <div v-if="groupedAgents.length === 0" class="agent-empty-state">
       <a-empty
         :image="false"
@@ -253,89 +326,19 @@ defineExpose({
             <template v-if="agentStats.officers">（{{ agentStats.officers }} 名数字警员）</template>
           </span>
         </div>
-        <ExtensionCardGrid :min-width="320">
-          <InfoCard
+        <ExtensionCardGrid :min-width="340">
+          <AgentCard
             v-for="agent in group.agents"
             :key="agent.id"
-            :title="agent.name"
-            :subtitle="agent._officer ? `${agent.slug || agent.id} · 工号 ${agent._officer.badge_number}` : (agent.slug || agent.id)"
-            :description="agent.description || '暂无描述'"
-            :default-icon="isOfficer(agent) ? UserCircle : Bot"
-            :tags="[]"
-            class="config-card agent-card"
+            :agent="agent"
+            :is-officer="isOfficer(agent)"
+            :status-text="getAgentStatus(agent).text"
+            :status-color="getAgentStatus(agent).color"
             @click="openProfile(agent)"
-          >
-            <template #icon>
-              <div class="agent-card-icon-wrapper">
-                <FallbackAvatar
-                  class="agent-card-icon-image"
-                  :src="agent.icon"
-                  :default-src="getAgentDefaultIconSrc(agent)"
-                  :name="agent.name || agent.id"
-                  :seed="agent.id || agent.name"
-                  kind="agent"
-                  :size="40"
-                  shape="rounded"
-                  :alt="`${agent.name || '智能体'}图标`"
-                />
-                <!-- 数字警员角标 -->
-                <span v-if="isOfficer(agent)" class="officer-badge" title="数字警员">
-                  <UserCircle :size="10" />
-                </span>
-              </div>
-            </template>
-
-            <template v-if="canManageAgent(agent)" #card-more-action-corner>
-              <a-menu>
-                <a-menu-item key="profile" @click.stop="openProfile(agent)">
-                  <span class="lucide-menu-item">
-                    <Eye :size="14" />
-                    <span>查看档案</span>
-                  </span>
-                </a-menu-item>
-                <a-menu-item key="edit" @click.stop="openEditAgentModal(agent)">
-                  <span class="lucide-menu-item">
-                    <SquarePen :size="14" />
-                    <span>编辑</span>
-                  </span>
-                </a-menu-item>
-                <a-menu-item
-                  key="delete"
-                  :disabled="isBuiltinAgent(agent)"
-                  :danger="!isBuiltinAgent(agent)"
-                  @click.stop="deleteAgent(agent)"
-                >
-                  <span class="lucide-menu-item">
-                    <Trash2 :size="14" />
-                    <span>删除</span>
-                  </span>
-                </a-menu-item>
-              </a-menu>
-            </template>
-
-            <template v-if="group.key === 'agents'" #tags>
-              <div class="agent-card-actions">
-                <a-button
-                  type="text"
-                  size="small"
-                  class="lucide-icon-btn agent-profile-entry"
-                  @click.stop="openProfile(agent)"
-                >
-                  <Eye :size="14" />
-                  档案
-                </a-button>
-                <a-button
-                  type="text"
-                  size="small"
-                  class="lucide-icon-btn agent-chat-entry"
-                  @click.stop="openAgentChat(agent)"
-                >
-                  <MessageCirclePlus :size="14" />
-                  对话
-                </a-button>
-              </div>
-            </template>
-          </InfoCard>
+            @chat="openAgentChat"
+            @edit="openEditAgentModal"
+            @delete="deleteAgent"
+          />
         </ExtensionCardGrid>
       </section>
     </template>
@@ -366,6 +369,41 @@ defineExpose({
   padding-top: 2px;
 }
 
+.agent-category-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px var(--page-padding) 4px;
+}
+
+.category-chip {
+  padding: 5px 14px;
+  border: 1px solid var(--gray-200);
+  border-radius: 999px;
+  background: var(--gray-0);
+  color: var(--gray-700);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    background 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease;
+
+  &:hover {
+    border-color: var(--main-300);
+    color: var(--main-800);
+  }
+
+  &.active {
+    border-color: var(--main-700);
+    background: var(--main-700);
+    color: #ffffff;
+    font-weight: 600;
+  }
+}
+
 .agent-group-header {
   display: flex;
   align-items: center;
@@ -381,97 +419,6 @@ defineExpose({
 .group-count {
   font-weight: 400;
   opacity: 0.7;
-}
-
-.agent-card-icon-image {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
-
-.agent-card-icon-wrapper {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* 数字警员角标：右下角小圆点 */
-.officer-badge {
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 18px;
-  height: 18px;
-  background: var(--main-700);
-  color: #fff;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-}
-
-.officer-hint {
-  font-size: 11px;
-  color: var(--main-700);
-  background: var(--main-30);
-  padding: 1px 8px;
-  border-radius: 6px;
-  margin-left: 6px;
-}
-
-.agent-card {
-  cursor: pointer;
-
-  &:hover {
-    border-color: var(--main-200);
-    box-shadow: 0 4px 14px var(--shadow-2);
-  }
-}
-
-.agent-card :deep(.info-card-tags) {
-  justify-content: flex-start;
-  margin-top: auto;
-}
-
-.agent-card-actions {
-  display: flex;
-  justify-content: flex-start;
-  gap: 4px;
-  width: 100%;
-  margin-top: auto;
-}
-
-.agent-profile-entry,
-.agent-chat-entry {
-  min-width: 64px;
-  height: 32px;
-  padding: 2px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--gray-100);
-  box-shadow: none;
-  color: var(--gray-800);
-  font-size: 12px;
-
-  &:hover {
-    border: 0;
-    background: var(--gray-700);
-    box-shadow: none;
-    color: var(--gray-0);
-  }
-
-  &:focus:not(:focus-visible) {
-    outline: none;
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--main-200);
-    outline-offset: 2px;
-  }
 }
 
 .spinning {

@@ -80,11 +80,12 @@ export const policeEvidenceApi = {
 
 // ── 智能体 / 流程技能 (SOP) ────────────────────────────────
 export const policeAgentApi = {
-  list: ({ type, status, keyword, page = 1, page_size = 50 } = {}) => {
+  list: ({ type, status, keyword, category, page = 1, page_size = 50 } = {}) => {
     const params = new URLSearchParams({ page, page_size })
     if (type) params.set('type', type)
     if (status) params.set('status', status)
     if (keyword) params.set('keyword', keyword)
+    if (category) params.set('category', category)
     return apiGet(`/api/police/agents?${params}`)
   },
   get: (agentId) => apiGet(`/api/police/agents/${agentId}`),
@@ -107,18 +108,23 @@ export const policeAgentApi = {
   createSop: (data) => apiPost('/api/police/agents/sops', data),
   updateSop: (sopId, data) => apiPut(`/api/police/agents/sops/${sopId}`, data),
   seed: () => apiPost('/api/police/agents/seed'),
-  // ── 市场模板 ────────────────────────────────────────
-  listTemplates: ({ category, keyword, page = 1, page_size = 50 } = {}) => {
-    const params = new URLSearchParams({ page, page_size })
-    if (category) params.set('category', category)
-    if (keyword) params.set('keyword', keyword)
-    return apiGet(`/api/police/agents/templates?${params}`)
-  },
-  installTemplate: (templateId) => apiPost(`/api/police/agents/templates/${templateId}/install`),
+  // ── 共享与审批 ─────────────────────────────────────
   shareAgent: (agentId, { scope, department_ids, user_uids, author_id }) =>
     apiPost(`/api/police/agents/${agentId}/share`, { scope, department_ids, user_uids, author_id }),
   approveAgent: (agentId, { approved, reviewer_id }) =>
     apiPost(`/api/police/agents/${agentId}/approve`, { approved, reviewer_id }),
+  /** 待审批（全局共享申请）列表，仅超级管理员可见 */
+  listPending: ({ page = 1, page_size = 50 } = {}) => {
+    const params = new URLSearchParams({ page, page_size })
+    return apiGet(`/api/police/agents/pending?${params}`)
+  },
+  // ── 留言板 ─────────────────────────────────────
+  listComments: (agentId, { page = 1, page_size = 50 } = {}) =>
+    apiGet(`/api/police/agents/${agentId}/comments?page=${page}&page_size=${page_size}`),
+  createComment: (agentId, content) =>
+    apiPost(`/api/police/agents/${agentId}/comments`, { content }),
+  deleteComment: (agentId, commentId) =>
+    apiDelete(`/api/police/agents/${agentId}/comments/${commentId}`),
 }
 
 // ── 案件独立工作区（树状节点）────────────────────────────────

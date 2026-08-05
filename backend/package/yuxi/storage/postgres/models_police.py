@@ -466,113 +466,11 @@ class EvidenceLink(Base):
         }
 
 
-class PoliceAgent(Base):
-    """★ 数字警员定义表 (融合 StaffDeck 数字员工概念)
-
-    将公安智能体升级为"数字警员"——每位数字警员拥有完整身份档案、
-    能力矩阵、工作统计和成长记录，像管理真实员工一样管理 AI。
-
-    与 yuxi 原生的 agents 表互补：此表存储公安专用智能体的业务配置，
-    运行时仍走 yuxi 的 LangGraph 引擎。
-    """
-
-    __tablename__ = "police_agents"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-    type = Column(String(50), nullable=False, index=True)  # transcript_analyst/fund_analyst/legal_reviewer/case_orchestrator
-    system_prompt = Column(Text, nullable=False)
-    model_config = Column(JSON, nullable=False)  # {provider, model, temperature}
-
-    # ── 数字警员档案 (StaffDeck 数字员工概念) ──────────────────
-    badge_number = Column(String(20), nullable=True, index=True)  # 数字警员工号 (如 DA-001)
-    rank = Column(String(30), nullable=True)  # 警衔: 一级/二级/三级警员
-    specialty = Column(String(100), nullable=True)  # 专业领域: 资金追踪/笔录分析/法制审核
-    avatar = Column(String(200), nullable=True)  # 头像 URL 或 emoji
-    department = Column(String(100), nullable=True)  # 所属部门
-    color_theme = Column(String(20), nullable=True)  # 主题色: blue/green/coral/purple/amber
-
-    # ── 与 yuxi 原生智能体体系融合 ────────────────────────────
-    # 数字警员本质上是 yuxi 的专业智能体(子智能体)，在此建立双向关联：
-    #   backend_id  -> yuxi agents 表的 backend_id (如 "SubAgentBackend")
-    #   agent_id    -> yuxi agents 表的主键 id (种子初始化时同步创建)
-    backend_id = Column(String(64), nullable=True, index=True)
-    agent_id = Column(Integer, nullable=True, index=True)
-
-    # ── 能力矩阵 ──────────────────────────────────────────────
-    tools = Column(JSON, default=list)
-    skills = Column(JSON, default=list)
-    knowledge_base_ids = Column(JSON, default=list)
-    capabilities = Column(JSON, default=list)  # 能力标签: ["笔录解析","实体识别","OCR"]
-    sop_ids = Column(JSON, default=list)  # 关联的 SOP 流程技能 ID
-
-    # ── 工作统计 (由系统聚合，非手动维护) ─────────────────────
-    work_stats = Column(JSON, default=dict)  # {tasks_completed, tasks_total, success_rate, cases_handled, feedback_positive, feedback_negative}
-
-    # ── 成长记录 ──────────────────────────────────────────────
-    growth_log = Column(JSON, default=list)  # [{date, event, description}] 能力成长事件
-    experience_level = Column(Integer, default=1)  # 经验等级 1-5
-
-    icon = Column(String(50), nullable=True)
-    status = Column(String(20), default="active")  # active/offline/training
-    is_template = Column(Integer, default=0)
-    category = Column(String(50), nullable=True, index=True)  # 市场分类: case_analysis/fund_tracking/legal_review/...
-    install_count = Column(Integer, default=0)  # 市场安装次数
-    source_template_id = Column(Integer, nullable=True, index=True)  # 安装来源模板 ID（NULL 表示自建或预设）
-
-    # ── 共享与市场发布 ────────────────────────────────────────
-    author_id = Column(Integer, nullable=True, index=True)  # 创建者 users.id（NULL=系统预设）
-    is_public = Column(Integer, default=0)  # 是否在市场中可见（1=可见）
-    share_scope = Column(String(20), default="personal")  # personal / department / global
-    approval_status = Column(String(20), nullable=True)  # NULL / pending / approved / rejected
-    approved_by = Column(Integer, nullable=True)  # 审批人 users.id
-    approved_at = Column(DateTime, nullable=True)  # 审批时间
-
-    created_at = Column(DateTime, default=utc_now_naive)
-    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
-
-    runs = relationship("PoliceAgentRun", back_populates="agent")
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "name": self.name,
-            "description": self.description,
-            "type": self.type,
-            "system_prompt": self.system_prompt,
-            "model_config": self.model_config,
-            "badge_number": self.badge_number,
-            "rank": self.rank,
-            "specialty": self.specialty,
-            "avatar": self.avatar,
-            "department": self.department,
-            "color_theme": self.color_theme,
-            "backend_id": self.backend_id,
-            "agent_id": self.agent_id,
-            "tools": self.tools or [],
-            "skills": self.skills or [],
-            "knowledge_base_ids": self.knowledge_base_ids or [],
-            "capabilities": self.capabilities or [],
-            "sop_ids": self.sop_ids or [],
-            "work_stats": self.work_stats or {},
-            "growth_log": self.growth_log or [],
-            "experience_level": self.experience_level,
-            "icon": self.icon,
-            "status": self.status,
-            "is_template": self.is_template,
-            "category": self.category,
-            "install_count": self.install_count or 0,
-            "source_template_id": self.source_template_id,
-            "author_id": self.author_id,
-            "is_public": self.is_public or 0,
-            "share_scope": self.share_scope or "personal",
-            "approval_status": self.approval_status,
-            "approved_by": self.approved_by,
-            "approved_at": format_utc_datetime(self.approved_at) if self.approved_at else None,
-            "created_at": format_utc_datetime(self.created_at),
-            "updated_at": format_utc_datetime(self.updated_at),
-        }
+# ── PoliceAgent 已废弃 ────────────────────────────────────────
+# 智能体在平台内具有唯一性，定义与档案统一存放于 yuxi 原生 agents 表
+# (models_business.Agent)：警号 badge_number / 功能分类 category /
+# 共享可见性 share_config / 全局审批 approval_status 均在该表。
+# 迁移脚本见 backend/scripts/migrate_police_agents_to_agents.sql。
 
 
 class PoliceAgentRun(Base):
@@ -581,7 +479,7 @@ class PoliceAgentRun(Base):
     __tablename__ = "police_agent_runs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    agent_id = Column(Integer, ForeignKey("police_agents.id"), nullable=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True, index=True)
     task_id = Column(Integer, ForeignKey("police_tasks.id"), nullable=True, index=True)
     case_id = Column(Integer, ForeignKey("police_cases.id", ondelete="CASCADE"), nullable=True, index=True)
     status = Column(String(20), default="queued", index=True)  # queued/running/completed/failed/cancelled
@@ -595,7 +493,7 @@ class PoliceAgentRun(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
 
-    agent = relationship("PoliceAgent", back_populates="runs")
+    agent = relationship("Agent")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -612,6 +510,30 @@ class PoliceAgentRun(Base):
             "duration_ms": self.duration_ms,
             "started_at": format_utc_datetime(self.started_at),
             "completed_at": format_utc_datetime(self.completed_at),
+            "created_at": format_utc_datetime(self.created_at),
+        }
+
+
+class PoliceAgentComment(Base):
+    """★ 数字警员留言板评论表
+
+    用户可在数字警员档案页留下评论，支持表情（Emoji），评论持久化到数据库。
+    """
+
+    __tablename__ = "police_agent_comments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # NULL = 系统/匿名
+    content = Column(Text, nullable=False)  # 含 Emoji 的原始文本
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "agent_id": self.agent_id,
+            "user_id": self.user_id,
+            "content": self.content,
             "created_at": format_utc_datetime(self.created_at),
         }
 

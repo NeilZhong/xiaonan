@@ -150,7 +150,7 @@ const baseShareModeOptions = [
   {
     value: 'global',
     title: '全局共享',
-    description: '所有用户都可以访问',
+    description: '所有用户都可以访问（需超级管理员审核通过后上架并授予警号）',
     icon: Globe
   },
   {
