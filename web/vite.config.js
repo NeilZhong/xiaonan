@@ -10,7 +10,8 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       // File Viewer：自动装配已安装的 @file-viewer/preset-* 渲染器，并拷贝 WASM/字体等静态资源
-      fileViewerRenderers({ copyAssets: true })
+      // dev 模式跳过拷贝（Docker on Windows bind mount 上 fs.cp 有兼容性问题），build 时正常拷贝
+      fileViewerRenderers({ copyAssets: { mode: 'build' } })
     ],
     resolve: {
       alias: {

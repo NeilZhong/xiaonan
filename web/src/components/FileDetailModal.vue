@@ -123,7 +123,10 @@
 import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { documentApi } from '@/apis/knowledge_api'
-import { getWorkspaceKnowledgeFileContent } from '@/apis/workspace_api'
+import {
+  downloadWorkspaceKnowledgeFile,
+  getWorkspaceKnowledgeFileContent
+} from '@/apis/workspace_api'
 import { mergeChunks } from '@/utils/chunkUtils'
 import { getPreviewTypeByPath, normalizePreviewResponse } from '@/utils/file_preview'
 import {
@@ -177,7 +180,8 @@ const sourcePreview = ref({
   content: '',
   type: '',
   message: '',
-  supported: true
+  supported: true,
+  rawBlob: null
 })
 
 let basicRequestSeq = 0
@@ -210,7 +214,8 @@ const resetSourcePreview = () => {
     content: '',
     type: '',
     message: '',
-    supported: true
+    supported: true,
+    rawBlob: null
   }
 }
 
@@ -267,6 +272,8 @@ const sourcePreviewFile = computed(() => {
     content: sourcePreview.value.content,
     previewType: sourcePreviewDisplayType.value,
     previewUrl: sourcePreview.value.url,
+    // 办公文档由 File Viewer 直接渲染原始字节，需把 blob 透传给 AgentFilePreview
+    rawBlob: sourcePreview.value.rawBlob,
     supported: sourcePreview.value.supported,
     message: sourcePreview.value.message
   }
@@ -480,6 +487,22 @@ const loadSourcePreview = async () => {
   const requestId = ++sourceRequestSeq
   sourcePreview.value.loading = true
   try {
+    // 办公文档走前端 File Viewer 渲染：直接取原始字节，
+    // 不再请求 /workspace/knowledge/file（该接口对 Office 会用 LibreOffice 转成 PDF 再返回）。
+    if (sourcePreviewCandidateType.value === 'office') {
+      const response = await downloadWorkspaceKnowledgeFile(props.kbId, props.fileId)
+      const blob = await response.blob()
+      if (requestId !== sourceRequestSeq) return
+      revokeSourcePreviewUrl()
+      sourcePreview.value.type = 'office'
+      sourcePreview.value.rawBlob = blob
+      sourcePreview.value.url = window.URL.createObjectURL(blob)
+      sourcePreview.value.content = ''
+      sourcePreview.value.supported = true
+      sourcePreview.value.message = ''
+      return
+    }
+
     const response = await getWorkspaceKnowledgeFileContent(props.kbId, props.fileId)
     const preview = await normalizePreviewResponse(response)
     if (requestId !== sourceRequestSeq) {

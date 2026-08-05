@@ -1,6 +1,7 @@
+// 注意：knowledges 不在此集合内。未配置（null）即视为“不关联任何知识库”，
+// 需显式选择，避免智能体越权访问全部知识库。
 export const DEFAULT_ALL_AGENT_RESOURCE_KINDS = Object.freeze([
   'tools',
-  'knowledges',
   'mcps',
   'skills',
   'subagents'

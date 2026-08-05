@@ -188,6 +188,21 @@ const createRenderer = ({ themeName, highlighter }) =>
     .use(taskLists, { enabled: false, label: false, labelAfter: false })
     .use(markdownItFrontmatterCard)
 
+/**
+ * 将模型写出的轻量引用 token 确定性地转换为角标标签。
+ *
+ * 弱模型（如 agnes-2.5-flash）难以稳定输出带 HTML 属性的完整标签，因此让模型只写
+ * `[ref:CHUNK_ID]`（半角）或 `【ref:CHUNK_ID】`（全角）这类极简 token，由前端在渲染期
+ * 统一转成 `<cite data-chunk-id="CHUNK_ID">` 并完成校验与重编号。序号先填占位 1，
+ * 后续由 MarkdownPreview 的 enhanceCitations 按实际片段重写。
+ */
+const convertRefTokensToCitations = (markdown) => {
+  if (typeof markdown !== 'string') return markdown
+  return markdown
+    .replace(/\[ref:\s*([^\]\s]+)\s*\]/g, '<cite data-chunk-id="$1">1</cite>')
+    .replace(/【ref:\s*([^】\s]+)\s*】/g, '<cite data-chunk-id="$1">1</cite>')
+}
+
 const getRenderer = async (theme, needsHighlight) => {
   const themeName = normalizeTheme(theme)
   const cacheKey = needsHighlight ? themeName : 'plain'
@@ -228,8 +243,8 @@ export const renderMarkdown = async (content, { theme = 'github-light' } = {}) =
     }
 
     const md = await getRenderer(themeName, needsHighlight)
-    const html = DOMPurify.sanitize(md.render(svgContent), {
-      ADD_TAGS: ['input'],
+    const html = DOMPurify.sanitize(md.render(convertRefTokensToCitations(svgContent)), {
+      ADD_TAGS: ['input', 'cite'],
       ADD_ATTR: [
         'class',
         'style',
@@ -240,7 +255,10 @@ export const renderMarkdown = async (content, { theme = 'github-light' } = {}) =
         'disabled',
         'source',
         'colspan',
-        'rowspan'
+        'rowspan',
+        'data-chunk-id',
+        'data-cite-index',
+        'data-cite-title'
       ]
     })
     setCachedHtml(cacheKey, html)

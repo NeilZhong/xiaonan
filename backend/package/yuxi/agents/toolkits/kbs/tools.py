@@ -162,6 +162,10 @@ async def query_kb(kb_id: str, query_text: str, file_name: str | None = None, ru
 
     当用户需要查询具体内容时使用此工具。kb_id 是知识库资源 ID，也就是 kb_id；返回结果中的
     file_id 可继续用于 find_kb_document 或 open_kb_document。
+
+    返回 results 中每个片段的 id 字段即该片段的 chunk_id，是引用锚点：
+    回答引用了某个片段时，在对应句末插入极简标记 [ref:该片段的 id]（方括号内只放 id，不要加空格、
+    不要写成带属性的 HTML 标签），id 必须原样复制，不得改写或编造。
     """
     if not kb_id:
         return "请提供 kb_id"

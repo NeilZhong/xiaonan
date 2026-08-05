@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import io
 import shutil
 from pathlib import Path, PurePosixPath
@@ -14,12 +13,9 @@ from fastapi.responses import FileResponse, StreamingResponse
 from yuxi.agents.backends.sandbox.paths import _global_user_data_dir, ensure_workspace_default_files
 from yuxi.services.file_preview import (
     MAX_BINARY_PREVIEW_SIZE_BYTES,
-    OfficePreviewConversionError,
-    convert_office_to_pdf,
     detect_media_type,
     detect_preview_type,
     is_binary_preview_type,
-    is_office_pdf_preview_file,
     render_preview_payload,
     render_preview_too_large_payload,
 )
@@ -169,15 +165,6 @@ async def read_workspace_file_content(*, path: str, current_user: User) -> dict 
     stat = await asyncio.to_thread(target.stat)
     if stat.st_size > MAX_BINARY_PREVIEW_SIZE_BYTES:
         return render_preview_too_large_payload()
-
-    if is_office_pdf_preview_file(path):
-        pdf_content = await _convert_workspace_office_to_pdf(current_user, target, target.name)
-        return _preview_binary_response(
-            filename=f"{target.stem or 'preview'}.pdf",
-            content=pdf_content,
-            media_type="application/pdf",
-            preview_type="pdf",
-        )
 
     raw_content = await asyncio.to_thread(target.read_bytes)
     preview_type, supported, message = detect_preview_type(path, raw_content)
@@ -334,35 +321,6 @@ async def upload_workspace_files(*, parent_path: str, files: list[UploadFile], c
 
     await invalidate_workspace_mention_cache(str(current_user.uid))
     return {"success": True, "entries": [_entry_for_path(root, target) for _file, target in upload_targets]}
-
-
-async def _convert_workspace_office_to_pdf(user: User, target: Path, file_name: str) -> bytes:
-    user_data_root = _global_user_data_dir(str(user.uid)).resolve()
-    cache_dir = user_data_root / ".office_preview_cache"
-    stat = await asyncio.to_thread(target.stat)
-    digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()
-    cache_path = cache_dir / f"{digest}-{stat.st_mtime_ns}-{stat.st_size}.pdf"
-
-    cached = await asyncio.to_thread(lambda: cache_path.read_bytes() if cache_path.exists() else None)
-    if cached is not None:
-        return cached
-
-    content = await asyncio.to_thread(target.read_bytes)
-    try:
-        pdf_content = await convert_office_to_pdf(file_name, content)
-    except OfficePreviewConversionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    await asyncio.to_thread(_store_office_pdf_cache, cache_dir, digest, cache_path, pdf_content)
-    return pdf_content
-
-
-def _store_office_pdf_cache(cache_dir: Path, digest: str, cache_path: Path, pdf_content: bytes) -> None:
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    for stale in cache_dir.glob(f"{digest}-*.pdf"):
-        if stale != cache_path:
-            stale.unlink(missing_ok=True)
-    cache_path.write_bytes(pdf_content)
 
 
 async def download_workspace_file(*, path: str, current_user: User) -> StreamingResponse | FileResponse:

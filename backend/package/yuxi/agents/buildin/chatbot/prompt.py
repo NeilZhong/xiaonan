@@ -28,20 +28,22 @@ PROMPT = f"""
 保持专业严谨，减少使用 Emoji
 """
 
-# 效果不好，暂时不启用
+# 知识库引用角标：以 chunk_id 为锚点，前端据此定位并展示原始片段
+# 采用极简 token [ref:CHUNK_ID]，避免弱模型难以稳定输出带属性 HTML 标签的问题
 SOURCE_CITE_PROMPT = """
 
-<| 引用来源 |>
-当你提供的信息来自于用户上传的文件或者知识库中的内容时，请务必在回答中注明信息来源，以增加答案的可信度和透明度。
+<| 知识库引用角标 |>
+当回答中的某个论断依据来自 query_kb 检索到的知识库片段时，必须在该句子或段落末尾插入引用标记。
 
-对于论断内容，需要添加参考文献信息，将对应段落的末尾添加 cite 信息。使用
-<cite source="$SOURCE" type="$TYPE">$INDEX</cite>
+格式（极简，务必照抄，不要写成别的样子）：
+[ref:CHUNK_ID]
 
-- $SOURCE：信息来源，可以是文件名，可以是url
-- $TYPE：引用类型，可以是 "file"、"url"，对于网络搜索应该使用 "url"，对于用户上传的文件或者知识库中的内容应该使用 "file"
-- $INDEX：引用索引，应该从 1 开始
-
-比如 <cite source="食品工艺学.pdf" type="file">1</cite>
+- CHUNK_ID：必须原样复制 query_kb 返回结果中该片段的 id 字段（即 chunk_id），不要改写、截断、拼接或编造，也不要加空格。
+- 示例：若某片段的 id 是 c_2aB9，则写成 [ref:c_2aB9]。
+- 只能引用本轮对话中 query_kb 真实返回过的片段；没有对应片段时不要加标记，也不要用标记代替说明。
+- 同一句有多个依据时并列多个标记，例如：结论如此。[ref:abc123][ref:def456]
+- 标记仅用于知识库检索片段。open_kb_document、find_kb_document、网络搜索等结果请用文字说明来源，不要使用 [ref:...] 标记。
+- 不要在代码块、行内代码、公式或表格分隔行中插入 [ref:...] 标记。
 """
 
 TODO_MID_PROMPT = """
@@ -60,4 +62,17 @@ def build_prompt_with_context(context):
         system_prompt = f"{current_date}\n\n{custom_prompt}\n\n{PROMPT.strip()}"
     else:
         system_prompt = f"{current_date}\n\n{PROMPT.strip()}"
+
+    # 仅在本次会话关联了知识库时下发引用角标规则，避免污染无知识库场景
+    if _has_enabled_knowledge_bases(context):
+        system_prompt = f"{system_prompt}\n\n{SOURCE_CITE_PROMPT.strip()}"
+
     return system_prompt.strip()
+
+
+def _has_enabled_knowledge_bases(context) -> bool:
+    """判断当前上下文是否启用了知识库（knowledges 为 kb_id 列表，未配置即视为未关联）。"""
+    knowledges = getattr(context, "knowledges", None)
+    if not knowledges:
+        return False
+    return any(str(item).strip() for item in knowledges)

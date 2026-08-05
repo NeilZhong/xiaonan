@@ -96,7 +96,7 @@ async def test_read_workspace_file_content_returns_unsupported_for_non_utf8_text
 
 
 @pytest.mark.asyncio
-async def test_read_workspace_file_content_returns_pdf_preview_for_office_file(
+async def test_read_workspace_file_content_returns_office_preview_for_office_file(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -106,25 +106,18 @@ async def test_read_workspace_file_content_returns_pdf_preview_for_office_file(
     target = root / "demo.docx"
     target.write_bytes(b"office")
 
-    async def fake_convert(filename: str, content: bytes) -> bytes:
-        assert filename == "demo.docx"
-        assert content == b"office"
-        return b"%PDF-1.4\npreview"
-
-    monkeypatch.setattr(svc, "convert_office_to_pdf", fake_convert)
-
     result = await svc.read_workspace_file_content(path="/demo.docx", current_user=user)
     body = b""
     async for chunk in result.body_iterator:
         body += chunk
 
-    assert result.media_type == "application/pdf"
-    assert result.headers["x-yuxi-preview-type"] == "pdf"
-    assert body == b"%PDF-1.4\npreview"
+    assert result.media_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert result.headers["x-yuxi-preview-type"] == "office"
+    assert body == b"office"
 
 
 @pytest.mark.asyncio
-async def test_read_workspace_file_content_rejects_xlsx_preview(
+async def test_read_workspace_file_content_returns_office_preview_for_xlsx(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -135,14 +128,18 @@ async def test_read_workspace_file_content_rejects_xlsx_preview(
     target.write_bytes(b"PK\x03\x04excel")
 
     result = await svc.read_workspace_file_content(path="/sheet.xlsx", current_user=user)
+    body = b""
+    async for chunk in result.body_iterator:
+        body += chunk
 
-    assert result["content"] is None
-    assert result["preview_type"] == "unsupported"
-    assert result["supported"] is False
+    # xlsx 与 docx 一样作为办公文档原样交由前端 File Viewer 渲染，不再判为不支持
+    assert result.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert result.headers["x-yuxi-preview-type"] == "office"
+    assert body == b"PK\x03\x04excel"
 
 
 @pytest.mark.asyncio
-async def test_preview_workspace_file_converts_office_file_to_pdf(
+async def test_preview_workspace_file_returns_office_preview_for_pptx(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -151,25 +148,19 @@ async def test_preview_workspace_file_converts_office_file_to_pdf(
     root = svc._workspace_root(user)
     target = root / "slides.pptx"
     target.write_bytes(b"presentation")
-
-    async def fake_convert(filename: str, content: bytes) -> bytes:
-        assert filename == "slides.pptx"
-        assert content == b"presentation"
-        return b"%PDF-1.4\npreview"
-
-    monkeypatch.setattr(svc, "convert_office_to_pdf", fake_convert)
 
     response = await svc.read_workspace_file_content(path="/slides.pptx", current_user=user)
     body = b""
     async for chunk in response.body_iterator:
         body += chunk
 
-    assert response.media_type == "application/pdf"
-    assert body == b"%PDF-1.4\npreview"
+    assert response.media_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    assert response.headers["x-yuxi-preview-type"] == "office"
+    assert body == b"presentation"
 
 
 @pytest.mark.asyncio
-async def test_preview_workspace_file_caches_office_pdf_conversion(
+async def test_preview_workspace_office_file_returns_original_bytes_consistently(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -179,29 +170,19 @@ async def test_preview_workspace_file_caches_office_pdf_conversion(
     target = root / "slides.pptx"
     target.write_bytes(b"presentation")
 
-    convert_calls = 0
-
-    async def fake_convert(filename: str, content: bytes) -> bytes:
-        nonlocal convert_calls
-        convert_calls += 1
-        return b"%PDF-1.4\npreview"
-
-    monkeypatch.setattr(svc, "convert_office_to_pdf", fake_convert)
-
-    async def read_pdf() -> bytes:
+    async def read_body() -> bytes:
         response = await svc.read_workspace_file_content(path="/slides.pptx", current_user=user)
         body = b""
         async for chunk in response.body_iterator:
             body += chunk
         return body
 
-    assert await read_pdf() == b"%PDF-1.4\npreview"
-    assert await read_pdf() == b"%PDF-1.4\npreview"
-    assert convert_calls == 1
+    # 不再依赖 LibreOffice 转换：直接原样返回字节流，多次读取内容稳定一致
+    assert await read_body() == b"presentation"
+    assert await read_body() == b"presentation"
 
     target.write_bytes(b"presentation-v2")
-    assert await read_pdf() == b"%PDF-1.4\npreview"
-    assert convert_calls == 2
+    assert await read_body() == b"presentation-v2"
 
 
 @pytest.mark.asyncio

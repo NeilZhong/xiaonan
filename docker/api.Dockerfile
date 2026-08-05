@@ -40,9 +40,8 @@ RUN set -ex \
         libpq5 \
         libsm6 \
         libxext6 \
-    # 注：libreoffice-impress-nogui / libreoffice-writer-nogui 依赖链极长，
-    # 首次构建易因个别包缺失拖垮 apt；当前 Phase 2 验证暂不需要文档预览，
-    # 后续若需后端生成 PPT/Word 预览再恢复这两行。
+    # 注：文件预览统一由前端 File Viewer 渲染（原样回传字节流），后端不再依赖
+    # libreoffice 生成 PPT/Word 预览，故 libxoffic 相关包保持不安装。
     # (D) 清理垃圾，减小体积
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

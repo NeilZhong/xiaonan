@@ -57,8 +57,10 @@
         v-if="parsedData.content"
         :key="message.id"
         :content="parsedData.content"
+        :citations="citations"
         code-copy
         class="message-md"
+        @citation-click="handleCitationClick"
       />
 
       <div v-else-if="parsedData.reasoning_content" class="empty-block"></div>
@@ -144,6 +146,12 @@
       <img :src="imagePreview.src" :alt="imagePreview.alt" class="message-image-preview-img" />
     </div>
   </Teleport>
+
+  <KbChunkDetailModal
+    v-model:open="citationModal.open"
+    :chunk="citationModal.chunk"
+    title-prefix="引用片段"
+  />
 </template>
 
 <script setup>
@@ -154,6 +162,7 @@ import { Copy, Check, X } from 'lucide-vue-next'
 import ToolCallsGroupComponent from '@/components/ToolCallsGroupComponent.vue'
 import MarkdownPreview from '@/components/common/MarkdownPreview.vue'
 import MentionTextRenderer from '@/components/common/MentionTextRenderer.vue'
+import KbChunkDetailModal from '@/components/sources/KbChunkDetailModal.vue'
 import { useAgentStore } from '@/stores/agent'
 import { useInfoStore } from '@/stores/info'
 import { storeToRefs } from 'pinia'
@@ -196,6 +205,11 @@ const props = defineProps({
   mention: {
     type: Object,
     default: () => null
+  },
+  // 会话级来源（知识库片段/网络来源）。不传时退回按单条消息提取。
+  sources: {
+    type: Object,
+    default: null
   },
   // 是否显示调试信息 (已废弃，使用 infoStore.debugMode)
   debugMode: {
@@ -309,11 +323,49 @@ const messageImageMimeType = computed(
 const mentionDisplayLabels = computed(() => buildMentionDisplayLabels(props.mention || {}))
 
 const messageSources = computed(() => {
+  // 工具调用与最终回答通常不在同一条消息上，优先使用父级传入的会话级来源
+  if (props.sources && typeof props.sources === 'object') {
+    return {
+      knowledgeChunks: props.sources.knowledgeChunks || [],
+      webSources: props.sources.webSources || []
+    }
+  }
   if (props.message.type === 'ai') {
     return MessageProcessor.extractSourcesFromMessage(props.message, availableKnowledgeBases.value)
   }
   return { knowledgeChunks: [], webSources: [] }
 })
+
+// === 知识库引用角标 ===
+const CITATION_TOOLTIP_MAX = 160
+
+// 以 chunk_id 为锚点构建角标数据；序号按前端展示顺序统一分配，避免模型编号漂移
+const citations = computed(() =>
+  (messageSources.value.knowledgeChunks || [])
+    .filter((chunk) => String(chunk?.metadata?.chunk_id || '').trim())
+    .map((chunk, index) => {
+      const source = chunk?.metadata?.source || chunk?.kb_name || '知识库片段'
+      const raw = String(chunk?.content || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+      const snippet =
+        raw.length > CITATION_TOOLTIP_MAX ? `${raw.slice(0, CITATION_TOOLTIP_MAX)}…` : raw
+      return {
+        chunkId: String(chunk.metadata.chunk_id).trim(),
+        label: String(index + 1),
+        tooltip: snippet ? `${source}\n${snippet}` : source,
+        chunk
+      }
+    })
+)
+
+const citationModal = ref({ open: false, chunk: null })
+
+const handleCitationClick = ({ chunkId }) => {
+  const hit = citations.value.find((item) => item.chunkId === chunkId)
+  if (!hit) return
+  citationModal.value = { open: true, chunk: hit.chunk }
+}
 
 const validToolCalls = computed(() => enrichTaskToolCalls(props.message.tool_calls))
 

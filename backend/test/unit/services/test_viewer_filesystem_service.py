@@ -8,7 +8,6 @@ from fastapi import HTTPException
 
 from yuxi.agents.backends.sandbox import paths as sandbox_paths
 from yuxi.services import viewer_filesystem_service as svc
-from yuxi.services import workspace_service
 
 
 def test_resolve_local_user_data_path_blocks_upload_symlink_escape(tmp_path: Path, monkeypatch) -> None:
@@ -46,7 +45,7 @@ def test_list_local_entries_skips_symlink_escape(tmp_path: Path, monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_read_viewer_workspace_office_file_returns_pdf_preview(
+async def test_read_viewer_workspace_office_file_returns_office_preview(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -61,13 +60,7 @@ async def test_read_viewer_workspace_office_file_returns_pdf_preview(
     async def fake_resolve_viewer_state(**kwargs):
         return None, None, []
 
-    async def fake_convert(filename: str, content: bytes) -> bytes:
-        assert filename == "slides.pptx"
-        assert content == b"presentation"
-        return b"%PDF-1.4\npreview"
-
     monkeypatch.setattr(svc, "_resolve_viewer_state", fake_resolve_viewer_state)
-    monkeypatch.setattr(workspace_service, "convert_office_to_pdf", fake_convert)
 
     response = await svc.read_viewer_file_content(
         thread_id=thread_id,
@@ -79,6 +72,7 @@ async def test_read_viewer_workspace_office_file_returns_pdf_preview(
     async for chunk in response.body_iterator:
         body += chunk
 
-    assert response.media_type == "application/pdf"
-    assert response.headers["x-yuxi-preview-type"] == "pdf"
-    assert body == b"%PDF-1.4\npreview"
+    # 办公文档原样交由前端 File Viewer 渲染，不再经 LibreOffice 转 PDF
+    assert response.media_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    assert response.headers["x-yuxi-preview-type"] == "office"
+    assert body == b"presentation"

@@ -655,6 +655,11 @@ async def _worker_startup(ctx):
         from yuxi.config.options import ensure_options_in_db
 
         await ensure_options_in_db(session)
+    # Worker 直接执行 query_kb 等知识库工具，必须初始化 KnowledgeBaseManager，
+    # 否则 retriever 未注册会导致检索返回"知识库资源不存在"。
+    from yuxi.knowledge.runtime import knowledge_base
+
+    await knowledge_base.initialize()
     sys_config.start_runtime_sync()
     await recover_pending_dispatches()
 

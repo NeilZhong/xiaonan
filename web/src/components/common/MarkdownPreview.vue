@@ -29,8 +29,15 @@ const props = defineProps({
   codeCopy: {
     type: Boolean,
     default: false
+  },
+  // 知识库引用角标数据：[{ chunkId, label, tooltip }]
+  citations: {
+    type: Array,
+    default: () => []
   }
 })
+
+const emit = defineEmits(['citation-click'])
 
 const themeStore = useThemeStore()
 const shikiTheme = computed(() => (themeStore.isDark ? 'github-dark' : 'github-light'))
@@ -311,12 +318,76 @@ const enhanceHtmlPreviews = () => {
   })
 }
 
+// === 知识库引用角标 ===
+const CITATION_SELECTOR = 'cite[data-chunk-id]'
+const CITATION_LABEL_MAX_LENGTH = 4
+
+const citationMap = computed(() => {
+  const map = new Map()
+  ;(props.citations || []).forEach((item, index) => {
+    const chunkId = String(item?.chunkId ?? item?.chunk_id ?? '').trim()
+    if (!chunkId || map.has(chunkId)) return
+    map.set(chunkId, {
+      chunkId,
+      label: String(item?.label ?? index + 1),
+      tooltip: String(item?.tooltip ?? '')
+    })
+  })
+  return map
+})
+
+// 渲染后校正角标：序号以前端 citations 顺序为准，非法 chunk_id 降级为不可点击
+const enhanceCitations = () => {
+  const root = previewRef.value
+  if (!root) return
+
+  root.querySelectorAll(CITATION_SELECTOR).forEach((el) => {
+    const chunkId = (el.getAttribute('data-chunk-id') || '').trim()
+    const info = citationMap.value.get(chunkId)
+    el.classList.add('md-citation')
+
+    // 流式输出时 </cite> 尚未到达，后续正文会被吞进标签内，此时退化为普通文本
+    const rawLabel = (el.textContent || '').trim()
+    if (rawLabel.length > CITATION_LABEL_MAX_LENGTH) {
+      el.classList.add('is-pending')
+      el.removeAttribute('data-cite-title')
+      return
+    }
+    el.classList.remove('is-pending')
+
+    if (!info) {
+      el.classList.add('is-unknown')
+      const unknownLabel = `[${(rawLabel || '').trim() || '?'}]`
+      if (el.textContent !== unknownLabel) el.textContent = unknownLabel
+      el.setAttribute('data-cite-title', '未找到对应的知识库片段')
+      return
+    }
+
+    el.classList.remove('is-unknown')
+    const displayLabel = `[${info.label}]`
+    if (el.textContent !== displayLabel) el.textContent = displayLabel
+    el.setAttribute('data-cite-index', info.label)
+    if (info.tooltip) el.setAttribute('data-cite-title', info.tooltip)
+    else el.removeAttribute('data-cite-title')
+  })
+}
+
+watch(
+  citationMap,
+  async () => {
+    await nextTick()
+    enhanceCitations()
+  },
+  { flush: 'post' }
+)
+
 onMounted(async () => {
   if (pendingMarkdownHtml === null) return
 
   replaceHtmlPreservingPreviews(pendingMarkdownHtml)
   await nextTick()
   enhanceHtmlPreviews()
+  enhanceCitations()
   if (props.codeCopy) enhanceCodeBlocks()
 })
 
@@ -349,6 +420,7 @@ watch(
       await nextTick()
       if (expired) return
       enhanceHtmlPreviews()
+      enhanceCitations()
       if (codeCopy) enhanceCodeBlocks()
       cleanupHtmlPreviewFrames()
     }
@@ -364,6 +436,20 @@ const handleMarkdownAction = async (e) => {
   const codeCopyBtn = target.closest('.markdown-code-copy-btn')
   if (codeCopyBtn) {
     await copyCodeBlock(codeCopyBtn)
+    return
+  }
+
+  const citation = target.closest(CITATION_SELECTOR)
+  if (citation) {
+    if (citation.classList.contains('is-pending')) return
+
+    const chunkId = (citation.getAttribute('data-chunk-id') || '').trim()
+    const info = citationMap.value.get(chunkId)
+    if (!info) return
+
+    e.preventDefault()
+    e.stopPropagation()
+    emit('citation-click', { chunkId, label: info.label })
     return
   }
 
@@ -596,19 +682,38 @@ const showCopiedFeedback = (btn) => {
 
   cite {
     position: relative;
-    margin: 0 4px;
-    padding: 0 0.25rem;
-    border-radius: 4px;
-    outline: 2px solid var(--gray-100);
-    background-color: var(--gray-100);
-    color: var(--gray-800);
-    font-size: 12px;
+    margin: 0 1px;
+    color: var(--main-700);
+    font-size: 0.75em;
     font-style: normal;
+    font-weight: 600;
+    vertical-align: super;
     cursor: pointer;
     user-select: none;
+    text-decoration: none;
+    transition: color 0.15s ease;
 
-    &:hover::after {
-      content: attr(source);
+    &:hover {
+      color: var(--main-500);
+    }
+
+    &.is-unknown {
+      color: var(--gray-400);
+      cursor: default;
+    }
+
+    // 流式未闭合的 cite：按普通正文渲染，避免出现巨型标签
+    &.is-pending {
+      margin: 0;
+      color: inherit;
+      font-size: inherit;
+      font-weight: inherit;
+      vertical-align: baseline;
+      cursor: text;
+    }
+
+    &[data-cite-title]:hover::after {
+      content: attr(data-cite-title);
       position: absolute;
       bottom: calc(100% + 6px);
       left: 50%;
@@ -622,15 +727,16 @@ const showCopiedFeedback = (btn) => {
       background-color: #222;
       color: #fff;
       font-size: 13px;
+      font-weight: 400;
       line-height: 1.5;
-      text-align: center;
-      white-space: normal;
+      text-align: left;
+      white-space: pre-wrap;
       word-break: break-word;
       pointer-events: none;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
 
-    &:hover::before {
+    &[data-cite-title]:hover::before {
       content: '';
       position: absolute;
       bottom: 100%;
@@ -638,7 +744,7 @@ const showCopiedFeedback = (btn) => {
       z-index: 1000;
       transform: translateX(-50%);
       border: 5px solid transparent;
-      border-top-color: var(--gray-900);
+      border-top-color: #222;
     }
   }
 

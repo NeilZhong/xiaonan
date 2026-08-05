@@ -12,6 +12,7 @@
           :show-refs="false"
           :hide-tool-calls="true"
           :mention="{}"
+          :sources="conversationSourcesList[convIndex]"
         />
         <ToolCallsGroupComponent
           v-else
@@ -28,8 +29,10 @@
 import { computed } from 'vue'
 import AgentMessageComponent from '@/components/AgentMessageComponent.vue'
 import ToolCallsGroupComponent from '@/components/ToolCallsGroupComponent.vue'
+import { storeToRefs } from 'pinia'
 import { MessageProcessor } from '@/utils/messageProcessor'
 import { getConversationDisplayItems } from '@/utils/messageGrouping'
+import { useAgentStore } from '@/stores/agent'
 
 const props = defineProps({
   messages: {
@@ -71,6 +74,15 @@ const displayItemsList = computed(() =>
       conv,
       props.enrichToolCalls ? { enrichToolCalls: props.enrichToolCalls } : {}
     )
+  )
+)
+
+// 会话级来源，供正文知识库引用角标定位片段
+const agentStore = useAgentStore()
+const { availableKnowledgeBases } = storeToRefs(agentStore)
+const conversationSourcesList = computed(() =>
+  conversations.value.map((conv) =>
+    MessageProcessor.extractSourcesFromConversation(conv, availableKnowledgeBases.value)
   )
 )
 

@@ -80,6 +80,7 @@
                     :show-refs="showMsgRefs(displayItem.message, row.conv)"
                     :hide-tool-calls="true"
                     :mention="mentionConfig"
+                    :sources="row.sources"
                     @retry="retryMessage(displayItem.message)"
                   >
                   </AgentMessageComponent>
@@ -102,7 +103,7 @@
                   :message="getLastMessage(row.conv)"
                   :show-refs="['model', 'copy', 'sources']"
                   :is-latest-message="false"
-                  :sources="getConversationSources(row.conv)"
+                  :sources="row.sources"
                 />
               </div>
               <div v-else class="chat-inline-notice">
@@ -1866,7 +1867,9 @@ const conversationRows = computed(() => {
     key: conv.status === 'streaming' ? 'ongoing-conversation' : `history-${index}`,
     conv,
     displayItems: getDisplayItems(conv),
-    artifacts: MessageProcessor.extractArtifactsFromConversation(conv)
+    artifacts: MessageProcessor.extractArtifactsFromConversation(conv),
+    // 会话级来源：工具调用与最终回答常分属不同消息，角标需按整轮对话取片段
+    sources: getConversationSources(conv)
   }))
 
   if (currentThreadConfigNotice.value) {

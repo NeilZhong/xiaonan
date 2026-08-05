@@ -1,4 +1,9 @@
 /**
+ * 统一知识库检索工具名（新架构不再按知识库名注册工具）
+ */
+const KB_QUERY_TOOL_NAMES = new Set(['query_kb'])
+
+/**
  * 消息处理工具类
  */
 export class MessageProcessor {
@@ -145,12 +150,20 @@ export class MessageProcessor {
   static extractKnowledgeChunksFromConversation(conv, databases = []) {
     if (!conv || !Array.isArray(conv.messages) || conv.messages.length === 0) return []
 
+    const dbList = Array.isArray(databases) ? databases : []
+    // 旧架构：每个知识库注册为同名工具
     const databaseNames = new Set(
-      (databases || [])
-        .map((db) => db?.name)
-        .filter((name) => typeof name === 'string' && name.trim())
+      dbList.map((db) => db?.name).filter((name) => typeof name === 'string' && name.trim())
     )
-    if (databaseNames.size === 0) return []
+    // 新架构：统一 query_kb 工具，按 kb_id 反查知识库名称
+    const kbNameById = new Map(
+      dbList
+        .map((db) => [
+          String(db?.kb_id ?? db?.db_id ?? '').trim(),
+          typeof db?.name === 'string' ? db.name : ''
+        ])
+        .filter(([kbId]) => kbId)
+    )
 
     const normalizedChunks = []
     const dedupSet = new Set()
@@ -161,22 +174,26 @@ export class MessageProcessor {
       if (!content) return
 
       const metadata = chunk.metadata && typeof chunk.metadata === 'object' ? chunk.metadata : {}
-      const dedupKey =
-        metadata.chunk_id && typeof metadata.chunk_id === 'string'
-          ? `${kbName}::${metadata.chunk_id}`
-          : `${kbName}::${content}`
+      // SearchResultSchema.id 即 chunk_id，metadata 中不一定重复携带
+      const chunkId = String(metadata.chunk_id || chunk.chunk_id || chunk.id || '').trim()
+      const dedupKey = chunkId ? `${kbName}::${chunkId}` : `${kbName}::${content}`
       if (dedupSet.has(dedupKey)) return
       dedupSet.add(dedupKey)
 
-      const score = typeof chunk.score === 'number' ? chunk.score : null
+      const score =
+        typeof chunk.score === 'number'
+          ? chunk.score
+          : typeof metadata.score === 'number'
+            ? metadata.score
+            : null
       normalizedChunks.push({
         kb_name: kbName,
         content,
         score,
         metadata: {
           source: metadata.source || '',
-          file_id: metadata.file_id || '',
-          chunk_id: metadata.chunk_id || '',
+          file_id: metadata.file_id || chunk.file_id || '',
+          chunk_id: chunkId,
           chunk_index: metadata.chunk_index
         }
       })
@@ -199,21 +216,42 @@ export class MessageProcessor {
       if (!msg || msg.type !== 'ai' || !Array.isArray(msg.tool_calls)) continue
 
       for (const toolCall of msg.tool_calls) {
-        const kbName = toolCall?.name || toolCall?.function?.name
-        if (!databaseNames.has(kbName)) continue
+        const toolName = toolCall?.name || toolCall?.function?.name
+        if (!toolName) continue
+
+        const isLegacyKbTool = databaseNames.has(toolName)
+        const isQueryKbTool = KB_QUERY_TOOL_NAMES.has(toolName)
+        if (!isLegacyKbTool && !isQueryKbTool) continue
 
         const content = toolCall?.tool_call_result?.content
         const parsed = parseToolResultContent(content)
         if (!parsed) continue
 
+        const resolveKbName = (kbId) => {
+          if (isLegacyKbTool) return toolName
+          const byResult = kbNameById.get(String(kbId || '').trim())
+          if (byResult) return byResult
+          const args = parseToolResultContent(toolCall?.args ?? toolCall?.function?.arguments)
+          return kbNameById.get(String(args?.kb_id || '').trim()) || '知识库'
+        }
+
         // Milvus / Dify: 直接是 chunks 数组
         if (Array.isArray(parsed)) {
+          const kbName = resolveKbName('')
           for (const chunk of parsed) appendChunk(chunk, kbName)
+          continue
+        }
+
+        // 新版 query_kb: SearchOutputSchema -> { kb_id, results: [...] }
+        if (Array.isArray(parsed?.results)) {
+          const kbName = resolveKbName(parsed.kb_id)
+          for (const chunk of parsed.results) appendChunk(chunk, kbName)
           continue
         }
 
         const wrappedChunks = parsed?.data?.chunks
         if (Array.isArray(wrappedChunks)) {
+          const kbName = resolveKbName(parsed?.kb_id)
           for (const chunk of wrappedChunks) appendChunk(chunk, kbName)
         }
       }

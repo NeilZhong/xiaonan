@@ -330,7 +330,7 @@ provide('settingsModal', {
           :to="primaryNavItem.path"
           class="nav-item"
           :class="{ active: isNavItemActive(primaryNavItem) }"
-          :active-class="primaryNavItem.action ? '' : 'active'"
+          :active-class="''"
           @click.stop
         >
           <a-tooltip placement="right" :open="sidebarCollapsed ? undefined : false">
@@ -366,7 +366,7 @@ provide('settingsModal', {
           v-show="!item.hidden"
           class="nav-item"
           :class="{ active: isNavItemActive(item) }"
-          :active-class="item.action ? '' : 'active'"
+          :active-class="''"
           @click.stop
         >
           <a-tooltip placement="right" :open="sidebarCollapsed ? undefined : false">

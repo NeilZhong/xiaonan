@@ -12,7 +12,18 @@ const IMAGE_EXTENSIONS = new Set([
 ])
 const PDF_EXTENSIONS = new Set(['.pdf'])
 const HTML_EXTENSIONS = new Set(['.html', '.htm'])
-const OFFICE_EXTENSIONS = new Set(['.docx', '.pptx', '.xlsx', '.doc', '.ppt', '.odt', '.ods', '.odp'])
+// 需与后端 backend/package/yuxi/services/file_preview.py 的 _OFFICE_EXTENSIONS 保持一致
+const OFFICE_EXTENSIONS = new Set([
+  '.docx',
+  '.doc',
+  '.pptx',
+  '.ppt',
+  '.xlsx',
+  '.xls',
+  '.odt',
+  '.ods',
+  '.odp'
+])
 const TEXT_EXTENSIONS = new Set([
   '.txt',
   '.text',
@@ -203,6 +214,29 @@ export const normalizePreviewResponse = async (response, baseFile = {}) => {
     previewType,
     supported: previewType !== 'unsupported',
     message: previewType === 'unsupported' ? '当前文件暂不支持预览，请下载后查看' : '',
+    // 办公文档由 File Viewer 直接渲染原始字节，需要 Blob 而非 object URL
+    rawBlob: blob,
     previewUrl: window.URL.createObjectURL(blob)
   }
+}
+
+// 从 Content-Disposition 响应头解析真实文件名。
+// File Viewer 纯靠 filename 扩展名识别格式，而知识库列表 entry 的 name 可能不带扩展名，
+// 必须从下载接口的 Content-Disposition（后端返回的上传原始文件名）取真实名，否则误判为 unsupported。
+// 兼容 RFC 5987 写法（filename*=UTF-8''xxx.docx）与退化写法（filename=xxx.docx）。
+export const parseContentDispositionFilename = (header) => {
+  if (!header) return ''
+  const rfc5987Match = header.match(/filename\*\s*=\s*[^']*''\s*([^;]+)/i)
+  if (rfc5987Match && rfc5987Match[1]) {
+    try {
+      return decodeURIComponent(rfc5987Match[1].trim())
+    } catch {
+      return rfc5987Match[1].trim()
+    }
+  }
+  const legacyMatch = header.match(/filename\s*=\s*("?)([^";]+)\1/i)
+  if (legacyMatch && legacyMatch[2]) {
+    return legacyMatch[2].trim()
+  }
+  return ''
 }

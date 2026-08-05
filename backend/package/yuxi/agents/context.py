@@ -250,7 +250,7 @@ class BaseContext:
         default=None,
         metadata={
             "name": "知识库",
-            "description": "知识库列表，可以在左侧知识库页面中创建知识库。默认选择当前用户可访问的全部知识库。",
+            "description": "知识库列表，可以在左侧知识库页面中创建知识库。未配置（null/空）即不关联任何知识库，需显式选择要访问的知识库。",
             "type": "list",
             "kind": "knowledges",
         },
@@ -419,7 +419,9 @@ class BaseContext:
                 setattr(self, key, value)
 
 
-_DEFAULT_ALL_CONTEXT_FIELDS = frozenset({"tools", "knowledges", "mcps", "skills"})
+# 注意：knowledges 不在此集合内。未显式配置（null/空）即视为“不关联任何知识库”，
+# 防止智能体越权访问当前用户可访问的全部知识库。
+_DEFAULT_ALL_CONTEXT_FIELDS = frozenset({"tools", "mcps", "skills"})
 _EMPTY_ALL_CONTEXT_FIELDS = frozenset({"subagents"})
 _AGENT_RESOURCE_FIELDS = _DEFAULT_ALL_CONTEXT_FIELDS | _EMPTY_ALL_CONTEXT_FIELDS
 

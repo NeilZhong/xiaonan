@@ -6,6 +6,7 @@
 
 ## v0.7.2 (current)
 
+- 新增 AI 回答知识库片段角标引用：模型以 `[ref:CHUNK_ID]` 标记来源，前端渲染期确定性转为深蓝 `[]` 上标（点击弹片段详情），来源面板稳定展示；ARQ worker 启动初始化知识库 retriever，`query_kb` 结果加入中间件卸载豁免集，智能体 SKILL.md 同步引用规则。全局配色统一为警察蓝（品牌色阶与强调色），并修复侧边栏父子路由 `active-class` 包含式匹配导致的高亮冲突。
 - 新增 PDF 解析前置页树校验：PDF 进入 PyPDFLoader、MinerU 或 OCR 引擎前会用 PyMuPDF 逐页加载页槽，提前识别加密、空文档、null 页槽和非 Page 对象等结构异常，并返回可操作的中文错误，避免解析服务内层延迟失败。
 - 修复真实 API 测试资源清理：integration 与 E2E 会在测试会话前后通过公开接口删除名称以 `pytest`（兼容旧 `py_test`）开头的评估基准、评估运行和知识库；知识库删除改用列表真实返回的 `kb_id`，清理失败会明确中止测试，避免测试数据长期残留。
 - 优化知识图谱构建：以持续队列并发执行 LLM 抽取、结构写入和向量索引，失败自动重试并持久化进度；已有结果支持断点恢复，新增按最近 Chunk 查询失败样例和向量 reconcile 接口，任务与前端分别展示抽取、结构、向量进度，索引面板支持键盘操作。
@@ -32,6 +33,7 @@
 - 新增共享权限体系（Phase 3.1）：新建智能体默认个人使用、移除共享选择；档案页新增「分享」可分享给指定人/部门/全局，全局分享进入待审批、系统管理员审批通过后上架；市场新增「来自分享」来源（个人/部门分享亦可见）并标注作者。`police_agents` 补 author_id/is_public/share_scope/approval_status/approved_by/approved_at 字段与迁移，新增 `GET /templates?source=shared`、`POST /{id}/share`、`POST /{id}/approve` 接口。
 - 子智能体关联默认关闭（Phase 3.2）：数字警员无需关联 yuxi 子智能体。调整 `context.py` 使 `subagents:[]` 表示「不关联」、`None` 仍表示「继承全部」（向后兼容），`subagent_task.py` 中间件据此区分三者；新建智能体 `config_json` 默认 `subagents:[]`，配置 UI 不再暴露子智能体项。
 - 智能体系统提示词修复（Phase 3.3）：对话时 LLM 回复模型默认身份而非自定义角色。两层修复：① `chat_service._resolve_agent_runtime()` 增加 DA- 前缀 slug 检测 + police_agents 表兜底读取（防 yuxi config 被覆盖丢失）；② `prompt.py build_prompt_with_context()` 改为自定义 system_prompt **前置为主身份**、基础 PROMPT（"你是小南"）降级追加在后（原顺序导致模型优先采纳基础身份声明，忽略末尾的自定义角色）。14 项单测覆盖兜底+排序两种场景。
+- 文件预览去 LibreOffice 依赖：移除后端 office→PDF 转换链路（`convert_office_to_pdf` 及 PDF 缓存/落盘），docx/doc/pptx/ppt/xlsx/xls/odt/ods/odp 全部原样回传字节，由前端 File Viewer 渲染；xlsx 等表格类从「不支持」改为可预览。
 
 ## v0.7.1 (2026-07-17)
 

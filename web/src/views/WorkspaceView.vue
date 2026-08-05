@@ -212,13 +212,17 @@ import {
   downloadWorkspaceFile,
   downloadWorkspaceKnowledgeFile,
   getWorkspaceFileContent,
-  getWorkspaceKnowledgeFileContent,
   getWorkspaceKnowledgeTree,
   getWorkspaceTree,
   saveWorkspaceFileContent,
   uploadWorkspaceFiles
 } from '@/apis/workspace_api'
-import { normalizePreviewResponse, isOfficePreview } from '@/utils/file_preview'
+import {
+  normalizePreviewResponse,
+  isOfficePreview,
+  getPreviewTypeByContentType,
+  parseContentDispositionFilename
+} from '@/utils/file_preview'
 
 const userStore = useUserStore()
 
@@ -277,11 +281,16 @@ const isAgentsWorkspacePath = computed(
     activeSourceKey.value === 'personal' &&
     isSameOrChildPath(currentPath.value, AGENTS_WORKSPACE_PATH)
 )
-const selectedPreviewPath = computed(() =>
-  selectedEntry.value?.source === 'knowledge'
-    ? selectedEntry.value.name || ''
-    : selectedEntry.value?.path || ''
-)
+const selectedPreviewPath = computed(() => {
+  const entry = selectedEntry.value
+  if (!entry) return ''
+  // File Viewer 纯靠 filename 扩展名识别格式，预览加载完成后优先用 file 对象里的真实文件名（带扩展名），
+  // 避免列表 entry.path/name 没有扩展名导致误判为 unsupported（知识库 / 工作区共用此分支）
+  if (previewFile.value?.filename || previewFile.value?.name) {
+    return previewFile.value.filename || previewFile.value.name
+  }
+  return entry.path || entry.name || ''
+})
 const showInlinePreview = computed(() => useInlinePreview.value && Boolean(previewFile.value))
 const workspaceMainStyle = computed(() => {
   if (!showInlinePreview.value) return {}
@@ -393,8 +402,14 @@ const loadWorkspacePreview = async (entry) => {
       const response = await downloadWorkspaceFile(entry.path)
       const blob = await response.blob()
       const previewUrl = window.URL.createObjectURL(blob)
+      const realName =
+        parseContentDispositionFilename(response.headers.get('Content-Disposition')) ||
+        entry.name ||
+        entry.path
       const file = {
         ...entry,
+        name: realName,
+        filename: realName,
         previewType: 'office',
         rawBlob: blob,
         previewUrl,
@@ -423,14 +438,27 @@ const loadKnowledgePreview = async (
 ) => {
   const requestId = startPreviewRequest(entry, baseFile)
   try {
-    // 办公文档走前端 File Viewer 渲染：取原始字节而非经 LibreOffice 转换的 PDF
-    if (isOfficePreview(entry.filename || entry.name || entry.path || '')) {
-      const response = await downloadWorkspaceKnowledgeFile(entry.kb_id, entry.file_id)
-      const blob = await response.blob()
+    // 办公文档走前端 File Viewer 渲染，直接取原始字节。
+    // 注意：知识库列表 entry.name 常常是「无扩展名」的（如「操作手册0624」而非「操作手册0624.docx」），
+    // 因此不能只靠 entry.name 判定办公文档，否则会漏进通用路径、且传给 File Viewer 的文件名无扩展名 → 误报 unsupported。
+    // 统一用下载接口取原始字节，再用 Content-Disposition 的真实文件名 + Content-Type 双重判定是否为办公文档。
+    const response = await downloadWorkspaceKnowledgeFile(entry.kb_id, entry.file_id)
+    const blob = await response.blob()
+    const realName =
+      parseContentDispositionFilename(response.headers.get('Content-Disposition')) ||
+      entry.filename ||
+      entry.name ||
+      entry.path ||
+      'document'
+    const contentType = response.headers.get('content-type') || ''
+
+    if (isOfficePreview(realName) || getPreviewTypeByContentType(contentType) === 'office') {
       const previewUrl = window.URL.createObjectURL(blob)
       const file = {
         ...baseFile,
         ...entry,
+        name: realName,
+        filename: realName,
         previewType: 'office',
         rawBlob: blob,
         previewUrl,
@@ -441,10 +469,13 @@ const loadKnowledgePreview = async (
       if (isCurrentPreviewEntry(requestId, entry)) applyPreviewFile(requestId, entry, file)
       return
     }
-    const response = await getWorkspaceKnowledgeFileContent(entry.kb_id, entry.file_id)
-    if (!isCurrentPreviewEntry(requestId, entry)) return
-    const file = await normalizePreviewFile(entry, response)
-    applyPreviewFile(requestId, entry, file)
+
+    // 非办公文档：复用已下载的字节走通用渲染路径（文本/代码/图片/PDF 等）
+    const file = await normalizePreviewResponse(
+      new Response(blob, { headers: { 'content-type': contentType } }),
+      { ...baseFile, ...entry, name: realName, filename: realName }
+    )
+    if (isCurrentPreviewEntry(requestId, entry)) applyPreviewFile(requestId, entry, file)
   } catch (error) {
     showPreviewError(requestId, entry, error, messages.log, messages.resolveUserMessage(error))
   } finally {

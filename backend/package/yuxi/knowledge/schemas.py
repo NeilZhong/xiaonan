@@ -10,7 +10,7 @@ class SearchInputSchema(BaseModel):
 
 
 class SearchResultSchema(BaseModel):
-    id: str = Field(description="检索结果 ID，通常对应 chunk_id")
+    id: str = Field(description="检索结果 ID，即 chunk_id；引用该片段时作为 <cite data-chunk-id> 的取值")
     kb_id: str = Field(description="知识库资源 ID，也就是 kb_id")
     file_id: str = Field(default="", description="结果所属文件 ID，可用于 Find/Open")
     content: str = Field(description="chunk 内容")

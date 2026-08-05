@@ -107,7 +107,13 @@ const knowledgeSkillWarningVisible = computed(() => {
   const selected = agentStore.agentConfig?.knowledges
   const hasKnowledge = Array.isArray(selected) ? selected.length > 0 : false
   const skills = agentStore.agentConfig?.skills
-  const hasKnowledgeSkill = Array.isArray(skills) ? skills.includes('knowledge-base') : false
+  let hasKnowledgeSkill = false
+  if (Array.isArray(skills)) {
+    hasKnowledgeSkill = skills.includes('knowledge-base')
+  } else if (skills === null || skills === undefined) {
+    // skills 为 null/undefined 表示默认启用当前用户可用的全部 Skills
+    hasKnowledgeSkill = true
+  }
   return hasKnowledge && !hasKnowledgeSkill
 })
 

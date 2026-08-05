@@ -1,27 +1,27 @@
 /* 深色模式 */
 :root.dark {
-  --main-1000: #e1f6fb;
-  --main-900: #c4eaf5;
-  --main-800: #a3d8e8;
-  --main-700: #82c3d6;
-  --main-600: #5faec2;
-  --main-500: #4a9fb8;
-  --main-400: #3996ae;
-  --main-300: #24839a;
-  --main-200: #046a82;
-  --main-100: #035065;
-  --main-50: #023944;
-  --main-40: #01151f;
-  --main-30: #010d14;
-  --main-20: #010a0f;
-  --main-10: #00070a;
-  --main-5: #000405;
-  --main-1: #000102;
+  --main-1000: #eaf2fc;
+  --main-900: #d4e4f7;
+  --main-800: #a9c8ef;
+  --main-700: #7ba8e6;
+  --main-600: #5a93e0;
+  --main-500: #3f7ad6;
+  --main-400: #2e6dce;
+  --main-300: #1f57ad;
+  --main-200: #174591;
+  --main-100: #103670;
+  --main-50: #0a2550;
+  --main-40: #061a35;
+  --main-30: #051529;
+  --main-20: #041120;
+  --main-10: #030c17;
+  --main-5: #020911;
+  --main-1: #01060d;
   --main-0: #000000;
 
   /* 保留原有的 main 变量 */
-  --main-color: #4a9fb8;
-  --main-bright: #5faec2;
+  --main-color: #3f7ad6;
+  --main-bright: #5a93e0;
 
   --gray-10000: #fafafa;
   --gray-2000: #f8fafa;
@@ -69,12 +69,12 @@
   --color-info-700: #40a9ff; /* 信息色-浅 */
   --color-info-900: #69c0ff; /* 信息色-最浅 */
 
-  --color-accent-10: #081919; /* 强调色-极深 */
-  --color-accent-50: #0f2e2e; /* 强调色-最深 */
-  --color-accent-100: #164e63; /* 强调色-深 */
-  --color-accent-500: #13c2c2; /* 强调色-标准 */
-  --color-accent-700: #36cfc9; /* 强调色-浅 */
-  --color-accent-900: #5cdbd3; /* 强调色-最浅 */
+  --color-accent-10: #0a1830; /* 强调色-极深（警察蓝） */
+  --color-accent-50: #102a52; /* 强调色-最深 */
+  --color-accent-100: #174a8c; /* 强调色-深 */
+  --color-accent-500: #3f7ad6; /* 强调色-标准（警察蓝） */
+  --color-accent-700: #7ba8e6; /* 强调色-浅 */
+  --color-accent-900: #d4e4f7; /* 强调色-最浅 */
 
   --chart-palette-1: var(--main-300);
   --chart-palette-2: #3ea896;

@@ -67,7 +67,6 @@ class FakeMinioClient:
         data: bytes,
         content_type: str | None = None,
     ) -> SimpleNamespace:
-        assert content_type == "application/pdf"
         self.objects[(bucket_name, object_name)] = data
         return SimpleNamespace(url=f"http://localhost:9000/{bucket_name}/{object_name}")
 
@@ -105,39 +104,31 @@ def test_office_file_entry_exposes_logical_file_availability(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_read_office_pdf_preview_converts_and_caches_pdf(tmp_path, monkeypatch) -> None:
+async def test_read_office_preview_returns_original_bytes_without_conversion(tmp_path, monkeypatch) -> None:
+    """办公文档预览直接回传原始字节，由前端 File Viewer 渲染，不做服务端 PDF 转换。"""
     kb = make_kb(tmp_path)
     minio_client = FakeMinioClient()
-    minio_client.objects[("knowledgebases", "db1/upload/demo.docx")] = b"office"
+    minio_client.objects[("knowledgebases", "db1/upload/demo.docx")] = b"PK\x03\x04office"
     minio_client.objects[("knowledgebases", "db1/parsed/file1.md")] = b"# parsed"
-
-    convert_calls = 0
-
-    async def fake_convert(filename: str, content: bytes) -> bytes:
-        nonlocal convert_calls
-        convert_calls += 1
-        assert filename == "demo.docx"
-        assert content == b"office"
-        return b"%PDF-1.4\nconverted"
-
     monkeypatch.setattr("yuxi.storage.minio.get_minio_client", lambda: minio_client)
-    monkeypatch.setattr("yuxi.knowledge.base.convert_office_to_pdf", fake_convert)
 
     response = await kb.read_file_preview("db1", "file1")
-    cached_response = await kb.read_file_preview("db1", "file1")
 
-    assert response["preview_type"] == "pdf"
+    assert response["preview_type"] == "office"
     assert response["supported"] is True
     assert response["binary"] is True
-    assert response["content"] == b"%PDF-1.4\nconverted"
-    assert response["media_type"] == "application/pdf"
-    assert cached_response["content"] == b"%PDF-1.4\nconverted"
-    assert minio_client.objects[("knowledgebases", "db1/preview/file1.pdf")] == b"%PDF-1.4\nconverted"
-    assert convert_calls == 1
+    assert response["content"] == b"PK\x03\x04office"
+    assert response["filename"] == "demo.docx"
+    assert response["media_type"] == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    # 不再生成 PDF 派生物
+    assert ("knowledgebases", "db1/preview/file1.pdf") not in minio_client.objects
 
 
 @pytest.mark.asyncio
-async def test_non_docx_pptx_office_files_do_not_get_pdf_preview(tmp_path, monkeypatch) -> None:
+async def test_read_office_preview_also_covers_spreadsheets(tmp_path, monkeypatch) -> None:
+    """xlsx 曾被排除在服务端 PDF 转换之外，现在同样走 File Viewer。"""
     kb = make_kb(tmp_path)
     kb.test_file_meta["filename"] = "demo.xlsx"
     minio_client = FakeMinioClient()
@@ -149,8 +140,9 @@ async def test_non_docx_pptx_office_files_do_not_get_pdf_preview(tmp_path, monke
 
     assert entry["has_original_file"] is True
     assert entry["has_parsed_markdown"] is True
-    assert response["preview_type"] == "unsupported"
-    assert response["supported"] is False
+    assert response["preview_type"] == "office"
+    assert response["supported"] is True
+    assert response["content"] == b"PK\x03\x04excel"
 
 
 @pytest.mark.asyncio
