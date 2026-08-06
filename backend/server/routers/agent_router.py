@@ -54,6 +54,12 @@ class AgentCreate(BaseModel):
     share_config: dict | None = None
     is_subagent: bool | None = None
     set_default: bool = False
+    # ── 数字警员档案字段（单表化：一并写入 agents 表）──
+    category: str | None = None  # 功能分类: case_analysis/fund_tracking/...
+    agent_type: str | None = None  # 业务类型: transcript_analyst/fund_analyst/...
+    status: str | None = None  # active/offline/training
+    system_prompt: str | None = None
+    capabilities: list | None = None
 
 
 class AgentUpdate(BaseModel):
@@ -64,6 +70,12 @@ class AgentUpdate(BaseModel):
     config_json: dict | None = None
     share_config: dict | None = None
     is_subagent: bool | None = None
+    # ── 数字警员档案字段（单表化）──
+    category: str | None = None
+    agent_type: str | None = None
+    status: str | None = None
+    system_prompt: str | None = None
+    capabilities: list | None = None
 
 
 class AgentRunCreate(BaseModel):
@@ -178,6 +190,11 @@ async def create_agent(
             is_subagent=payload.is_subagent,
             created_by=str(current_user.uid),
             creator=current_user,
+            category=payload.category,
+            agent_type=payload.agent_type,
+            status=payload.status,
+            system_prompt=payload.system_prompt,
+            capabilities=payload.capabilities,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -229,6 +246,11 @@ async def update_agent(
             is_subagent=payload.is_subagent,
             updated_by=str(current_user.uid),
             updater=current_user,
+            category=payload.category,
+            agent_type=payload.agent_type,
+            status=payload.status,
+            system_prompt=payload.system_prompt,
+            capabilities=payload.capabilities,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

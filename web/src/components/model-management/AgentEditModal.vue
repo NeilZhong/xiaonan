@@ -3,7 +3,7 @@ import { computed, nextTick, reactive, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   Bot,
-  Database,
+  Dices,
   Info,
   Microscope,
   RefreshCw,
@@ -14,11 +14,18 @@ import {
 } from 'lucide-vue-next'
 
 import { userApi } from '@/apis/user_api'
+import { policeAgentApi } from '@/apis/police_api'
 import AgentRuntimeConfigForm from '@/components/AgentRuntimeConfigForm.vue'
 import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
+import ShareConfigForm from '@/components/ShareConfigForm.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import { useUserStore } from '@/stores/user'
 import { generatePixelAvatar } from '@/utils/pixelAvatar'
+import {
+  generateRandomPoliceAvatar,
+  POLICE_AVATAR_IDS,
+  getPoliceAvatarById
+} from '@/utils/policeAvatar'
 import { MAX_IMAGE_UPLOAD_SIZE_BYTES, MAX_IMAGE_UPLOAD_SIZE_MB } from '@/utils/upload_limits'
 
 const props = defineProps({
@@ -31,7 +38,19 @@ const userStore = useUserStore()
 const agentStore = useAgentStore()
 
 const DEFAULT_AGENT_BACKEND_ID = 'ChatbotAgent'
-const SUB_AGENT_BACKEND_ID = 'SubAgentBackend'
+
+/** 9 大功能分类（新增数字警员时下拉选择，对应 agents.category） */
+const AGENT_CATEGORIES = [
+  { value: 'case_analysis', label: '案件分析' },
+  { value: 'fund_tracking', label: '资金追踪' },
+  { value: 'intelligence', label: '情报研判' },
+  { value: 'evidence_mgmt', label: '调证取证' },
+  { value: 'legal_review', label: '法制审核' },
+  { value: 'interrogation', label: '审讯辅助' },
+  { value: 'image_recon', label: '图像侦查' },
+  { value: 'anti_fraud', label: '反诈劝阻' },
+  { value: 'command', label: '指挥调度' }
+]
 const runtimeAgentModalTabs = ['model', 'tools', 'other']
 
 const showAgentModal = ref(false)
@@ -40,13 +59,18 @@ const agentModalActiveTab = ref('basic')
 const agentIconUploading = ref(false)
 const saving = ref(false)
 const runtimeConfigFormRef = ref(null)
+const shareConfigFormRef = ref(null)
+const shareConfig = ref({ access_level: 'user', department_ids: [], user_uids: [] })
 const agentNameInputRef = ref(null)
+const isGeneratingAvatar = ref(false)
+const currentAvatarId = ref('')
 const agentForm = reactive({
   slug: '',
   name: '',
   backend_id: DEFAULT_AGENT_BACKEND_ID,
   description: '',
-  icon: ''
+  icon: '',
+  category: ''
 })
 
 const normalizeAgent = (agent) => {
@@ -57,25 +81,20 @@ const normalizeAgent = (agent) => {
 }
 
 const agentModalMenuItems = computed(() => {
-  const items = [{ key: 'basic', label: '基本信息', icon: Info }]
-  if (editingAgentId.value) {
-    items.push(
-      { key: 'model', label: '模型配置', icon: SlidersHorizontal },
-      { key: 'tools', label: '工具配置', icon: Wrench },
-      { key: 'knowledge', label: '知识库', icon: Database },
-      { key: 'other', label: '其他配置', icon: Settings2 }
-    )
-  }
-  return items
+  return [
+    { key: 'basic', label: '基本信息', icon: Info },
+    { key: 'model', label: '模型配置', icon: SlidersHorizontal },
+    { key: 'tools', label: '工具配置', icon: Wrench },
+    { key: 'other', label: '其他配置', icon: Settings2 }
+  ]
 })
 
-const showAgentModalSidebar = computed(() => agentModalMenuItems.value.length > 1)
+const showAgentModalSidebar = computed(() => true)
 const runtimeConfigSegment = computed(() =>
   runtimeAgentModalTabs.includes(agentModalActiveTab.value) ? agentModalActiveTab.value : 'model'
 )
 const isRuntimeAgentModalTab = (key) => runtimeAgentModalTabs.includes(key)
 const getDefaultBackendId = () => DEFAULT_AGENT_BACKEND_ID
-const isSubAgentBackend = (backendId) => backendId === SUB_AGENT_BACKEND_ID
 
 const isEditingBuiltinAgent = computed(() => isBuiltinAgent({ id: editingAgentId.value }))
 
@@ -95,36 +114,43 @@ const selectedBackendIcon = computed(() => {
   return backendText.includes('deep') || backendText.includes('search') ? Microscope : Bot
 })
 
-const knowledgeBaseOptions = computed(() =>
-  (agentStore.availableKnowledgeBases || []).map((db) => ({
-    value: db.kb_id,
-    label: db.name || db.kb_id,
-    title: db.description || db.name || db.kb_id
-  }))
-)
-
-const knowledgeSkillWarningVisible = computed(() => {
-  const selected = agentStore.agentConfig?.knowledges
-  const hasKnowledge = Array.isArray(selected) ? selected.length > 0 : false
-  const skills = agentStore.agentConfig?.skills
-  let hasKnowledgeSkill = false
-  if (Array.isArray(skills)) {
-    hasKnowledgeSkill = skills.includes('knowledge-base')
-  } else if (skills === null || skills === undefined) {
-    // skills 为 null/undefined 表示默认启用当前用户可用的全部 Skills
-    hasKnowledgeSkill = true
-  }
-  return hasKnowledge && !hasKnowledgeSkill
-})
-
 const resetAgentForm = () => {
   Object.assign(agentForm, {
     slug: '',
     name: '',
     backend_id: getDefaultBackendId(),
     description: '',
-    icon: ''
+    icon: '',
+    category: ''
   })
+  currentAvatarId.value = ''
+}
+
+/**
+ * 随机生成数字警员漫画形象：卡牌翻转/快速切换动画，最后落定。
+ */
+const generatePoliceAvatar = () => {
+  if (isGeneratingAvatar.value) return
+  isGeneratingAvatar.value = true
+  const cycles = 8
+  const interval = 120
+  let step = 0
+  const timer = setInterval(() => {
+    const avatarId = POLICE_AVATAR_IDS[step % POLICE_AVATAR_IDS.length]
+    const avatar = getPoliceAvatarById(avatarId)
+    if (avatar) {
+      agentForm.icon = avatar.url
+      currentAvatarId.value = avatar.id
+    }
+    step += 1
+    if (step >= cycles) {
+      clearInterval(timer)
+      const final = generateRandomPoliceAvatar()
+      agentForm.icon = final.url
+      currentAvatarId.value = final.id
+      isGeneratingAvatar.value = false
+    }
+  }, interval)
 }
 
 const focusAgentNameInput = async () => {
@@ -141,6 +167,14 @@ const openCreate = () => {
   agentModalActiveTab.value = 'basic'
   resetAgentForm()
   agentStore.resetAgentConfig()
+  // 确保知识库配置初始化为数组（避免未定义）
+  if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
+    agentStore.agentConfig.knowledges = []
+  }
+  // 新建数字警员时默认随机分配一个漫画警察形象
+  const avatar = generateRandomPoliceAvatar()
+  agentForm.icon = avatar.url
+  currentAvatarId.value = avatar.id
   showAgentModal.value = true
 }
 
@@ -167,12 +201,21 @@ const openEdit = async (agent) => {
     name: detail.name || '',
     backend_id: detail.backend_id || DEFAULT_AGENT_BACKEND_ID,
     description: detail.description || '',
-    icon: detail.icon || ''
+    icon: detail.icon || '',
+    category: detail.category || ''
   })
   await agentStore.selectAgent(detail.id, { allowSubagent: true })
   await agentStore.fetchMentionResources()
   if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
     agentStore.agentConfig.knowledges = []
+  }
+  // 初始化共享范围配置（单表化：从 share_config 读取，而非已废弃的顶层 share_scope）
+  const sc = detail?.share_config || {}
+  const scope = sc.access_level || 'user'
+  shareConfig.value = {
+    access_level: scope === 'global' ? 'global' : scope === 'department' ? 'department' : 'user',
+    department_ids: sc.department_ids || [],
+    user_uids: sc.user_uids || []
   }
   showAgentModal.value = true
 }
@@ -222,14 +265,16 @@ const buildAgentPayload = () => {
     name: agentForm.name.trim(),
     description: agentForm.description.trim() || null,
     icon: agentForm.icon.trim() || null,
-    // 新增智能体默认个人使用，共享权限在档案页单独设置
-    share_config: { access_level: 'user', department_ids: [], user_uids: [] },
-    is_subagent: isSubAgentBackend(agentForm.backend_id)
+    is_subagent: false,
+    // 单表化：功能分类写入 agents.category，使其归入数字警员列表
+    category: agentForm.category || null
   }
 
   if (!editingAgentId.value) {
     payload.slug = agentForm.slug.trim() || undefined
     payload.backend_id = agentForm.backend_id
+    // 新建智能体默认个人使用，共享权限在档案页单独设置
+    payload.share_config = { access_level: 'user', department_ids: [], user_uids: [] }
     // 新建智能体默认不关联任何子智能体（子智能体为内部运行时委派细节，不在 UI 暴露）
     payload.config_json = { context: { subagents: [] } }
   }
@@ -260,6 +305,22 @@ const saveAgent = async () => {
       }
       const updated = await agentStore.updateAgentProfile(editingAgentId.value, payload)
       agentStore.originalAgentConfig = { ...agentStore.agentConfig }
+      // 保存共享范围配置
+      const configForm = shareConfigFormRef.value
+      if (configForm && configForm.validate) {
+        const validate = configForm.validate()
+        if (validate.valid) {
+          // 后端支持 personal / department / user / global 四种共享范围；
+          // 「指定人」(user) 会持久化 shared_user_uids，被分享用户即可在智能体页面看到该智能体。
+          const scope = shareConfig.value.access_level
+          await policeAgentApi.shareAgent(editingAgentId.value, {
+            scope,
+            department_ids: shareConfig.value.department_ids,
+            user_uids: shareConfig.value.user_uids,
+            author_id: null
+          })
+        }
+      }
       emit('saved', { mode: 'edit', agent: updated })
       message.success('智能体已保存')
     } else {
@@ -287,7 +348,7 @@ defineExpose({
   <a-modal
     v-model:open="showAgentModal"
     class="agent-edit-modal"
-    :width="editingAgentId ? 820 : 740"
+    :width="820"
     :footer="null"
     :closable="false"
     @cancel="closeAgentModal"
@@ -306,10 +367,6 @@ defineExpose({
     </template>
     <div
       class="agent-modal-content"
-      :class="{
-        'without-sidebar': !showAgentModalSidebar,
-        'create-mode': !editingAgentId
-      }"
     >
       <aside v-if="showAgentModalSidebar" class="agent-modal-sidebar" aria-label="智能体配置分组">
         <button
@@ -333,38 +390,53 @@ defineExpose({
           <div class="agent-profile-header">
             <div class="agent-icon-preview" aria-label="智能体图标、名称与类型">
               <div class="agent-profile-main">
-                <a-upload
-                  :show-upload-list="false"
-                  :before-upload="beforeAgentIconUpload"
-                  :disabled="agentIconUploading"
-                  accept="image/*"
-                >
-                  <div
-                    class="agent-icon-upload"
-                    :class="{
-                      uploading: agentIconUploading,
-                      'is-empty': !agentForm.icon && !editingAgentId
-                    }"
+                <div class="agent-icon-preview-area">
+                  <a-upload
+                    :show-upload-list="false"
+                    :before-upload="beforeAgentIconUpload"
+                    :disabled="agentIconUploading || isGeneratingAvatar"
+                    accept="image/*"
                   >
-                    <FallbackAvatar
-                      v-if="agentForm.icon || editingAgentId"
-                      :src="agentForm.icon"
-                      :default-src="agentPreviewDefaultIcon"
-                      :name="agentPreviewName"
-                      :seed="editingAgentId || agentForm.slug || agentForm.name"
-                      kind="agent"
-                      :size="56"
-                      shape="rounded"
-                      :alt="`${agentForm.name || '智能体'}图标`"
-                      class="agent-icon-preview-avatar"
-                    />
-                    <div class="agent-icon-mask">
-                      <RefreshCw v-if="agentIconUploading" :size="16" class="spinning" />
-                      <Upload v-else :size="16" />
-                      <span>{{ agentForm.icon ? '更换图标' : '上传图标' }}</span>
+                    <div
+                      class="agent-icon-upload"
+                      :class="{
+                        uploading: agentIconUploading,
+                        'is-empty': !agentForm.icon && !editingAgentId,
+                        'avatar-shuffling': isGeneratingAvatar
+                      }"
+                    >
+                      <FallbackAvatar
+                        v-if="agentForm.icon || editingAgentId"
+                        :src="agentForm.icon"
+                        :default-src="agentPreviewDefaultIcon"
+                        :name="agentPreviewName"
+                        :seed="editingAgentId || agentForm.slug || agentForm.name"
+                        kind="agent"
+                        :size="56"
+                        shape="rounded"
+                        :alt="`${agentForm.name || '智能体'}图标`"
+                        class="agent-icon-preview-avatar"
+                      />
+                      <div class="agent-icon-mask">
+                        <RefreshCw v-if="agentIconUploading" :size="16" class="spinning" />
+                        <Upload v-else :size="16" />
+                        <span>{{ agentForm.icon ? '更换图标' : '上传图标' }}</span>
+                      </div>
                     </div>
-                  </div>
-                </a-upload>
+                  </a-upload>
+
+                  <!-- 新建模式：随机生成漫画警察形象 -->
+                  <button
+                    v-if="!editingAgentId"
+                    type="button"
+                    class="agent-avatar-dice-btn"
+                    :disabled="isGeneratingAvatar"
+                    @click="generatePoliceAvatar"
+                  >
+                    <Dices :size="14" :class="{ spinning: isGeneratingAvatar }" />
+                    <span>{{ isGeneratingAvatar ? '生成中…' : '随机形象' }}</span>
+                  </button>
+                </div>
                 <div class="agent-icon-preview-text">
                   <input
                     ref="agentNameInputRef"
@@ -387,26 +459,6 @@ defineExpose({
                   }}</span>
                 </div>
               </div>
-              <div
-                class="agent-backend-summary"
-                :class="{ editable: !editingAgentId }"
-                aria-label="智能体类型"
-              >
-                <span class="agent-backend-icon">
-                  <component :is="selectedBackendIcon" :size="16" />
-                </span>
-                <div class="agent-backend-text">
-                  <span class="agent-backend-label">智能体类型</span>
-                  <a-select
-                    v-if="!editingAgentId"
-                    v-model:value="agentForm.backend_id"
-                    class="agent-backend-select"
-                    :bordered="false"
-                    :options="backendOptions"
-                  />
-                  <span v-else class="agent-backend-name">{{ selectedBackendLabel }}</span>
-                </div>
-              </div>
             </div>
           </div>
           <div class="modal-form">
@@ -419,48 +471,30 @@ defineExpose({
                 placeholder="可选"
               />
             </label>
+            <label class="form-label full-width">
+              <span>功能分类</span>
+              <a-select
+                v-model:value="agentForm.category"
+                class="agent-category-select"
+                placeholder="选择该数字警员的功能分类"
+                :options="AGENT_CATEGORIES"
+                allow-clear
+              />
+            </label>
           </div>
         </section>
 
-        <section
-          v-if="editingAgentId"
-          v-show="agentModalActiveTab === 'knowledge'"
-          class="agent-modal-section"
-        >
-          <div class="agent-knowledge-section">
-            <h4 class="section-title">关联知识库</h4>
-            <p class="section-desc">
-              选择该智能体可检索的知识库。例如「法制数字警察」可绑定法律法规、办案规定等知识库。
-            </p>
-            <a-select
-              v-model:value="agentStore.agentConfig.knowledges"
-              mode="multiple"
-              placeholder="选择知识库"
-              style="width: 100%"
-              :options="knowledgeBaseOptions"
-              :loading="!agentStore.availableKnowledgeBases.length"
-              allow-clear
-            />
-            <a-alert
-              v-if="knowledgeSkillWarningVisible"
-              type="warning"
-              show-icon
-              class="knowledge-skill-warning"
-            >
-              <template #message>知识库 Skill 未启用</template>
-              <template #description>
-                已关联知识库，但当前智能体未启用 <code>knowledge-base</code> Skill，知识库检索不会生效。
-                请前往「工具配置」或「其他配置」启用该 Skill。
-              </template>
-            </a-alert>
+        <section v-show="agentModalActiveTab === 'other'" class="agent-modal-section">
+          <div class="agent-share-section">
+            <h4 class="section-title">共享范围</h4>
+            <p class="section-desc">设置该智能体的访问范围，其他用户将无法在智能体页面看到或使用此智能体。</p>
+            <ShareConfigForm ref="shareConfigFormRef" v-model="shareConfig" :auto-select-user-dept="true" />
+            <a-alert v-if="shareConfig.access_level === 'global'" type="warning" show-icon
+              message="全局共享需超级管理员审核通过后，将出现在所有人的智能体页面并授予警号。" style="margin-top:12px" />
           </div>
         </section>
 
-        <section
-          v-if="editingAgentId"
-          v-show="isRuntimeAgentModalTab(agentModalActiveTab)"
-          class="agent-modal-section runtime-section"
-        >
+        <section v-show="isRuntimeAgentModalTab(agentModalActiveTab)" class="agent-modal-section runtime-section">
           <AgentRuntimeConfigForm
             ref="runtimeConfigFormRef"
             :segment="runtimeConfigSegment"
@@ -638,6 +672,28 @@ defineExpose({
 .agent-modal-section {
   min-height: 0;
   background: var(--gray-0);
+}
+
+.agent-share-section {
+  padding: 16px;
+  border: 1px solid var(--gray-100);
+  border-radius: 8px;
+  background: var(--gray-25);
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gray-900);
+  line-height: 1.4;
+  margin: 0 0 4px 0;
+}
+
+.section-desc {
+  font-size: 13px;
+  color: var(--gray-600);
+  line-height: 1.5;
+  margin: 0 0 14px 0;
 }
 
 .runtime-section {
@@ -973,6 +1029,54 @@ defineExpose({
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+.agent-icon-preview-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.agent-avatar-dice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px dashed var(--main-300);
+  border-radius: 8px;
+  background: var(--main-30);
+  color: var(--main-700);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.16s ease;
+
+  &:hover:not(:disabled) {
+    background: var(--main-50);
+    border-style: solid;
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: wait;
+  }
+}
+
+.agent-icon-upload.avatar-shuffling {
+  animation: avatar-flip 0.12s ease-in-out;
+}
+
+@keyframes avatar-flip {
+  0% {
+    transform: scaleX(1);
+  }
+  50% {
+    transform: scaleX(0);
+  }
+  100% {
+    transform: scaleX(1);
   }
 }
 

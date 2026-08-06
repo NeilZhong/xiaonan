@@ -1,57 +1,22 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 
 import PageHeader from '@/components/shared/PageHeader.vue'
 import AgentManagePanel from '@/components/model-management/AgentManagePanel.vue'
-import AgentMarketView from '@/views/AgentMarketView.vue'
-
-const route = useRoute()
-const router = useRouter()
 
 const activeTab = ref('agents')
 const agentPanelRef = ref(null)
-const marketPanelRef = ref(null)
 
 const modelManageTabs = computed(() => [
-  { key: 'agents', label: '智能体' },
-  { key: 'market', label: '智能体市场' }
+  { key: 'agents', label: '智能体' }
 ])
 
-const activePanel = computed(() =>
-  activeTab.value === 'market' ? marketPanelRef.value : agentPanelRef.value
-)
+const activeLoading = computed(() => agentPanelRef.value?.loading || false)
+const activeStats = computed(() => agentPanelRef.value?.stats || {})
 
-const activeLoading = computed(() => activePanel.value?.loading || false)
-const activeStats = computed(() => activePanel.value?.stats || {})
-
-// 旧链接 ?tab=providers 重定向到智能体市场
-const normalizeTab = (tab) => {
-  if (tab === 'market' || tab === 'providers') return 'market'
-  return 'agents'
-}
-
-watch(
-  () => route.query.tab,
-  (tab) => {
-    const nextTab = normalizeTab(tab)
-    if (activeTab.value !== nextTab) activeTab.value = nextTab
-  },
-  { immediate: true }
-)
-
-watch(activeTab, (tab) => {
-  const nextTab = normalizeTab(tab)
-  if (nextTab !== tab) {
-    activeTab.value = nextTab
-    return
-  }
-  if (route.query.tab !== nextTab) {
-    router.replace({ query: { ...route.query, tab: nextTab } })
-  }
-  // 切换到该 tab 时刷新对应面板数据
-  const panel = nextTab === 'market' ? marketPanelRef.value : agentPanelRef.value
-  panel?.refresh?.()
+// 切换到智能体面板时刷新数据
+watch(activeTab, () => {
+  agentPanelRef.value?.refresh?.()
 })
 </script>
 
@@ -79,9 +44,6 @@ watch(activeTab, (tab) => {
     <div class="agent-manage-content">
       <div v-show="activeTab === 'agents'" class="tab-panel">
         <AgentManagePanel ref="agentPanelRef" />
-      </div>
-      <div v-show="activeTab === 'market'" class="tab-panel">
-        <AgentMarketView ref="marketPanelRef" />
       </div>
     </div>
   </div>

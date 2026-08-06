@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from yuxi.services.police_service import police_agent_service
+from yuxi.repositories.police_agent_repository import police_agent_repository
+from server.utils.auth_middleware import get_required_user, get_superadmin_user
+from yuxi.storage.postgres.models_business import User
 
 agent_router = APIRouter(prefix="/police/agents")
 
@@ -18,7 +21,8 @@ agent_router = APIRouter(prefix="/police/agents")
 class AgentCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    type: str
+    type: str  # 业务类型（映射 Agent.agent_type）
+    category: Optional[str] = None  # 功能分类（新建时下拉选择）
     system_prompt: str
     model_settings: dict = Field(default={}, alias="model_config")
     badge_number: Optional[str] = None
@@ -32,11 +36,14 @@ class AgentCreate(BaseModel):
     knowledge_base_ids: list = []
     capabilities: list = []
     sop_ids: list = []
+    status: Optional[str] = None
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    type: Optional[str] = None
+    category: Optional[str] = None
     system_prompt: Optional[str] = None
     model_settings: Optional[dict] = Field(default=None, alias="model_config")
     badge_number: Optional[str] = None
@@ -72,24 +79,40 @@ async def list_agents(
     type: Optional[str] = None,
     status: Optional[str] = None,
     keyword: Optional[str] = None,
+    category: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_required_user),
 ):
-    """数字警员列表"""
+    """数字警员列表（按功能维度 category 筛选；后端按当前用户做可见性过滤）"""
     return await police_agent_service.list_agents(
-        type=type, status=status, keyword=keyword,
+        type=type, status=status, keyword=keyword, category=category,
+        page=page, page_size=page_size, current_user=current_user,
+    )
+
+
+@agent_router.get("/pending")
+async def list_pending_agents(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(get_superadmin_user),
+):
+    """待审批（全局共享申请）列表，仅超级管理员可见。"""
+    return await police_agent_service.list_pending_agents(
         page=page, page_size=page_size,
     )
 
 
 @agent_router.get("/by-yuxi/{yuxi_agent_id}")
-async def get_agent_by_yuxi(yuxi_agent_id: int):
-    """按 yuxi 智能体主键 id 查询关联的数字警员档案（无关联返回 null）。
+async def get_agent_by_yuxi(yuxi_agent_id: str):
+    """按 yuxi 智能体主键 id 或 slug 查询数字警员档案（单表化后 agents.id 即 yuxi 主键）。
 
-    统一智能体档案页路由携带 yuxi agent slug，前端先解析为 int 主键后再调用本接口，
-    避免把 slug 字符串当作 police_agents 表的 int 主键传入导致 422。
+    支持数字主键或 slug（前端档案页统一以 agents.slug 作为智能体 id）。
     """
-    return await police_agent_service.get_agent_by_yuxi(yuxi_agent_id)
+    agent = await police_agent_repository.resolve_by_identifier(yuxi_agent_id)
+    if not agent:
+        return None
+    return await police_agent_service.get_agent_by_yuxi(agent.id)
 
 
 @agent_router.get("/by-badge/{badge_number}")
@@ -104,54 +127,32 @@ async def get_agent_by_badge(badge_number: str):
     return result
 
 
-# ── 市场模板端点 (须在 /{agent_id} 之前注册，避免被路径参数吞掉) ──
-
-@agent_router.get("/templates")
-async def list_templates(
-    category: Optional[str] = None,
-    keyword: Optional[str] = None,
-    source: Optional[str] = None,  # builtin / shared
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
-):
-    """智能体市场列表（内置模板 + 来自分享）"""
-    return await police_agent_service.list_templates(
-        category=category, keyword=keyword, page=page, page_size=page_size,
-        source=source,
-    )
-
-
-@agent_router.post("/templates/{template_id}/install")
-async def install_template(template_id: int):
-    """一键安装模板：复制为新数字警员实例（自动生成工号 + 桥接 yuxi）
-
-    失败返回 400，模板不存在返回 404。
-    """
-    result = await police_agent_service.install_template(template_id)
-    if result is None:
-        # 区分「模板不存在」和「安装过程失败」
-        template = await police_agent_service.get_agent(template_id)
-        if not template:
-            return JSONResponse(status_code=404, content={"error": "模板不存在"})
-        return JSONResponse(status_code=400, content={"error": "安装失败，请重试"})
-    return result
-
-
 # ── 共享与审批端点 ───────────────────────────────────────
 
 @agent_router.post("/{agent_id}/share")
-async def share_agent(agent_id: int, body: dict):
+async def share_agent(
+    agent_id: str,
+    body: dict,
+    current_user: User = Depends(get_required_user),
+):
     """设置智能体共享范围（指定人 / 部门 / 全局）
 
-    body: { scope: "personal"|"department"|"global", department_ids?, user_uids? }
-    全局共享自动进入 pending 审批状态。
+    agent_id 支持数字主键、工号（大小写不敏感）或 yuxi 智能体 slug（前端统一用 slug）。
+    body: { scope: "personal"|"department"|"user"|"global", department_ids?, user_uids? }
+    - user:   「指定人」共享，写入 share_config.user_uids，直接生效无需审批
+    - global: 全局共享自动进入 pending 审批状态
     """
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return JSONResponse(status_code=404, content={"error": "智能体不存在"})
     scope = body.get("scope", "personal")
-    if scope not in ("personal", "department", "global"):
+    # 与 police_service.share_agent 保持一致：支持 personal / department / user / global 四种。
+    # 前端 ShareConfigForm 的「指定人」发送 access_level='user'，此前白名单漏掉导致 400。
+    if scope not in ("personal", "department", "user", "global"):
         return JSONResponse(status_code=400, content={"error": "无效的共享范围"})
-    author_id = body.get("author_id")
+    author_id = body.get("author_id") or current_user.id
     result = await police_agent_service.share_agent(
-        agent_id,
+        agent.id,
         scope=scope,
         author_id=author_id,
         department_ids=body.get("department_ids"),
@@ -163,22 +164,24 @@ async def share_agent(agent_id: int, body: dict):
 
 
 @agent_router.post("/{agent_id}/approve")
-async def approve_agent(agent_id: int, body: dict):
-    """管理员审批全局共享申请
+async def approve_agent(
+    agent_id: str,
+    body: dict,
+    current_user: User = Depends(get_superadmin_user),
+):
+    """超级管理员审批全局共享申请
 
-    body: { approved: true|false, reviewer_id: int }
+    agent_id 支持数字主键、工号（大小写不敏感）或 yuxi 智能体 slug。
+    body: { approved: true|false }；审批人取自当前超级管理员身份。
     """
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return JSONResponse(status_code=404, content={"error": "智能体不存在"})
     approved = body.get("approved", False)
-    reviewer_id = body.get("reviewer_id")
-    if reviewer_id is None:
-        return JSONResponse(status_code=400, content={"error": "缺少审批人信息"})
     result = await police_agent_service.approve_agent(
-        agent_id, approved=bool(approved), reviewer_id=reviewer_id,
+        agent.id, approved=bool(approved), reviewer_id=current_user.id,
     )
     if not result:
-        agent = await police_agent_service.get_agent(agent_id)
-        if not agent:
-            return JSONResponse(status_code=404, content={"error": "智能体不存在"})
         return JSONResponse(status_code=400, content={"error": "该智能体无待审批的共享申请"})
     return result
 
@@ -186,33 +189,47 @@ async def approve_agent(agent_id: int, body: dict):
 # ── 单个数字警员 CRUD ─────────────────────────────────────
 
 @agent_router.get("/{agent_id}")
-async def get_agent(agent_id: int):
-    """数字警员详情 (含最近运行记录 + 关联 SOP)"""
-    agent = await police_agent_service.get_agent(agent_id)
+async def get_agent(agent_id: str):
+    """数字警员详情 (含最近运行记录 + 关联 SOP)。agent_id 支持数字主键或 slug。"""
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
     if not agent:
         return {"error": "Agent not found"}, 404
-    return agent
+    result = await police_agent_service.get_agent(agent.id)
+    if not result:
+        return {"error": "Agent not found"}, 404
+    return result
 
 
 @agent_router.post("")
-async def create_agent(data: AgentCreate):
-    """创建数字警员"""
-    return await police_agent_service.create_agent(data.model_dump(by_alias=True))
+async def create_agent(
+    data: AgentCreate,
+    current_user: User = Depends(get_required_user),
+):
+    """创建数字警员（创建者记为当前用户，用于可见性过滤）"""
+    payload = data.model_dump(by_alias=True)
+    payload.setdefault("author_id", current_user.id)
+    return await police_agent_service.create_agent(payload)
 
 
 @agent_router.put("/{agent_id}")
-async def update_agent(agent_id: int, data: AgentUpdate):
-    """更新数字警员"""
-    result = await police_agent_service.update_agent(agent_id, data.model_dump(exclude_none=True, by_alias=True))
+async def update_agent(agent_id: str, data: AgentUpdate):
+    """更新数字警员。agent_id 支持数字主键或 slug。"""
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return {"error": "Agent not found"}, 404
+    result = await police_agent_service.update_agent(agent.id, data.model_dump(exclude_none=True, by_alias=True))
     if not result:
         return {"error": "Agent not found"}, 404
     return result
 
 
 @agent_router.delete("/{agent_id}")
-async def delete_agent(agent_id: int):
-    """删除数字警员"""
-    ok = await police_agent_service.delete_agent(agent_id)
+async def delete_agent(agent_id: str):
+    """删除数字警员。agent_id 支持数字主键或 slug。"""
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return {"error": "Agent not found"}, 404
+    ok = await police_agent_service.delete_agent(agent.id)
     if not ok:
         return {"error": "Agent not found"}, 404
     return {"ok": True}
@@ -220,13 +237,16 @@ async def delete_agent(agent_id: int):
 
 @agent_router.get("/{agent_id}/runs")
 async def agent_runs(
-    agent_id: int,
+    agent_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
-    """数字警员运行记录"""
+    """数字警员运行记录。agent_id 支持数字主键或 slug。"""
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return {"error": "Agent not found"}, 404
     return await police_agent_service.get_agent_runs(
-        agent_id=agent_id, page=page, page_size=page_size,
+        agent_id=agent.id, page=page, page_size=page_size,
     )
 
 
@@ -269,3 +289,63 @@ async def update_sop(sop_id: int, data: SOPCreate):
 async def seed_preset_agents():
     """初始化预设数字警员 (幂等)"""
     return await police_agent_service.seed_preset_agents()
+
+
+# ── 留言板端点 ─────────────────────────────────────────
+
+class CommentCreate(BaseModel):
+    content: str
+
+
+@agent_router.get("/{agent_id}/comments")
+async def list_agent_comments(
+    agent_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    current_user: User = Depends(get_required_user),
+):
+    """查询智能体留言列表。agent_id 支持数字主键或 slug。"""
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return JSONResponse(status_code=404, content={"error": "智能体不存在"})
+    return await police_agent_service.list_comments(
+        agent_id=agent.id, page=page, page_size=page_size,
+    )
+
+
+@agent_router.post("/{agent_id}/comments")
+async def create_agent_comment(
+    agent_id: str,
+    data: CommentCreate,
+    current_user: User = Depends(get_required_user),
+):
+    """创建留言。agent_id 支持数字主键或 slug。"""
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return JSONResponse(status_code=404, content={"error": "智能体不存在"})
+    result = await police_agent_service.create_comment(
+        agent_id=agent.id,
+        content=data.content,
+        user_id=current_user.id,
+    )
+    if not result:
+        return JSONResponse(status_code=404, content={"error": "智能体不存在"})
+    return result
+
+
+@agent_router.delete("/{agent_id}/comments/{comment_id}")
+async def delete_agent_comment(
+    agent_id: str,
+    comment_id: int,
+    current_user: User = Depends(get_required_user),
+):
+    """删除留言（best-effort）。agent_id 支持数字主键或 slug。"""
+    agent = await police_agent_repository.resolve_by_identifier(agent_id)
+    if not agent:
+        return JSONResponse(status_code=404, content={"error": "智能体不存在"})
+    ok = await police_agent_service.delete_comment(
+        agent_id=agent.id, comment_id=comment_id,
+    )
+    if not ok:
+        return JSONResponse(status_code=404, content={"error": "留言不存在"})
+    return {"ok": True}

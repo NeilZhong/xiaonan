@@ -146,7 +146,10 @@ def user_can_access_agent(user: User, agent: Agent) -> bool:
     share_config = agent.share_config or DEFAULT_SHARE_CONFIG.copy()
     access_level = share_config.get("access_level")
     if access_level == "global":
-        return True
+        # 全局共享须经超级管理员审核通过后才对全员可见。
+        # approval_status 为空表示内置/历史智能体（未纳入审批流），予以放行；
+        # pending / rejected 状态一律不对他人可见，仅创建者与超管可见。
+        return getattr(agent, "approval_status", None) in (None, "approved")
 
     if access_level == "department":
         if user.department_id is None:
@@ -422,12 +425,33 @@ class AgentRepository:
         is_subagent: bool | None = None,
         created_by: str | None = None,
         creator: User | None = None,
+        # ── 数字警员档案字段（单表化：一并写入 agents 表）──
+        category: str | None = None,
+        agent_type: str | None = None,
+        status: str | None = None,
+        system_prompt: str | None = None,
+        capabilities: list | None = None,
     ) -> Agent:
         resolved_is_subagent = resolve_agent_is_subagent(backend_id, is_subagent)
         if resolved_is_subagent and is_default:
             raise ValueError("子智能体不能设为默认智能体")
+
+        # 新建智能体默认私有：仅创建者可见，需显式分享（部门/指定人）或
+        # 走全局共享审批后他人才可见。普通用户由 force_private 兜底，
+        # 管理员未显式指定共享范围时同样收敛为私有，避免"新建即全员可见"。
+        # 内置/默认智能体（is_default）仍要求 global，由下方校验保证。
+        effective_share_config = share_config
+        if effective_share_config is None and not is_default:
+            owner_uid = str(creator.uid) if creator else created_by
+            if owner_uid:
+                effective_share_config = {
+                    "access_level": "user",
+                    "department_ids": [],
+                    "user_uids": [owner_uid],
+                }
+
         normalized_share_config = normalize_agent_share_config(
-            share_config,
+            effective_share_config,
             user_uid=str(creator.uid) if creator else created_by,
             department_id=creator.department_id if creator else None,
             force_private=bool(creator and creator.role not in ADMIN_ROLES),
@@ -450,6 +474,12 @@ class AgentRepository:
             updated_by=created_by,
             created_at=utc_now_naive(),
             updated_at=utc_now_naive(),
+            # ── 数字警员档案字段 ──
+            category=category,
+            agent_type=agent_type,
+            status=status or "active",
+            system_prompt=system_prompt,
+            capabilities=capabilities or [],
         )
         self.db.add(agent)
         await self.db.commit()
@@ -471,6 +501,12 @@ class AgentRepository:
         is_subagent: bool | None = None,
         updated_by: str | None = None,
         updater: User | None = None,
+        # ── 数字警员档案字段（单表化）──
+        category: str | None = None,
+        agent_type: str | None = None,
+        status: str | None = None,
+        system_prompt: str | None = None,
+        capabilities: list | None = None,
     ) -> Agent:
         if is_subagent is not None:
             agent.is_subagent = resolve_agent_is_subagent(agent.backend_id, is_subagent)
@@ -484,6 +520,16 @@ class AgentRepository:
             agent.pics = pics
         if config_json is not None:
             agent.config_json = config_json
+        if category is not None:
+            agent.category = category
+        if agent_type is not None:
+            agent.agent_type = agent_type
+        if status is not None:
+            agent.status = status
+        if system_prompt is not None:
+            agent.system_prompt = system_prompt
+        if capabilities is not None:
+            agent.capabilities = capabilities
         if share_config is not None:
             if is_builtin_agent(agent):
                 agent.share_config = DEFAULT_SHARE_CONFIG.copy()
