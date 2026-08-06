@@ -1,24 +1,41 @@
 <template>
-  <div v-if="message.type === 'human' && message.image_content" class="message-image">
-    <img
-      :src="`data:${messageImageMimeType};base64,${message.image_content}`"
-      alt="用户上传的图片"
-      @click="
-        openImagePreview(
-          `data:${messageImageMimeType};base64,${message.image_content}`,
-          '用户上传的图片'
-        )
-      "
-    />
+  <!-- 用户图片在 human 气泡内联渲染 -->
+  <!-- 系统消息：不带头像，居中提示 -->
+  <div v-if="message.type === 'system'" class="msg-row msg-row--system">
+    <div class="msg-body msg-body--system">
+      <p class="message-text-system">{{ message.content }}</p>
+    </div>
   </div>
+
+  <!-- 普通消息（用户 / 智能体）：头像 + 名称/时间 + 气泡 -->
   <div
-    class="message-box"
-    :class="[
-      message.type,
-      customClasses,
-      { 'has-attachments': message.type === 'human' && messageAttachments.length }
-    ]"
+    v-if="message.type !== 'system'"
+    class="msg-row"
+    :class="isUserMessage ? 'msg-row--user' : 'msg-row--agent'"
   >
+    <div class="msg-avatar">
+      <FallbackAvatar
+        :src="avatarSrc"
+        :name="displayName"
+        :kind="avatarKind"
+        :size="32"
+        shape="circle"
+      />
+    </div>
+    <div class="msg-body" :class="isUserMessage ? 'msg-body--user' : 'msg-body--agent'">
+      <div class="msg-meta">
+        <span class="msg-name">{{ displayName }}</span>
+        <span v-if="timeText" class="msg-time">{{ timeText }}</span>
+      </div>
+
+      <div
+        class="message-box"
+        :class="[
+          message.type,
+          customClasses,
+          { 'has-attachments': message.type === 'human' && messageAttachments.length }
+        ]"
+      >
     <!-- 用户消息 -->
     <div
       v-if="message.type === 'human'"
@@ -32,8 +49,6 @@
     <p v-if="message.type === 'human'" class="message-text">
       <MentionTextRenderer :content="message.content" :display-labels="mentionDisplayLabels" />
     </p>
-
-    <p v-else-if="message.type === 'system'" class="message-text-system">{{ message.content }}</p>
 
     <!-- 助手消息 -->
     <div v-else-if="message.type === 'ai'" class="assistant-message">
@@ -111,12 +126,19 @@
 
     <!-- 自定义内容 -->
     <slot></slot>
+      </div>
+    </div>
   </div>
 
   <div
     v-if="message.type === 'human' && messageAttachments.length"
-    class="human-message-attachments"
+    class="msg-row msg-row--user"
   >
+    <div class="msg-avatar">
+      <FallbackAvatar :src="avatarSrc" name="你" kind="user" :size="32" shape="circle" />
+    </div>
+    <div class="msg-body msg-body--user">
+      <div class="human-message-attachments">
     <div
       v-for="attachment in messageAttachments"
       :key="attachment.fileId"
@@ -132,6 +154,8 @@
         <div class="message-attachment-meta">{{ attachment.meta }}</div>
       </div>
     </div>
+    </div>
+  </div>
   </div>
 
   <Teleport to="body">
@@ -170,7 +194,9 @@ import { MessageProcessor } from '@/utils/messageProcessor'
 import { inferImageMimeTypeFromBase64, normalizeAttachmentPreviews } from '@/utils/file_utils'
 import { buildMentionDisplayLabels } from '@/utils/mention_utils'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
+import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
 import { enrichTaskToolCalls } from '@/components/ToolCallingResult/toolRegistry'
+import { formatRelative } from '@/utils/time'
 
 const props = defineProps({
   // 消息角色：'user'|'assistant'|'sent'|'received'
@@ -215,6 +241,11 @@ const props = defineProps({
   debugMode: {
     type: Boolean,
     default: false
+  },
+  // 当前智能体（用于助手消息头像/名称）；不传时回退到 agent store 当前选中智能体
+  agent: {
+    type: Object,
+    default: null
   }
 })
 
@@ -367,6 +398,29 @@ const handleCitationClick = ({ chunkId }) => {
   citationModal.value = { open: true, chunk: hit.chunk }
 }
 
+// ===== 头像 / 名称 / 时间（对齐悟帆对话页：用户与智能体头像 + 对话发生时间）=====
+const { agents, selectedAgentId } = storeToRefs(agentStore)
+
+const fallbackAgent = computed(() => {
+  const list = agents.value || []
+  const id = selectedAgentId.value
+  return list.find((a) => a.id === id) || list[0] || null
+})
+const activeAgent = computed(() => props.agent || fallbackAgent.value)
+
+const isUserMessage = computed(
+  () => props.message.type === 'human' || props.message.type === 'sent'
+)
+const displayName = computed(() =>
+  isUserMessage.value ? '你' : activeAgent.value?.name || '智能体'
+)
+const avatarSrc = computed(() => (isUserMessage.value ? '' : activeAgent.value?.icon || ''))
+const avatarKind = computed(() => (isUserMessage.value ? 'user' : 'agent'))
+const timeText = computed(() => {
+  const t = props.message?.created_at
+  return t ? formatRelative(t) : ''
+})
+
 const validToolCalls = computed(() => enrichTaskToolCalls(props.message.tool_calls))
 
 const parsedData = computed(() => {
@@ -382,7 +436,7 @@ const parsedData = computed(() => {
 .message-box {
   display: inline-block;
   border-radius: 1.5rem;
-  margin: 0.8rem 0;
+  margin: 0;
   padding: 0.625rem 1.25rem;
   user-select: text;
   word-break: break-word;
@@ -569,6 +623,80 @@ const parsedData = computed(() => {
     max-height: 200px;
     overflow-y: auto;
   }
+}
+
+// ===== 对话消息行：头像 + 名称/时间 + 气泡（对齐悟帆对话页）=====
+.msg-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0.8rem 0;
+  width: 100%;
+
+  &.msg-row--user {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+  }
+}
+
+.msg-avatar {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  margin-top: 2px;
+}
+
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+
+  &.msg-body--user {
+    align-items: flex-end;
+  }
+
+  &.msg-body--agent {
+    align-items: flex-start;
+  }
+
+  &.msg-body--system {
+    align-items: stretch;
+  }
+}
+
+.msg-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 0 2px;
+
+  .msg-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray-700);
+  }
+
+  .msg-time {
+    font-size: 12px;
+    color: var(--gray-400);
+  }
+}
+
+.msg-row--system {
+  justify-content: center;
+
+  .message-text-system {
+    max-width: 90%;
+  }
+}
+
+// 用户气泡内联图片：收窄并贴合浅色气泡边框
+.message-box.human .message-image {
+  margin: 4px 0 2px;
+  max-width: 280px;
+  border-color: var(--gray-200);
 }
 
 .human-message-attachments {

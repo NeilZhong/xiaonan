@@ -76,6 +76,7 @@
                   <AgentMessageComponent
                     v-if="displayItem.type === 'message'"
                     :message="displayItem.message"
+                    :agent="currentAgent"
                     :is-processing="isDisplayMessageProcessing(row.conv, displayItem)"
                     :show-refs="showMsgRefs(displayItem.message, row.conv)"
                     :hide-tool-calls="true"
@@ -3356,8 +3357,11 @@ watch(currentChatId, (threadId, oldThreadId) => {
     flex-shrink: 0; /* Prevent header from shrinking */
     transition: padding-right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
+    // 历史对话页：顶部留出与侧边栏浮层相同的留白(--xn-sidebar-gap)，内容贴顶，
+    // 使 conversation-title / header__right 的顶部与 xn-sidebar 顶部齐平；不显示底部边框线
     &.has-active-thread {
-      border-bottom: 1px solid var(--gray-150);
+      margin-top: var(--xn-sidebar-gap, 14px);
+      align-items: flex-start;
     }
 
     .header__left,
