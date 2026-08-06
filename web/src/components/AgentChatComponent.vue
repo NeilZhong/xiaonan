@@ -131,8 +131,8 @@
                 <span>正在加载消息...</span>
               </div>
 
-              <!-- 打招呼区域 - 在输入框上方 -->
-              <div v-if="!conversations.length" class="chat-greeting-input">
+              <!-- 打招呼区域 - 在输入框上方（hideGreeting 时由父级 hero 接管） -->
+              <div v-if="!conversations.length && !hideGreeting" class="chat-greeting-input">
                 <h1>{{ randomGreeting }}</h1>
               </div>
 
@@ -214,25 +214,29 @@
                   @cancel="handleQuestionCancel"
                 />
 
+                <!-- 输入框上方扩展区（如能力演进的子切换条），由父级按 Tab 模式注入 -->
+                <slot name="before-input"></slot>
+
                 <div
                   class="message-input-surface"
                   :inert="currentToolApprovalVisible"
                   :aria-hidden="currentToolApprovalVisible ? 'true' : undefined"
                 >
-                  <AgentInputArea
-                    ref="agentInputAreaRef"
-                    v-model="userInput"
-                    :is-loading="shouldShowStopButton"
-                    :disabled="!currentAgent || currentToolApprovalVisible"
-                    :send-button-disabled="isSendButtonDisabled"
-                    :mention="mentionConfig"
-                    :thread-id="currentChatId"
-                    :supports-file-upload="supportsFileUpload"
-                    :attachments="currentPendingThreadAttachments"
-                    @send="handleSendOrStop"
-                    @upload-attachment="handleAttachmentUpload"
-                    @remove-attachment="handleAttachmentRemove"
-                  >
+                <AgentInputArea
+                  ref="agentInputAreaRef"
+                  v-model="userInput"
+                  :is-loading="shouldShowStopButton"
+                  :disabled="!currentAgent || currentToolApprovalVisible"
+                  :send-button-disabled="isSendButtonDisabled"
+                  :mention="mentionConfig"
+                  :thread-id="currentChatId"
+                  :supports-file-upload="supportsFileUpload"
+                  :placeholder="props.placeholder"
+                  :attachments="currentPendingThreadAttachments"
+                  @send="handleSendOrStop"
+                  @upload-attachment="handleAttachmentUpload"
+                  @remove-attachment="handleAttachmentRemove"
+                >
                     <template #actions-left-extra>
                       <ToolApprovalModeSelector
                         :model-value="currentToolApprovalMode"
@@ -265,6 +269,9 @@
                   </AgentInputArea>
                 </div>
               </div>
+
+              <!-- 输入框下方扩展区（如推荐语胶囊），由父级按 Tab 模式注入 -->
+              <slot name="after-input"></slot>
 
               <AttachmentTmpUploadModal
                 v-model:open="attachmentUploadModalOpen"
@@ -729,7 +736,11 @@ import {
 const props = defineProps({
   agentId: { type: String, default: '' },
   singleMode: { type: Boolean, default: true },
-  sendDisabled: { type: Boolean, default: false }
+  sendDisabled: { type: Boolean, default: false },
+  // 关闭内置欢迎语（由父级自建 hero 区域时使用，如新建对话页三 Tab）
+  hideGreeting: { type: Boolean, default: false },
+  // 输入框占位符（按 Tab 模式切换，如日常办公/能力演进/智能孵化）
+  placeholder: { type: String, default: '' }
 })
 const emit = defineEmits(['thread-change'])
 
@@ -2998,7 +3009,11 @@ const buildExportPayload = () => {
 
 defineExpose({
   getExportPayload: buildExportPayload,
-  selectThreadFromRoute
+  selectThreadFromRoute,
+  // 预填输入框（推荐语胶囊点击后写入，不直接发送，由用户确认）
+  prefillInput: (text) => {
+    if (typeof text === 'string') userInput.value = text
+  }
 })
 
 const handleAgentStateRefresh = async (threadId = null) => {

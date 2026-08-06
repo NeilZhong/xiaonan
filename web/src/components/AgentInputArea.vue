@@ -92,6 +92,7 @@ const props = defineProps({
   mention: { type: Object, default: () => null },
   threadId: { type: String, default: '' },
   supportsFileUpload: { type: Boolean, default: false },
+  placeholder: { type: String, default: '' },
   attachments: {
     type: Array,
     default: () => []
@@ -108,7 +109,9 @@ const emit = defineEmits([
 
 const inputRef = ref(null)
 const currentImage = ref(null)
-const placeholder = '问点什么？使用 @ 可以提及哦~'
+const placeholder = computed(
+  () => props.placeholder || '问点什么？使用 @ 可以提及哦~'
+)
 
 const previewAttachments = computed(() => normalizeAttachmentPreviews(props.attachments))
 const showInputOptions = computed(
