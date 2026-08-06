@@ -299,10 +299,10 @@ class PoliceAgentRepository:
             comments = list(result.scalars().all())
             return comments, total
 
-    async def create_comment(self, agent_id: int, user_id: int | None, content: str) -> PoliceAgentComment:
+    async def create_comment(self, agent_id: int, user_id: int | None, content: str, rating: int | None = None) -> PoliceAgentComment:
         """创建留言"""
         async with pg_manager.get_async_session_context() as session:
-            comment = PoliceAgentComment(agent_id=agent_id, user_id=user_id, content=content)
+            comment = PoliceAgentComment(agent_id=agent_id, user_id=user_id, content=content, rating=rating)
             session.add(comment)
             await session.commit()
             await session.refresh(comment)

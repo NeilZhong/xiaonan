@@ -527,6 +527,7 @@ class PoliceAgentComment(Base):
     agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)  # NULL = 系统/匿名
     content = Column(Text, nullable=False)  # 含 Emoji 的原始文本
+    rating = Column(Integer, nullable=True)  # 评分 1-5 星；NULL = 未评分
     created_at = Column(DateTime, default=utc_now_naive)
 
     def to_dict(self) -> dict[str, Any]:
@@ -535,6 +536,7 @@ class PoliceAgentComment(Base):
             "agent_id": self.agent_id,
             "user_id": self.user_id,
             "content": self.content,
+            "rating": self.rating,
             "created_at": format_utc_datetime(self.created_at),
         }
 

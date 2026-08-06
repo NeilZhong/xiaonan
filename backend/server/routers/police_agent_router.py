@@ -325,6 +325,7 @@ async def seed_preset_agents():
 
 class CommentCreate(BaseModel):
     content: str
+    rating: int | None = None
 
 
 @agent_router.get("/{agent_id}/comments")
@@ -357,6 +358,7 @@ async def create_agent_comment(
         agent_id=agent.id,
         content=data.content,
         user_id=current_user.id,
+        rating=data.rating,
     )
     if not result:
         return JSONResponse(status_code=404, content={"error": "智能体不存在"})

@@ -1102,6 +1102,8 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_agent ON police_agent_comments(agent_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_user ON police_agent_comments(user_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_created ON police_agent_comments(created_at DESC)",
+            # 留言板评分字段（1-5 星，NULL=未评分）
+            "ALTER TABLE IF EXISTS police_agent_comments ADD COLUMN IF NOT EXISTS rating INTEGER",
             # 用户 ↔ 数字警员连接表（市场「申请使用」/「我的数字警员」目录；唯一身份模型核心，不复制警员）
             """
             CREATE TABLE IF NOT EXISTS police_agent_connections (

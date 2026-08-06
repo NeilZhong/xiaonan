@@ -941,14 +941,17 @@ class PoliceAgentService:
             "page_size": page_size,
         }
 
-    async def create_comment(self, agent_id: int, content: str, user_id: int | None = None) -> dict[str, Any] | None:
+    async def create_comment(self, agent_id: int, content: str, user_id: int | None = None, rating: int | None = None) -> dict[str, Any] | None:
         """创建留言"""
         # 先校验智能体是否存在
         agent = await police_agent_repository.get_by_id(agent_id)
         if not agent:
             return None
+        # 评分校验：仅接受 1-5 的整数，超出范围视为未评分
+        if rating is not None and not (1 <= rating <= 5):
+            rating = None
         comment = await police_agent_repository.create_comment(
-            agent_id=agent_id, user_id=user_id, content=content,
+            agent_id=agent_id, user_id=user_id, content=content, rating=rating,
         )
         await self._audit_agent(agent_id, "comment_create", {"comment_id": comment.id})
         return comment.to_dict()
