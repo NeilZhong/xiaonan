@@ -916,3 +916,45 @@ class PoliceTaskTemplate(Base):
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
         }
+
+
+class PoliceReflectionRecord(Base):
+    """★ 数字民警办案复盘记录（模块 I.1，借鉴悟帆自进化闭环·改造为待审流）
+
+    模式A 任务后反思三环节：记忆审计 / 技能沉淀 / 用户画像
+    模式B 技能自修复：模板/SOP 修订建议
+    合规红线：所有沉淀产物默认 draft / pending_review，民警确认后才入册，绝不自动上线。
+    """
+
+    __tablename__ = "police_reflection_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(Integer, nullable=True, index=True)  # 数字民警 id
+    case_id = Column(Integer, nullable=True, index=True)  # 关联案件 id
+    trigger_type = Column(String(10), nullable=False)  # A=任务后反思 B=技能自修复
+    phase = Column(String(20), nullable=True)  # memory/skill/profile/repair
+    source = Column(String(30), nullable=True)  # conversation / template_audit
+    payload = Column(JSON, nullable=True)  # 拟沉淀内容（记忆条目/模板草稿/画像差异/修订建议）
+    status = Column(String(20), nullable=False, default="draft", index=True)  # draft/pending_review/applied/rejected
+    created_by = Column(Integer, nullable=True, index=True)  # 触发人（民警）
+    reviewed_by = Column(Integer, nullable=True)  # 审阅人
+    reviewed_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now_naive)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "agent_id": self.agent_id,
+            "case_id": self.case_id,
+            "trigger_type": self.trigger_type,
+            "phase": self.phase,
+            "source": self.source,
+            "payload": self.payload or {},
+            "status": self.status,
+            "created_by": self.created_by,
+            "reviewed_by": self.reviewed_by,
+            "reviewed_at": format_utc_datetime(self.reviewed_at) if self.reviewed_at else None,
+            "created_at": format_utc_datetime(self.created_at),
+            "updated_at": format_utc_datetime(self.updated_at),
+        }

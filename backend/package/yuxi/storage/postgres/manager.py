@@ -1148,6 +1148,28 @@ class PostgresManager(metaclass=SingletonMeta):
             )
             """,
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_police_agent_release_state_agent ON police_agent_release_state(agent_id)",
+            # 数字民警办案复盘记录（模块 I.1：任务后反思三环节 + 技能自修复修订建议，待审流）
+            """
+            CREATE TABLE IF NOT EXISTS police_reflection_records (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER,
+                case_id INTEGER,
+                trigger_type VARCHAR(10) NOT NULL,
+                phase VARCHAR(20),
+                source VARCHAR(30),
+                payload JSON,
+                status VARCHAR(20) NOT NULL DEFAULT 'draft',
+                created_by INTEGER,
+                reviewed_by INTEGER,
+                reviewed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_reflection_agent ON police_reflection_records(agent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_reflection_case ON police_reflection_records(case_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_reflection_status ON police_reflection_records(status)",
+            "CREATE INDEX IF NOT EXISTS ix_police_reflection_created ON police_reflection_records(created_by, created_at DESC)",
             # 审计日志
             """
             CREATE TABLE IF NOT EXISTS police_audit_logs (

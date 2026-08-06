@@ -197,6 +197,18 @@ const router = createRouter({
           meta: { keepAlive: false, requiresAuth: true }
         },
         {
+          path: 'explore',
+          name: 'PoliceExplore',
+          component: () => import('../views/police/ExploreView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: 'reflections',
+          name: 'PoliceReflections',
+          component: () => import('../views/police/ReflectionReviewView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
           path: 'task-templates',
           name: 'PoliceTaskTemplates',
           component: () => import('../views/police/TaskTemplateView.vue'),

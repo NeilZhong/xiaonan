@@ -250,3 +250,48 @@ export const policeTaskTemplateApi = {
   preview: (id, sampleValue = '示例值') =>
     apiPost(`/api/police/task-templates/${id}/preview`, { sample_value: sampleValue }),
 }
+
+// ── 小南市场（探索 + 发布 + 审核，模块 A）────────────────
+export const policeMarketApi = {
+  // 探索列表（type: all/agent/partner/template；keyword/category 过滤；分页）
+  explore: ({ type = 'all', keyword, category, page = 1, page_size = 50 } = {}) => {
+    const params = new URLSearchParams({ type, page, page_size })
+    if (keyword) params.set('keyword', keyword)
+    if (category) params.set('category', category)
+    return apiGet(`/api/police/market/explore?${params}`)
+  },
+  // 资产详情
+  detail: (type, assetId) => apiGet(`/api/police/market/${type}/${assetId}`),
+  // 申请使用（agent→connect / partner→equip_guided / template→install）
+  apply: (type, assetId) => apiPost(`/api/police/market/${type}/${assetId}/apply`),
+  // 发布到市场（agent/partner/template，完整复刻）
+  publish: ({ type, asset_id, reason }) =>
+    apiPost('/api/police/market/publish', { type, asset_id, reason }),
+  // 超管：待审列表
+  pending: ({ page = 1, page_size = 50 } = {}) =>
+    apiGet(`/api/police/market/pending?page=${page}&page_size=${page_size}`),
+  // 超管：审批（approved=true 上架 / false 驳回）
+  approve: (requestType, requestId, approved) =>
+    apiPost(`/api/police/market/${requestType}/${requestId}/approve`, { approved }),
+}
+
+// ── 办案复盘（模块 I.1：任务后反思 + 技能自修复待审流）────────
+export const policeReflectionApi = {
+  // 触发任务后反思（模式A，规则化判定，生成 draft 记录）
+  trigger: ({ agent_id, case_id, conversation_summary }) =>
+    apiPost('/api/police/reflections/trigger', { agent_id, case_id, conversation_summary }),
+  // 显式创建复盘记录
+  create: (data) => apiPost('/api/police/reflections', data),
+  // 记录列表（本人 + 超管全部；trigger_type/status 过滤）
+  list: ({ trigger_type, status, page = 1, page_size = 50 } = {}) => {
+    const params = new URLSearchParams({ page, page_size })
+    if (trigger_type) params.set('trigger_type', trigger_type)
+    if (status) params.set('status', status)
+    return apiGet(`/api/police/reflections?${params}`)
+  },
+  // 详情
+  get: (recordId) => apiGet(`/api/police/reflections/${recordId}`),
+  // 审阅：approve→applied（技能沉淀自动入模板库）/ reject→rejected
+  review: (recordId, action) =>
+    apiPost(`/api/police/reflections/${recordId}/review`, { action }),
+}
