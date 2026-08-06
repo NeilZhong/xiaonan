@@ -177,7 +177,7 @@ export const generateRandomPoliceAvatar = (seed) => {
     id: item.id,
     name: item.name,
     tags: [...item.tags],
-    url: item.svg
+    url: encodeSvg(item.svg)
   }
 }
 
@@ -188,7 +188,7 @@ export const generateRandomPoliceAvatar = (seed) => {
  */
 export const getPoliceAvatarById = (id) => {
   const item = AVATAR_LIBRARY.find((a) => a.id === id)
-  return item ? { id: item.id, name: item.name, tags: [...item.tags], url: item.svg } : null
+  return item ? { id: item.id, name: item.name, tags: [...item.tags], url: encodeSvg(item.svg) } : null
 }
 
 /**
@@ -197,6 +197,40 @@ export const getPoliceAvatarById = (id) => {
  */
 export const isPoliceAvatarUrl = (url) =>
   typeof url === 'string' && url.startsWith('data:image/svg+xml')
+
+// 数字警员头像：统一默认占位图（用户提供素材），已配置图片地址优先展示。
+// 历史曾用 Notionists 32 张池（dicebear 生成）按 seed 哈希分配；现统一为同一张图，
+// 池文件 web/public/avatars/officers/*.svg 保留在仓库中作为未来多风格占位的备选。
+export const OFFICER_DEFAULT_AVATAR_URL = '/avatars/officer-default.png'
+
+/**
+ * 统一返回默认占位图。保留 seed 参数以兼容既有调用点（agent.id / slug / 工号等）；
+ * 若未来要按 seed 分配多张图，仅需在此函数内切换实现。
+ */
+export const getOfficerAvatar = (seed) => {
+  void seed
+  return OFFICER_DEFAULT_AVATAR_URL
+}
+
+/**
+ * 判断取值是否为可直接渲染的图片地址（http/data/blob/以 / 开头的本地路径）。
+ * 后端 avatar/icon 字段可能存 emoji key（如 shield）或原始 SVG 文本，不属于图片地址。
+ */
+export const isImageUrl = (value) => {
+  if (!value) return false
+  return /^(https?:|data:image\/|blob:|\/)/i.test(String(value).trim())
+}
+
+/**
+ * 解析智能体/数字警员头像：已配置图片地址（avatar 或 icon）优先展示，
+ * emoji key / 原始 SVG 等坏数据或未配置时，统一回退到默认占位图。
+ */
+export const resolveAgentAvatar = (agent) => {
+  if (!agent) return OFFICER_DEFAULT_AVATAR_URL
+  const configured = isImageUrl(agent.avatar) ? agent.avatar : isImageUrl(agent.icon) ? agent.icon : ''
+  if (configured) return configured
+  return OFFICER_DEFAULT_AVATAR_URL
+}
 
 export default {
   POLICE_AVATAR_IDS,

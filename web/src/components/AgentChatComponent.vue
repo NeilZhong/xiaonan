@@ -676,7 +676,7 @@ import {
 } from 'lucide-vue-next'
 import { formatFileSize } from '@/utils/file_utils'
 import FileTypeIcon from '@/components/common/FileTypeIcon.vue'
-import { generatePixelAvatar } from '@/utils/pixelAvatar'
+import { getOfficerAvatar } from '@/utils/policeAvatar'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -957,7 +957,7 @@ const getSubagentIconSrc = (run) => {
 }
 
 const getSubagentDefaultIconSrc = (run) =>
-  run?.subagent_slug ? generatePixelAvatar(run.subagent_slug) : ''
+  run?.subagent_slug ? getOfficerAvatar(run.subagent_slug) : ''
 
 const getSubagentRunMeta = (run) => {
   const artifacts = Array.isArray(run?.artifacts) ? run.artifacts.length : 0

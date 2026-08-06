@@ -30,6 +30,12 @@ from server.routers.police_import_router import import_router as police_import_r
 from server.routers.police_advancement_router import advancement_router as police_advancement_router
 from server.routers.police_task_template_router import task_template_router as police_task_template_router
 from server.routers.police_audit_router import audit_router as police_audit_router
+from server.routers.police_partner_router import (
+    partner_router as police_partner_router,
+    equip_router as police_equip_router,
+    connection_router as police_connection_router,
+)
+from server.routers.police_agent_version_router import version_router as police_version_router
 
 _LITE_MODE = os.environ.get("LITE_MODE", "").lower() in ("true", "1")
 
@@ -67,6 +73,10 @@ router.include_router(police_import_router)       # /api/police/import/* 笔录�
 router.include_router(police_advancement_router)   # /api/police/advancement/* 案件推进智能体
 router.include_router(police_task_template_router)  # /api/police/task-templates/* 侦查任务模板配置
 router.include_router(police_audit_router)           # /api/police/audit/* 审计统计/查询/校验 (§10.7)
+router.include_router(police_partner_router)         # /api/police/partners/* 协助伙伴（子智能体）CRUD
+router.include_router(police_equip_router)           # /api/police/agents/:id/partners/* 数字警员装备区
+router.include_router(police_connection_router)      # /api/police/agent-connections/* 用户↔数字警员连接
+router.include_router(police_version_router)         # /api/police/agents/:id/(versions|switch-mode|health) 版本与发布控制
 
 if not _LITE_MODE:
     from server.routers.external_kb_router import external_kb

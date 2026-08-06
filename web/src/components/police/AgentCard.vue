@@ -10,7 +10,7 @@
 import { computed } from 'vue'
 import { MessageCircle, MoreHorizontal, Trash2, SquarePen } from 'lucide-vue-next'
 
-import { generateRandomPoliceAvatar } from '@/utils/policeAvatar'
+import { resolveAgentAvatar } from '@/utils/policeAvatar'
 
 const props = defineProps({
   agent: { type: Object, required: true },
@@ -23,11 +23,7 @@ const emit = defineEmits(['click', 'chat', 'profile', 'edit', 'delete'])
 
 const officer = computed(() => (props.isOfficer ? props.agent._officer : null))
 
-const avatarUrl = computed(() => {
-  const icon = String(props.agent?.icon || '').trim()
-  if (icon) return icon
-  return generateRandomPoliceAvatar(props.agent?.id || props.agent?.slug || props.agent?.name).url
-})
+const avatarUrl = computed(() => resolveAgentAvatar(props.agent))
 
 const agentName = computed(() => props.agent?.name || '未命名智能体')
 

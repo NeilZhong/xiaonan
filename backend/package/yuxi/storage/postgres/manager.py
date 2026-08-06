@@ -1102,6 +1102,52 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_agent ON police_agent_comments(agent_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_user ON police_agent_comments(user_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_comments_created ON police_agent_comments(created_at DESC)",
+            # 用户 ↔ 数字警员连接表（市场「申请使用」/「我的数字警员」目录；唯一身份模型核心，不复制警员）
+            """
+            CREATE TABLE IF NOT EXISTS police_agent_connections (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                applied_at TIMESTAMPTZ DEFAULT NOW(),
+                approved_at TIMESTAMPTZ,
+                approved_by INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_police_agent_connections_user_agent UNIQUE (user_id, agent_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_user ON police_agent_connections(user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_agent ON police_agent_connections(agent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_status ON police_agent_connections(status)",
+            # 数字警员版本快照（运行中心：流动版本/受控发布/回滚）
+            """
+            CREATE TABLE IF NOT EXISTS police_agent_versions (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                version_label VARCHAR(20) NOT NULL,
+                change_summary VARCHAR(500),
+                config_snapshot JSON,
+                release_mode VARCHAR(20) NOT NULL DEFAULT 'rolling',
+                status VARCHAR(20) NOT NULL DEFAULT 'active',
+                created_by INTEGER,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                published_at TIMESTAMPTZ
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_versions_agent ON police_agent_versions(agent_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_versions_agent_created ON police_agent_versions(agent_id, created_at DESC)",
+            # 数字警员发布状态（受控发布模式下 current/draft 版本指向）
+            """
+            CREATE TABLE IF NOT EXISTS police_agent_release_state (
+                id SERIAL PRIMARY KEY,
+                agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                release_mode VARCHAR(20) NOT NULL DEFAULT 'rolling',
+                current_version_id INTEGER,
+                draft_version_id INTEGER,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_police_agent_release_state_agent ON police_agent_release_state(agent_id)",
             # 审计日志
             """
             CREATE TABLE IF NOT EXISTS police_audit_logs (

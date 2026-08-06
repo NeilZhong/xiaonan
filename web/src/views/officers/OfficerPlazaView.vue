@@ -54,7 +54,7 @@
         <div class="card-topbar" />
         <div class="card-head">
           <div class="avatar" :class="`bg-${agent.color_theme || 'blue'}`">
-            {{ avatarEmoji(agent.avatar) }}
+            <img class="avatar-img" :src="resolveAgentAvatar(agent)" :alt="agent.name" loading="lazy" />
           </div>
           <div class="head-info">
             <div class="name-row">
@@ -105,12 +105,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { policeAgentApi } from '@/apis/police_api'
 import { message } from 'ant-design-vue'
 import { useUserStore } from '@/stores/user'
 import { storeToRefs } from 'pinia'
+import { resolveAgentAvatar } from '@/utils/policeAvatar'
 import OfficerFormDrawer from './OfficerFormDrawer.vue'
 
 const router = useRouter()
@@ -137,18 +138,6 @@ const statusOptions = [
   { label: '训练中', value: 'training' },
   { label: '离线', value: 'offline' },
 ]
-
-const AVATAR_EMOJI = {
-  pencil: '✏️',
-  chart: '📊',
-  file: '📄',
-  shield: '🛡️',
-  network: '🕸️',
-}
-
-function avatarEmoji(name) {
-  return AVATAR_EMOJI[name] || '🤖'
-}
 
 function statusBadge(status) {
   return { active: 'success', training: 'processing', offline: 'default' }[status] || 'default'
@@ -317,6 +306,13 @@ onMounted(loadAgents)
   font-size: 26px;
   color: #fff;
   flex-shrink: 0;
+  overflow: hidden;
+}
+.avatar-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .bg-blue { background: #2B6CB0; }
 .bg-green { background: #2F855A; }

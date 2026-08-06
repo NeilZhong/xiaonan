@@ -191,6 +191,12 @@ const router = createRouter({
           redirect: '/agent-manage'
         },
         {
+          path: 'partners',
+          name: 'PolicePartners',
+          component: () => import('../views/police/PartnerManageView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
           path: 'task-templates',
           name: 'PoliceTaskTemplates',
           component: () => import('../views/police/TaskTemplateView.vue'),

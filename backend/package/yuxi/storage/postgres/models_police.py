@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     inspect,
 )
 from sqlalchemy.orm import relationship
@@ -536,6 +537,102 @@ class PoliceAgentComment(Base):
             "content": self.content,
             "created_at": format_utc_datetime(self.created_at),
         }
+
+
+class PoliceAgentConnection(Base):
+    """★ 用户 ↔ 数字警员连接表（市场「申请使用」/「我的数字警员」目录）
+
+    唯一数字警员模型核心：用户「雇佣」数字警员 = 建立连接（不复制警员身份）。
+    UNIQUE(user_id, agent_id) 保证同一用户同一警员只保留一条连接记录。
+    """
+
+    __tablename__ = "police_agent_connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "agent_id", name="uq_police_agent_connections_user_agent"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), default="pending", index=True)  # pending / active / rejected
+    applied_at = Column(DateTime, default=utc_now_naive)
+    approved_at = Column(DateTime, nullable=True)
+    approved_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "status": self.status,
+            "applied_at": format_utc_datetime(self.applied_at),
+            "approved_at": format_utc_datetime(self.approved_at),
+            "approved_by": self.approved_by,
+            "created_at": format_utc_datetime(self.created_at),
+        }
+
+
+class PoliceAgentVersion(Base):
+    """★ 数字警员版本快照（运行中心：流动版本 / 受控发布 / 回滚）
+
+    每次灵魂/技能/连接器/卡片改动自动生成一条版本记录（config_snapshot 全量快照）。
+    release_mode: rolling=改动即生效（current_version_id 立即指向新版本）；
+                  controlled=改动进草稿（draft_version_id），手动 publish 后生效。
+    """
+
+    __tablename__ = "police_agent_versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    version_label = Column(String(20), nullable=False)  # v0.1 / v0.2 ...
+    change_summary = Column(String(500), nullable=True)
+    config_snapshot = Column(JSON, nullable=True)  # 全量 config_json 快照
+    release_mode = Column(String(20), default="rolling")  # rolling / controlled
+    status = Column(String(20), default="active", index=True)  # active / superseded / rolled_back / draft
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=utc_now_naive)
+    published_at = Column(DateTime, nullable=True)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "agent_id": self.agent_id,
+            "version_label": self.version_label,
+            "change_summary": self.change_summary,
+            "release_mode": self.release_mode,
+            "status": self.status,
+            "created_by": self.created_by,
+            "created_at": format_utc_datetime(self.created_at),
+            "published_at": format_utc_datetime(self.published_at),
+        }
+
+
+class PoliceAgentReleaseState(Base):
+    """★ 数字警员发布状态（受控发布模式下：当前版本 / 草稿版本）
+
+    与 agents 表 1:1；避免直接改 yuxi Agent 模型列。
+    """
+
+    __tablename__ = "police_agent_release_state"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    release_mode = Column(String(20), default="rolling")  # rolling / controlled
+    current_version_id = Column(Integer, nullable=True)
+    draft_version_id = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "agent_id": self.agent_id,
+            "release_mode": self.release_mode,
+            "current_version_id": self.current_version_id,
+            "draft_version_id": self.draft_version_id,
+            "updated_at": format_utc_datetime(self.updated_at),
+        }
+
 
 
 class PoliceSOP(Base):

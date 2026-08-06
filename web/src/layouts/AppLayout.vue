@@ -14,7 +14,8 @@ import {
   Search,
   Shield,
   Briefcase,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Handshake
 } from 'lucide-vue-next'
 import { CheckSquareOutlined } from '@ant-design/icons-vue'
 
@@ -151,6 +152,14 @@ const mainList = computed(() => {
     icon: Box,
     activeIcon: Box,
     activePaths: ['/agent-manage']
+  })
+
+  items.push({
+    name: '协助伙伴',
+    path: '/police/partners',
+    icon: Handshake,
+    activeIcon: Handshake,
+    activePaths: ['/police/partners']
   })
 
   items.push({

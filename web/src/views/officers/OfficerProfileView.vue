@@ -25,7 +25,7 @@
     <!-- 头部档案卡 -->
     <div class="profile-head" :class="`theme-${agent.color_theme || 'blue'}`">
       <div class="head-avatar" :class="`bg-${agent.color_theme || 'blue'}`">
-        {{ avatarEmoji(agent.avatar) }}
+        <img class="head-avatar-img" :src="resolveAgentAvatar(agent)" :alt="agent.name" />
       </div>
       <div class="head-main">
         <div class="head-line1">
@@ -139,6 +139,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { policeAgentApi } from '@/apis/police_api'
 import { message } from 'ant-design-vue'
+import { resolveAgentAvatar } from '@/utils/policeAvatar'
 import OfficerFormDrawer from './OfficerFormDrawer.vue'
 
 const route = useRoute()
@@ -163,8 +164,6 @@ async function handleDelete() {
   }
 }
 
-const AVATAR_EMOJI = { pencil: '✏️', chart: '📊', file: '📄', shield: '🛡️', network: '🕸️' }
-function avatarEmoji(name) { return AVATAR_EMOJI[name] || '🤖' }
 function statusBadge(s) { return { active: 'success', training: 'processing', offline: 'default' }[s] || 'default' }
 function statusText(s) { return { active: '在线', training: '训练中', offline: '离线' }[s] || '离线' }
 function runColor(s) {
@@ -257,6 +256,13 @@ onMounted(load)
   border-radius: 18px;
   display: flex; align-items: center; justify-content: center;
   font-size: 38px; color: #fff; flex-shrink: 0;
+  overflow: hidden;
+}
+.head-avatar-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .bg-blue { background: #2B6CB0; }
 .bg-green { background: #2F855A; }

@@ -125,6 +125,56 @@ export const policeAgentApi = {
     apiPost(`/api/police/agents/${agentId}/comments`, { content }),
   deleteComment: (agentId, commentId) =>
     apiDelete(`/api/police/agents/${agentId}/comments/${commentId}`),
+  // ── 版本与发布控制（运行中心）─────────────────
+  listVersions: (agentId, { include_snapshot = false } = {}) =>
+    apiGet(`/api/police/agents/${agentId}/versions?include_snapshot=${include_snapshot}`),
+  switchReleaseMode: (agentId, mode) =>
+    apiPost(`/api/police/agents/${agentId}/switch-mode`, { mode }),
+  publishVersion: (agentId, versionId) =>
+    apiPost(`/api/police/agents/${agentId}/versions/${versionId}/publish`),
+  rollbackVersion: (agentId, versionId) =>
+    apiPost(`/api/police/agents/${agentId}/versions/${versionId}/rollback`),
+  health: (agentId) => apiGet(`/api/police/agents/${agentId}/health`),
+}
+
+// ── 协助伙伴（子智能体）管理 ───────────────────────────
+export const policePartnerApi = {
+  // 列表（keyword / category / status=mine）
+  list: ({ keyword, category, status, page = 1, page_size = 50 } = {}) => {
+    const params = new URLSearchParams({ page, page_size })
+    if (keyword) params.set('keyword', keyword)
+    if (category) params.set('category', category)
+    if (status) params.set('status', status)
+    return apiGet(`/api/police/partners?${params}`)
+  },
+  get: (partnerId) => apiGet(`/api/police/partners/${partnerId}`),
+  create: (data) => apiPost('/api/police/partners', data),
+  update: (partnerId, data) => apiPut(`/api/police/partners/${partnerId}`, data),
+  remove: (partnerId) => apiDelete(`/api/police/partners/${partnerId}`),
+  share: (partnerId, { scope, department_ids, user_uids }) =>
+    apiPost(`/api/police/partners/${partnerId}/share`, { scope, department_ids, user_uids }),
+  approve: (partnerId, { approved }) =>
+    apiPost(`/api/police/partners/${partnerId}/approve`, { approved }),
+}
+
+// ── 数字警员装备区（协助伙伴挂载）────────────────────
+export const policeEquipApi = {
+  listEquipped: (agentId) => apiGet(`/api/police/agents/${agentId}/partners`),
+  listAvailable: (agentId) => apiGet(`/api/police/agents/${agentId}/partners/available`),
+  equip: (agentId, partnerId) =>
+    apiPost(`/api/police/agents/${agentId}/partners/${partnerId}/equip`),
+  unequip: (agentId, partnerId) =>
+    apiPost(`/api/police/agents/${agentId}/partners/${partnerId}/unequip`),
+}
+
+// ── 用户 ↔ 数字警员连接（市场申请使用 / 我的数字警员）──
+export const policeConnectionApi = {
+  list: ({ status } = {}) => {
+    const qs = status ? `?status=${status}` : ''
+    return apiGet(`/api/police/agent-connections${qs}`)
+  },
+  apply: (agentId) => apiPost('/api/police/agent-connections', { agent_id: agentId }),
+  remove: (connectionId) => apiDelete(`/api/police/agent-connections/${connectionId}`),
 }
 
 // ── 案件独立工作区（树状节点）────────────────────────────────

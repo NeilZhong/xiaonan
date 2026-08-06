@@ -10,6 +10,7 @@ from typing import Optional
 
 from yuxi.services.police_service import police_agent_service
 from yuxi.repositories.police_agent_repository import police_agent_repository
+from yuxi.repositories.agent_repository import user_can_manage_agent
 from server.utils.auth_middleware import get_required_user, get_superadmin_user
 from yuxi.storage.postgres.models_business import User
 
@@ -212,11 +213,20 @@ async def create_agent(
 
 
 @agent_router.put("/{agent_id}")
-async def update_agent(agent_id: str, data: AgentUpdate):
-    """更新数字警员。agent_id 支持数字主键或 slug。"""
+async def update_agent(
+    agent_id: str,
+    data: AgentUpdate,
+    current_user: User = Depends(get_required_user),
+):
+    """更新数字警员。agent_id 支持数字主键或 slug。
+
+    权限（2026-08-06 收口）：仅创建者或超管可编辑，复用 yuxi user_can_manage_agent。
+    """
     agent = await police_agent_repository.resolve_by_identifier(agent_id)
     if not agent:
         return {"error": "Agent not found"}, 404
+    if not user_can_manage_agent(current_user, agent):
+        return {"error": "无权编辑他人创建的数字警员"}, 403
     result = await police_agent_service.update_agent(agent.id, data.model_dump(exclude_none=True, by_alias=True))
     if not result:
         return {"error": "Agent not found"}, 404
@@ -224,11 +234,31 @@ async def update_agent(agent_id: str, data: AgentUpdate):
 
 
 @agent_router.delete("/{agent_id}")
-async def delete_agent(agent_id: str):
-    """删除数字警员。agent_id 支持数字主键或 slug。"""
+async def delete_agent(
+    agent_id: str,
+    current_user: User = Depends(get_required_user),
+):
+    """删除数字警员。agent_id 支持数字主键或 slug。
+
+    权限（2026-08-06 收口）：仅创建者或超管可删除；若该警员已参与案件运行则拒绝。
+    """
     agent = await police_agent_repository.resolve_by_identifier(agent_id)
     if not agent:
         return {"error": "Agent not found"}, 404
+    if not user_can_manage_agent(current_user, agent):
+        return {"error": "无权删除他人创建的数字警员"}, 403
+    # 检查是否已入案（存在绑定案件的运行记录则禁止删除，保护案件追溯）
+    from sqlalchemy import select
+    from yuxi.storage.postgres.manager import pg_manager
+    from yuxi.storage.postgres.models_police import PoliceAgentRun
+    async with pg_manager.get_async_session_context() as session:
+        stmt = select(PoliceAgentRun.id).where(
+            PoliceAgentRun.agent_id == agent.id,
+            PoliceAgentRun.case_id.isnot(None),
+        ).limit(1)
+        bound = (await session.execute(stmt)).scalar_one_or_none()
+    if bound:
+        return {"error": "该数字警员已参与案件运行，禁止删除"}, 409
     ok = await police_agent_service.delete_agent(agent.id)
     if not ok:
         return {"error": "Agent not found"}, 404

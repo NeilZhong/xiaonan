@@ -660,6 +660,22 @@ class PoliceAgentService:
             d["daily_trend"] = []
         return d
 
+    async def _with_equipped_partners(self, agent, d: dict[str, Any]) -> dict[str, Any]:
+        """附加数字警员已装备的协助伙伴（subagents slug → 详情），供档案页装备区。"""
+        try:
+            config = agent.config_json or {}
+            subagents = list(((config.get("context") or {}).get("subagents") or []))
+            items = []
+            for slug in subagents:
+                partner = await police_agent_repository.get_by_slug(slug)
+                if partner and partner.is_subagent:
+                    items.append(partner.to_dict())
+            d["partners"] = {"items": items, "total": len(items)}
+        except Exception as e:
+            logger.warning(f"Load equipped partners failed (agent={agent.slug}): {e}")
+            d["partners"] = {"items": [], "total": 0}
+        return d
+
     async def list_agents(
         self, *, type: str | None = None, status: str | None = None,
         keyword: str | None = None, category: str | None = None,
@@ -697,6 +713,7 @@ class PoliceAgentService:
         if not agent:
             return None
         d = await self._with_realtime_stats(agent, agent.to_dict())
+        d = await self._with_equipped_partners(agent, d)
         # 聚合运行记录
         runs, run_total = await police_agent_repository.list_runs(agent_id=agent_id, page=1, page_size=5)
         d["recent_runs"] = [r.to_dict() for r in runs]
@@ -716,6 +733,7 @@ class PoliceAgentService:
         if not agent:
             return None
         d = await self._with_realtime_stats(agent, agent.to_dict())
+        d = await self._with_equipped_partners(agent, d)
         runs, run_total = await police_agent_repository.list_runs(agent_id=agent.id, page=1, page_size=5)
         d["recent_runs"] = [r.to_dict() for r in runs]
         d["run_total"] = run_total
@@ -732,6 +750,7 @@ class PoliceAgentService:
         if not agent:
             return None
         d = await self._with_realtime_stats(agent, agent.to_dict())
+        d = await self._with_equipped_partners(agent, d)
         runs, run_total = await police_agent_repository.list_runs(agent_id=agent.id, page=1, page_size=5)
         d["recent_runs"] = [r.to_dict() for r in runs]
         d["run_total"] = run_total
@@ -805,6 +824,17 @@ class PoliceAgentService:
         await police_agent_repository.update(agent.id, {"config_json": {"context": cfg_ctx}})
         await self._audit_agent(agent_id, "update", data)
         agent = await police_agent_repository.get_by_id(agent_id)
+        # 版本自动快照（运行中心：灵魂/资产改动 → 新版本；rolling 立即生效 / controlled 进草稿）
+        try:
+            from yuxi.services.police_agent_version_service import police_agent_version_service
+            changed_keys = [k for k in ("system_prompt", "model_config", "tools", "skills", "sop_ids") if k in fields]
+            if changed_keys:
+                await police_agent_version_service.create_snapshot(
+                    agent_id=agent_id,
+                    change_summary=f"更新：{', '.join(changed_keys)}",
+                )
+        except Exception as e:
+            logger.warning(f"Create agent version snapshot failed (agent={agent_id}): {e}")
         return agent.to_dict() if agent else None
 
     async def delete_agent(self, agent_id: int) -> bool:

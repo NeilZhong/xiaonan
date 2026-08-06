@@ -14,8 +14,10 @@ import * as echarts from 'echarts'
 import { agentApi } from '@/apis/agent_api'
 import { policeAgentApi } from '@/apis/police_api'
 import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
+import EquipPartnersPanel from '@/components/police/EquipPartnersPanel.vue'
+import AgentRuntimeCenter from '@/components/police/AgentRuntimeCenter.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
-import { generateRandomPoliceAvatar } from '@/utils/policeAvatar'
+import { resolveAgentAvatar } from '@/utils/policeAvatar'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,6 +28,7 @@ const officer = ref(null)
 const loading = ref(false)
 const agentEditModalRef = ref(null)
 const backendOptions = ref([])
+const runtimeCenterOpen = ref(false)
 
 const isOfficer = computed(() => !!officer.value)
 
@@ -44,11 +47,7 @@ const statusColor = computed(() => {
   }
   return 'green'
 })
-const avatarUrl = computed(() => {
-  const icon = String(agent.value?.icon || '').trim()
-  if (icon) return icon
-  return generateRandomPoliceAvatar(agent.value?.id || agent.value?.slug || agent.value?.name).url
-})
+const avatarUrl = computed(() => resolveAgentAvatar(agent.value))
 const jobTitle = computed(() => officer.value?.rank || officer.value?.department || '通用智能体')
 
 // ============ 身份统计：资料/技能/工具 ============
@@ -353,6 +352,7 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
         返回列表
       </a-button>
       <div class="ap-bar-actions">
+        <a-button v-if="isOfficer" @click="runtimeCenterOpen = true">运行中心</a-button>
         <a-button v-if="agent.can_manage || isBuiltinAgent(agent) || isOfficer" @click="openEdit">编辑</a-button>
         <a-popconfirm v-if="!isBuiltinAgent(agent)" title="确认删除？"
           :description="isOfficer ? '关联的对话智能体也将一并移除' : '删除后不可恢复'"
@@ -517,12 +517,21 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
               </div>
             </div>
           </div>
+
+          <!-- 装备伙伴（协助伙伴挂载区） -->
+          <div v-if="isOfficer" class="ap-partner-section">
+            <div class="ap-stats-section-title">装备伙伴</div>
+            <EquipPartnersPanel v-if="officer" :agent="officer" />
+          </div>
         </div>
       </div>
     </div>
 
     <!-- 编辑弹窗 -->
     <AgentEditModal ref="agentEditModalRef" :backend-options="backendOptions" @saved="onEdited" />
+
+    <!-- 运行中心抽屉 -->
+    <AgentRuntimeCenter v-model:open="runtimeCenterOpen" :agent="officer || agent" />
   </div>
 
   <div v-else class="ap-loading"><a-spin tip="加载智能体档案中…" /></div>
@@ -1015,6 +1024,16 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
 
 // ============ 今日记录 ============
 .ap-today-section { padding-top: 4px; }
+
+// ============ 装备伙伴 ============
+.ap-partner-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--gray-150);
+  .ap-stats-section-title {
+    margin-bottom: 12px;
+  }
+}
 .ap-today-list {
   display: flex;
   flex-direction: column;

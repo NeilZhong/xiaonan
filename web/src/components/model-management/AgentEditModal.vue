@@ -20,11 +20,11 @@ import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
 import ShareConfigForm from '@/components/ShareConfigForm.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import { useUserStore } from '@/stores/user'
-import { generatePixelAvatar } from '@/utils/pixelAvatar'
 import {
   generateRandomPoliceAvatar,
   POLICE_AVATAR_IDS,
-  getPoliceAvatarById
+  getPoliceAvatarById,
+  getOfficerAvatar
 } from '@/utils/policeAvatar'
 import { MAX_IMAGE_UPLOAD_SIZE_BYTES, MAX_IMAGE_UPLOAD_SIZE_MB } from '@/utils/upload_limits'
 
@@ -100,7 +100,7 @@ const isEditingBuiltinAgent = computed(() => isBuiltinAgent({ id: editingAgentId
 
 const agentModalTitle = computed(() => (editingAgentId.value ? '编辑智能体' : '新增智能体'))
 const agentPreviewDefaultIcon = computed(() =>
-  editingAgentId.value ? generatePixelAvatar(editingAgentId.value) : ''
+  editingAgentId.value ? getOfficerAvatar(editingAgentId.value) : ''
 )
 const agentPreviewName = computed(() => agentForm.name || editingAgentId.value || '智能体')
 const selectedBackendOption = computed(() =>

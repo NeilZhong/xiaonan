@@ -6,6 +6,8 @@
 
 ## v0.7.2 (current)
 
+- 智能体头像统一本地化（公安内网零外网依赖）：新增 `web/public/avatars/officer-default.png` 统一占位图（用户提供素材），`policeAvatar.js` `getOfficerAvatar`/`resolveAgentAvatar` 统一回退到该图（已配置 avatar/icon 仍优先展示，兼容 emoji key 与原始 SVG 坏数据）；数字警员广场/档案页、协助伙伴管理/装备面板、智能体切换下拉、聊天子智能体头像、编辑弹窗预览、智能体档案/卡片头像均统一显示该占位；修复 `generateRandomPoliceAvatar` 返回原始 SVG 文本而非 data URI 导致头像无法渲染的 bug（`getPoliceAvatarById` 同步修复）。补充 `policeAvatar.test.js` 7 项单测。
+
 - 新增 AI 回答知识库片段角标引用：模型以 `[ref:CHUNK_ID]` 标记来源，前端渲染期确定性转为深蓝 `[]` 上标（点击弹片段详情），来源面板稳定展示；ARQ worker 启动初始化知识库 retriever，`query_kb` 结果加入中间件卸载豁免集，智能体 SKILL.md 同步引用规则。全局配色统一为警察蓝（品牌色阶与强调色），并修复侧边栏父子路由 `active-class` 包含式匹配导致的高亮冲突。
 - 新增 PDF 解析前置页树校验：PDF 进入 PyPDFLoader、MinerU 或 OCR 引擎前会用 PyMuPDF 逐页加载页槽，提前识别加密、空文档、null 页槽和非 Page 对象等结构异常，并返回可操作的中文错误，避免解析服务内层延迟失败。
 - 修复真实 API 测试资源清理：integration 与 E2E 会在测试会话前后通过公开接口删除名称以 `pytest`（兼容旧 `py_test`）开头的评估基准、评估运行和知识库；知识库删除改用列表真实返回的 `kb_id`，清理失败会明确中止测试，避免测试数据长期残留。
