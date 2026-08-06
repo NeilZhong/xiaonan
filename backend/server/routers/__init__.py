@@ -38,6 +38,7 @@ from server.routers.police_partner_router import (
 from server.routers.police_agent_version_router import version_router as police_version_router
 from server.routers.police_market_router import market_router as police_market_router
 from server.routers.police_reflection_router import reflection_router as police_reflection_router
+from server.routers.police_incubation_router import incubation_router as police_incubation_router
 
 _LITE_MODE = os.environ.get("LITE_MODE", "").lower() in ("true", "1")
 
@@ -76,6 +77,7 @@ router.include_router(police_advancement_router)   # /api/police/advancement/* �
 router.include_router(police_task_template_router)  # /api/police/task-templates/* 侦查任务模板配置
 router.include_router(police_market_router)          # /api/police/market/* 市场探索/发布/审核
 router.include_router(police_reflection_router)      # /api/police/reflections/* 办案复盘（任务后反思+技能自修复）
+router.include_router(police_incubation_router)      # /api/police/incubation/* 智能孵化（从零孵化/继续打磨）
 router.include_router(police_audit_router)           # /api/police/audit/* 审计统计/查询/校验 (§10.7)
 router.include_router(police_partner_router)         # /api/police/partners/* 协助伙伴（子智能体）CRUD
 router.include_router(police_equip_router)           # /api/police/agents/:id/partners/* 数字警员装备区

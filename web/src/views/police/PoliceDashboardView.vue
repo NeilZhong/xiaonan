@@ -16,7 +16,7 @@ import { message } from 'ant-design-vue'
 import { usePoliceStore } from '@/stores/police'
 import { useUserStore } from '@/stores/user'
 import { useRealtime } from '@/composables/useRealtime'
-import { policeAgentApi, policeCaseApi } from '@/apis/police_api'
+import { policeAgentApi, policeCaseApi, policeDashboardApi } from '@/apis/police_api'
 import TaskCard from '@/components/police/TaskCard.vue'
 import {
   InboxOutlined, ClockCircleOutlined, FileSearchOutlined,
@@ -30,6 +30,97 @@ const policeStore = usePoliceStore()
 const userStore = useUserStore()
 
 const isSuperAdmin = computed(() => userStore.isSuperAdmin)
+
+// ── 工作台三 Tab（模块 G+F）────────────────────────
+const activeTab = ref('office')
+const tabOptions = [
+  { label: '日常办公', value: 'office' },
+  { label: '能力演进', value: 'evolution' },
+  { label: '智能孵化', value: 'incubation' },
+]
+const evolutionInput = ref('')
+const evolutionData = ref({ skill_diagnostics: {}, connectors: {}, partners: [] })
+const incubateInput = ref('')
+const incubateMode = ref('create')
+const incubateExamples = [
+  '帮我孵化一个笔录分析数字民警',
+  '帮我孵化一个资金追踪助手',
+  '帮我孵化一个法制审核专家',
+]
+const draftResult = ref(null)
+const incubationItems = ref([])
+
+async function onTabChange() {
+  if (activeTab.value === 'evolution' && !evolutionData.value.skill_diagnostics?.template_count) {
+    loadEvolution()
+  }
+  if (activeTab.value === 'incubation') {
+    loadIncubation()
+  }
+}
+
+async function loadEvolution() {
+  try {
+    const res = await policeDashboardApi.evolution()
+    evolutionData.value = res.data || {}
+  } catch (e) {
+    message.error('加载能力演进失败: ' + (e.message || e))
+  }
+}
+
+async function loadIncubation() {
+  try {
+    const res = await policeDashboardApi.incubation()
+    incubationItems.value = res.data?.items || []
+  } catch (e) {
+    message.error('加载智能孵化失败: ' + (e.message || e))
+  }
+}
+
+function onEvolutionSearch() {
+  if (!evolutionInput.value.trim()) return
+  message.info('能力沉淀建议生成依赖 LLM，当前为规则化 MVP——请前往「办案复盘」手动触发沉淀')
+}
+
+async function incubateCreate() {
+  if (!incubateInput.value.trim()) {
+    message.warning('请先描述想孵化的数字民警')
+    return
+  }
+  try {
+    const res = await policeDashboardApi.incubateCreate(incubateInput.value.trim())
+    draftResult.value = res.draft || null
+    if (!draftResult.value) message.warning('未生成草案，请调整描述')
+  } catch (e) {
+    message.error('孵化失败: ' + (e.message || e))
+  }
+}
+
+async function confirmDraft() {
+  // 保存为草稿：调现有数字民警创建接口（status=draft）
+  try {
+    await policeAgentApi.create({
+      name: draftResult.value.name,
+      description: draftResult.value.description,
+      type: 'incubation',
+      category: draftResult.value.department_tag || '综合',
+      system_prompt: draftResult.value.system_prompt,
+      status: 'draft',
+    })
+    message.success('草稿已保存，可在「智能体」中继续完善')
+    draftResult.value = null
+    loadIncubation()
+  } catch (e) {
+    message.error('保存失败: ' + (e.message || e))
+  }
+}
+
+function goTemplates() { router.push('/police/task-templates') }
+function goRuntimeConsole() { router.push('/police/runtime-console') }
+function goPartners() { router.push('/police/partners') }
+function goProfile(item) { router.push(`/agent-manage/${item.id}`) }
+function goChat(item) { router.push({ path: '/agent', query: { agent_id: item.badge_number || item.id } }) }
+function goPublish(item) { router.push(`/agent-manage/${item.id}?publish=1`) }
 
 // ── 智能体全局共享审批（仅超级管理员可见）────────────
 const pendingAgents = ref([])
@@ -239,6 +330,18 @@ onMounted(() => {
 
 <template>
   <div class="police-dashboard">
+    <!-- 顶部三 Tab：日常办公 / 能力演进 / 智能孵化（模块 G+F） -->
+    <div class="dashboard-tabs">
+      <a-segmented
+        v-model:value="activeTab"
+        :options="tabOptions"
+        block
+        @change="onTabChange"
+      />
+    </div>
+
+    <!-- ===== Tab1 日常办公（原 v2 数据驾驶舱） ===== -->
+    <div v-if="activeTab === 'office'">
     <!-- 顶部欢迎横幅 -->
     <div class="welcome-banner">
       <div class="banner-glow banner-glow-1"></div>
@@ -538,6 +641,145 @@ onMounted(() => {
       </div>
       <div v-else style="padding: 24px; text-align: center; color: #999;">加载中...</div>
     </a-modal>
+    </div>
+    <!-- ===== Tab1 结束 ===== -->
+
+    <!-- ===== Tab2 能力演进 ===== -->
+    <div v-else-if="activeTab === 'evolution'" class="evolution-tab">
+      <div class="tab-hero">
+        <h2 class="tab-title">🧬 能力演进</h2>
+        <p class="tab-sub">打造或诊断优化技能、连接器、协助伙伴</p>
+        <a-input-search
+          v-model:value="evolutionInput"
+          placeholder="描述要沉淀的方法论，或说「把刚才的做法沉淀成技能」"
+          size="large"
+          enter-button="生成建议"
+          class="evolution-input"
+          @search="onEvolutionSearch"
+        />
+      </div>
+
+      <div class="evo-grid">
+        <!-- 技能诊断 -->
+        <div class="evo-card evo-skill" @click="goTemplates">
+          <div class="evo-icon">📦</div>
+          <div class="evo-name">技能诊断</div>
+          <div class="evo-stats">
+            <span class="evo-stat"><b>{{ evolutionData.skill_diagnostics?.template_count ?? 0 }}</b> 模板</span>
+            <span class="evo-stat"><b>{{ evolutionData.skill_diagnostics?.success_rate ?? 0 }}%</b> 成功率</span>
+            <span class="evo-stat"><b>{{ (evolutionData.skill_diagnostics?.low_hit_templates || []).length }}</b> 待优化</span>
+          </div>
+          <div class="evo-action">点击「诊断」→ 任务模板 →</div>
+        </div>
+
+        <!-- 连接器 -->
+        <div class="evo-card evo-conn" @click="goRuntimeConsole">
+          <div class="evo-icon">🔌</div>
+          <div class="evo-name">连接器</div>
+          <div class="evo-stats">
+            <span class="evo-stat"><b>{{ evolutionData.connectors?.enabled_count ?? 0 }}</b> 已启用</span>
+            <span class="evo-stat"><b>{{ evolutionData.connectors?.success_rate ?? 0 }}%</b> 成功率</span>
+            <span class="evo-stat"><b>{{ (evolutionData.connectors?.offline || []).length }}</b> 异常</span>
+          </div>
+          <div class="evo-action">点击「管理」→ 运行时控制台 →</div>
+        </div>
+
+        <!-- 协助伙伴 -->
+        <div class="evo-card evo-partner" @click="goPartners">
+          <div class="evo-icon">🤝</div>
+          <div class="evo-name">协助伙伴 · 高频协作</div>
+          <div class="evo-list">
+            <div v-for="p in (evolutionData.partners || []).slice(0, 3)" :key="p.agent_id" class="evo-partner-item">
+              <span class="evo-dot" />{{ p.name }} · {{ p.run_count }} 次
+            </div>
+            <div v-if="!(evolutionData.partners || []).length" class="evo-empty">暂无协作数据</div>
+          </div>
+          <div class="evo-action">点击「查看」→ 档案 →</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== Tab3 智能孵化 ===== -->
+    <div v-else-if="activeTab === 'incubation'" class="incubation-tab">
+      <div class="tab-hero">
+        <h2 class="tab-title">🛠️ 智能孵化</h2>
+        <p class="tab-sub">从零孵化或继续打磨数字民警</p>
+        <a-input-search
+          v-model:value="incubateInput"
+          placeholder="描述想孵化的数字民警：服务谁、负责什么、在哪里用"
+          size="large"
+          enter-button="生成草案"
+          class="evolution-input"
+          @search="incubateCreate"
+        />
+        <div class="incubate-chips">
+          <a-tag v-for="chip in incubateExamples" :key="chip" class="incubate-chip" @click="incubateInput = chip">
+            {{ chip }}
+          </a-tag>
+        </div>
+      </div>
+
+      <!-- 两种模式 -->
+      <div class="incubate-modes">
+        <div class="incubate-mode" :class="{ active: incubateMode === 'create' }" @click="incubateMode = 'create'">
+          <div class="mode-icon">✨</div>
+          <div class="mode-name">从零孵化</div>
+          <div class="mode-desc">创建一个新的数字民警</div>
+        </div>
+        <div class="incubate-mode" :class="{ active: incubateMode === 'refine' }" @click="incubateMode = 'refine'">
+          <div class="mode-icon">🔨</div>
+          <div class="mode-name">继续打磨</div>
+          <div class="mode-desc">优化已有的数字民警草稿</div>
+        </div>
+      </div>
+
+      <!-- 从零孵化草案结果 -->
+      <div v-if="draftResult" class="draft-result">
+        <h3 class="draft-title">孵化草案</h3>
+        <div class="draft-name">{{ draftResult.name }}</div>
+        <div class="draft-desc">{{ draftResult.description }}</div>
+        <div class="draft-block">
+          <div class="draft-label">灵魂（system_prompt）</div>
+          <pre class="draft-prompt">{{ draftResult.system_prompt }}</pre>
+        </div>
+        <div v-if="draftResult.recommended_skills?.length" class="draft-block">
+          <div class="draft-label">推荐技能</div>
+          <div class="draft-skills">
+            <a-tag v-for="s in draftResult.recommended_skills" :key="s.template_id" class="draft-skill">{{ s.name }}</a-tag>
+          </div>
+        </div>
+        <div class="draft-ops">
+          <a-button type="primary" @click="confirmDraft">保存为草稿</a-button>
+          <a-button @click="draftResult = null">重新生成</a-button>
+        </div>
+      </div>
+
+      <!-- 我的数字民警（完成度） -->
+      <div class="incubate-list">
+        <h3 class="draft-title">我的数字民警</h3>
+        <div v-for="item in incubationItems" :key="item.id" class="incubate-item">
+          <div class="ii-head">
+            <span class="ii-name">{{ item.name }}</span>
+            <a-tag v-if="item.approval_status === 'approved'" color="success">已发布</a-tag>
+            <a-tag v-else color="processing">草稿</a-tag>
+            <span class="ii-badge">{{ item.badge_number }}</span>
+          </div>
+          <div class="ii-progress">
+            <a-progress :percent="item.completeness?.percent || 0" :show-info="false" size="small" />
+            <span class="ii-percent">{{ item.completeness?.percent || 0 }}%</span>
+          </div>
+          <div v-if="item.completeness?.next_steps?.length" class="ii-next">
+            建议：{{ item.completeness.next_steps.join('；') }}
+          </div>
+          <div class="ii-ops">
+            <a-button size="small" @click="goProfile(item)">编辑</a-button>
+            <a-button size="small" @click="goChat(item)">去对话</a-button>
+            <a-button size="small" type="primary" ghost @click="goPublish(item)">发布</a-button>
+          </div>
+        </div>
+        <a-empty v-if="!incubationItems.length" description="还没有数字民警，去上面孵化一个吧" />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -883,5 +1125,271 @@ onMounted(() => {
   .banner-stats { grid-template-columns: repeat(3, 1fr); }
   .agent-strip { grid-template-columns: repeat(2, 1fr); }
   .quick-action-grid { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* ===== 三 Tab 切换 ===== */
+.dashboard-tabs {
+  margin-bottom: 20px;
+}
+.dashboard-tabs :deep(.ant-segmented) {
+  background: var(--gray-100);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+/* ===== 能力演进 / 智能孵化 公共 ===== */
+.tab-hero {
+  background: linear-gradient(160deg, #eef4fd 0%, #f7f8fa 50%, #eef0f4 100%);
+  border-radius: 18px;
+  padding: 22px 24px;
+  margin-bottom: 18px;
+  box-shadow: 0 4px 16px rgba(16, 30, 54, 0.06);
+}
+.tab-title {
+  margin: 0;
+  font-size: 20px;
+  color: #1a365d;
+  font-weight: 700;
+}
+.tab-sub {
+  margin: 6px 0 14px;
+  font-size: 13px;
+  color: var(--gray-600);
+}
+.evolution-input {
+  max-width: 640px;
+}
+
+/* ===== 能力演进三卡 ===== */
+.evo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.evo-card {
+  border-radius: 16px;
+  padding: 18px;
+  cursor: pointer;
+  color: #fff;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 150px;
+}
+.evo-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(16, 30, 54, 0.15);
+}
+.evo-skill { background: linear-gradient(135deg, #2b6cb0, #3182ce); }
+.evo-conn { background: linear-gradient(135deg, #6b46c1, #805ad5); }
+.evo-partner { background: linear-gradient(135deg, #2f855a, #38a169); }
+.evo-icon {
+  font-size: 26px;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
+.evo-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+.evo-stats {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.evo-stat {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+.evo-stat b {
+  font-size: 16px;
+  color: #fff;
+}
+.evo-action {
+  margin-top: auto;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+.evo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+}
+.evo-partner-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.evo-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+}
+.evo-empty {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ===== 智能孵化 ===== */
+.incubate-chips {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.incubate-chip {
+  cursor: pointer;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  color: var(--gray-700);
+  padding: 3px 12px;
+  font-size: 12px;
+}
+.incubate-chip:hover {
+  border-color: var(--main-400);
+  color: var(--main-600);
+}
+.incubate-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.incubate-mode {
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: 14px;
+  padding: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.incubate-mode:hover {
+  border-color: var(--main-300);
+}
+.incubate-mode.active {
+  border-color: #1a365d;
+  background: #ebf2fa;
+}
+.mode-icon {
+  font-size: 26px;
+}
+.mode-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a202c;
+}
+.mode-desc {
+  font-size: 11px;
+  color: var(--gray-500);
+}
+.draft-result {
+  background: #fff;
+  border: 1px solid var(--gray-150);
+  border-radius: 14px;
+  padding: 18px;
+  margin-bottom: 18px;
+  box-shadow: 0 4px 16px rgba(16, 30, 54, 0.06);
+}
+.draft-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: #1a365d;
+}
+.draft-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a202c;
+}
+.draft-desc {
+  font-size: 13px;
+  color: var(--gray-700);
+  margin: 6px 0 12px;
+  line-height: 1.6;
+}
+.draft-block {
+  margin-bottom: 12px;
+}
+.draft-label {
+  font-size: 12px;
+  color: var(--gray-500);
+  margin-bottom: 6px;
+}
+.draft-prompt {
+  background: var(--gray-100);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 12px;
+  color: var(--gray-800);
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.draft-skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.draft-skill {
+  border-radius: 8px;
+}
+.draft-ops {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.incubate-list {
+  background: #fff;
+  border: 1px solid var(--gray-150);
+  border-radius: 14px;
+  padding: 18px;
+}
+.incubate-item {
+  border-top: 1px dashed var(--gray-200);
+  padding: 14px 0;
+}
+.incubate-item:first-of-type {
+  border-top: none;
+}
+.ii-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ii-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a202c;
+}
+.ii-badge {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--gray-500);
+}
+.ii-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 6px;
+}
+.ii-progress :deep(.ant-progress) {
+  flex: 1;
+}
+.ii-percent {
+  font-size: 12px;
+  color: var(--gray-600);
+}
+.ii-next {
+  font-size: 12px;
+  color: #b7791f;
+  margin-bottom: 10px;
+}
+.ii-ops {
+  display: flex;
+  gap: 8px;
 }
 </style>

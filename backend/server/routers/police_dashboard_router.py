@@ -46,3 +46,25 @@ async def get_review_tasks(
         current_user.id, skip=(page - 1) * page_size, limit=page_size
     )
     return {"code": 0, "message": "success", "data": result}
+
+
+@dashboard_router.get("/evolution")
+async def get_evolution(
+    current_user: User = Depends(get_required_user),
+):
+    """能力演进 Tab：技能诊断 / 连接器 / 协助伙伴高频协作。"""
+    from yuxi.services.police_evolution_service import police_evolution_service
+
+    result = await police_evolution_service.get_evolution(current_user)
+    return {"code": 0, "message": "success", "data": result}
+
+
+@dashboard_router.get("/incubation")
+async def get_incubation(
+    current_user: User = Depends(get_required_user),
+):
+    """智能孵化 Tab：我创建的数字民警 + 完成度。"""
+    from yuxi.services.police_evolution_service import police_evolution_service
+
+    result = await police_evolution_service.get_incubation(current_user)
+    return {"code": 0, "message": "success", "data": result}

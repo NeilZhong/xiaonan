@@ -12,6 +12,13 @@ export const policeDashboardApi = {
     apiGet(`/api/police/dashboard/my-tasks?page=${page}&page_size=${page_size}`, silent ? { silent: true } : {}),
   getReviewTasks: ({ page = 1, page_size = 20 } = {}, silent = false) =>
     apiGet(`/api/police/dashboard/review-tasks?page=${page}&page_size=${page_size}`, silent ? { silent: true } : {}),
+  // 能力演进 Tab：技能诊断 / 连接器 / 协助伙伴（模块 G）
+  evolution: () => apiGet('/api/police/dashboard/evolution'),
+  // 智能孵化 Tab：我创建的数字民警 + 完成度（模块 G+F）
+  incubation: () => apiGet('/api/police/dashboard/incubation'),
+  // 从零孵化生成草案（规则化 MVP，不落库）
+  incubateCreate: (description) =>
+    apiPost('/api/police/incubation/create', { description }),
 }
 
 // ── 案件管理 ────────────────────────────────────────────────
