@@ -12,7 +12,6 @@ import {
   PanelLeftOpen,
   MessageCirclePlus,
   MessageSquare,
-  Bell,
   Search,
   Shield,
   Briefcase,
@@ -28,6 +27,7 @@ import { useChatThreadsStore } from '@/stores/chatThreads'
 import { useDatabaseStore } from '@/stores/database'
 import { useInfoStore } from '@/stores/info'
 import { useTaskerStore } from '@/stores/tasker'
+import { usePoliceStore } from '@/stores/police'
 import { useUserStore } from '@/stores/user'
 import { storeToRefs } from 'pinia'
 import UserInfoComponent from '@/components/UserInfoComponent.vue'
@@ -43,6 +43,7 @@ const chatThreadsStore = useChatThreadsStore()
 const databaseStore = useDatabaseStore()
 const infoStore = useInfoStore()
 const taskerStore = useTaskerStore()
+const policeStore = usePoliceStore()
 const userStore = useUserStore()
 const { activeCount: activeCountRef, isDrawerOpen } = storeToRefs(taskerStore)
 const { threads, currentThreadId, hasMoreThreads, isLoadingMoreThreads } =
@@ -153,12 +154,19 @@ onMounted(async () => {
   if (userStore.isAdmin) {
     taskerStore.loadTasks()
   }
+  // 加载工作台统计（我的待办 / 待审核），用于侧边栏红色数字指示器
+  policeStore.loadStats()
 })
 
 const route = useRoute()
 const router = useRouter()
 
 const activeTaskCount = computed(() => activeCountRef.value || 0)
+
+// 工作台红点指示器：我的待办任务(my_pending_count) + 待审核事项(review_count)
+const workbenchBadge = computed(
+  () => (policeStore.stats?.my_pending_count || 0) + (policeStore.stats?.review_count || 0)
+)
 const activeConversationThreadId = computed(() => {
   return route.path.startsWith('/agent') ? currentThreadId.value : null
 })
@@ -443,6 +451,10 @@ provide('settingsModal', {
               />
             </span>
             <span class="xn-nav-text">{{ item.name }}</span>
+            <span
+              v-if="item.path === '/police' && workbenchBadge > 0"
+              class="xn-nav-badge"
+            >{{ workbenchBadge > 99 ? '99+' : workbenchBadge }}</span>
           </RouterLink>
         </nav>
 
@@ -550,6 +562,10 @@ provide('settingsModal', {
             :is="isNavItemActive(item) ? item.activeIcon : item.icon"
             :size="18"
           />
+          <span
+            v-if="item.path === '/police' && workbenchBadge > 0"
+            class="xn-narrow-nav-dot"
+          ></span>
         </RouterLink>
 
         <div class="xn-narrow-divider"></div>
@@ -566,27 +582,6 @@ provide('settingsModal', {
 
         <div class="xn-narrow-flex"></div>
 
-        <RouterLink
-          to="/police/explore"
-          class="xn-narrow-btn"
-          :active-class="''"
-          title="探索市场"
-          @click="onNavClick"
-        >
-          <Store :size="18" />
-        </RouterLink>
-        <button
-          type="button"
-          class="xn-narrow-btn"
-          title="通知"
-          aria-label="通知"
-          @click="openWideFromNarrow"
-        >
-          <span class="xn-narrow-bell">
-            <Bell :size="16" />
-            <span class="xn-narrow-badge">99+</span>
-          </span>
-        </button>
         <div class="xn-narrow-spacer"></div>
         <button
           type="button"
@@ -910,6 +905,37 @@ provide('settingsModal', {
   }
 }
 
+// 工作台红色数字指示器（我的待办 + 待审核）
+.xn-nav-badge {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #ff6b6b, #e54848);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+  letter-spacing: 0.01em;
+  box-shadow: 0 1px 3px rgba(229, 72, 77, 0.45);
+  animation: xn-badge-pop 0.3s ease;
+}
+
+@keyframes xn-badge-pop {
+  from {
+    transform: scale(0.5);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 .xn-divider {
   margin: 0 12px;
   height: 1px;
@@ -971,6 +997,7 @@ provide('settingsModal', {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-top: 2px;
   scrollbar-gutter: stable;
 }
@@ -1030,12 +1057,26 @@ provide('settingsModal', {
   background: transparent;
   color: var(--xn-text-secondary);
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.1s ease,
+    box-shadow 0.2s ease;
 
   &:hover,
   &.active {
     background: var(--xn-nav-hover-bg);
     color: var(--xn-text-primary);
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+  }
+
+  &:active {
+    transform: scale(0.9);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--xn-text-muted);
+    outline-offset: 1px;
   }
 
   :deep(.ant-badge) {
@@ -1048,6 +1089,41 @@ provide('settingsModal', {
     width: 16px;
     height: 16px;
   }
+}
+
+// 底部用户区整体交互（用户名片 / 头像）
+.xn-footer :deep(.user-info-dropdown) {
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    transform 0.12s ease,
+    box-shadow 0.18s ease;
+
+  &:hover {
+    background: var(--xn-nav-hover-bg);
+  }
+
+  &:active {
+    transform: scale(0.975);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--xn-text-muted);
+    outline-offset: 1px;
+  }
+}
+
+.xn-footer :deep(.user-avatar) {
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.xn-footer :deep(.user-info-dropdown):hover .user-avatar {
+  transform: scale(1.06);
+  box-shadow: 0 4px 12px var(--shadow-1);
 }
 
 // ===== 汉堡按钮 =====
@@ -1138,6 +1214,7 @@ provide('settingsModal', {
 }
 
 .xn-narrow-btn {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1188,29 +1265,18 @@ provide('settingsModal', {
   min-height: 8px;
 }
 
-.xn-narrow-bell {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.xn-narrow-badge {
+// 窄栏工作台红点（收起态下无文字，仅以红点提示）
+.xn-narrow-nav-dot {
   position: absolute;
-  top: -5px;
-  right: -7px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: linear-gradient(rgb(251, 110, 110), rgb(229, 72, 77));
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 16px;
-  text-align: center;
-  box-shadow: 0 0 0 1.5px var(--xn-sidebar-bg), 0 1px 3px rgba(229, 72, 77, 0.45);
+  top: 5px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ff6b6b, #e54848);
+  box-shadow: 0 0 0 1.5px var(--xn-sidebar-bg);
   pointer-events: none;
+  animation: xn-badge-pop 0.3s ease;
 }
 
 .xn-narrow-avatar {

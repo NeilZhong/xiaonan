@@ -277,8 +277,10 @@ const renameChat = async (chatId) => {
 
 .conversation-list {
   min-height: 0;
+  min-width: 0;
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 2px;
   scrollbar-width: thin;
 }
