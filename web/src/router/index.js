@@ -100,6 +100,12 @@ const router = createRouter({
           name: 'AgentProfileComp',
           component: () => import('../views/AgentProfileView.vue'),
           meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          path: ':id/section/:section',
+          name: 'AgentSectionComp',
+          component: () => import('../views/AgentSectionView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
         }
       ]
     },

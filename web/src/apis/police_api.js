@@ -128,8 +128,8 @@ export const policeAgentApi = {
   // ── 留言板 ─────────────────────────────────────
   listComments: (agentId, { page = 1, page_size = 50 } = {}) =>
     apiGet(`/api/police/agents/${agentId}/comments?page=${page}&page_size=${page_size}`),
-  createComment: (agentId, content) =>
-    apiPost(`/api/police/agents/${agentId}/comments`, { content }),
+  createComment: (agentId, content, rating = null) =>
+    apiPost(`/api/police/agents/${agentId}/comments`, { content, rating }),
   deleteComment: (agentId, commentId) =>
     apiDelete(`/api/police/agents/${agentId}/comments/${commentId}`),
   // ── 版本与发布控制（运行中心）─────────────────

@@ -1,20 +1,20 @@
 <script setup>
 /**
- * 数字警员 / 智能体档案页 StaffDeck 风格
+ * 数字警员 / 智能体档案页（悟帆 AI 员工页风格）
  *
- * 左侧：大头像 hero（头像高出背景色块） + 基本信息/身份统计合并栏 + 留言板块
- * 右侧：大卡片整合历史数据（淡蓝）+ 今日数据（深蓝）+ 融合图表（绿底）+ 今日记录
+ * 左侧：头像 + 名称/介绍/状态 + 对话按钮 的头部卡，下方为 5 个可点击区块
+ *      （灵魂 / 技能 / 连接器 / 协助伙伴 / 记忆），点击跳转到对应子页。
+ * 右侧：工作概览（历史数据 / 今日数据 / 趋势图 / 今日记录）。
  */
-import { ref, reactive, onMounted, onUnmounted, computed, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
-import { Send, MessageSquare } from 'lucide-vue-next'
+import { Sparkles, Wrench, Cable, Users, Brain, ChevronRight } from 'lucide-vue-next'
 import * as echarts from 'echarts'
 
 import { agentApi } from '@/apis/agent_api'
-import { policeAgentApi } from '@/apis/police_api'
+import { policeAgentApi, policeEquipApi } from '@/apis/police_api'
 import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
-import EquipPartnersPanel from '@/components/police/EquipPartnersPanel.vue'
 import AgentRuntimeCenter from '@/components/police/AgentRuntimeCenter.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import { resolveAgentAvatar } from '@/utils/policeAvatar'
@@ -50,16 +50,53 @@ const statusColor = computed(() => {
 const avatarUrl = computed(() => resolveAgentAvatar(agent.value))
 const jobTitle = computed(() => officer.value?.rank || officer.value?.department || '通用智能体')
 
-// ============ 身份统计：资料/技能/工具 ============
-const identityStats = computed(() => {
-  const skills = (officer.value?.skills || []).length
-  const tools = (agent.value?.tools || agent.value?.tool_ids || []).length
-  return [
-    { label: '资料', value: officer.value?.doc_count ?? 0 },
-    { label: '技能', value: skills },
-    { label: '工具', value: tools }
-  ]
+// ============ 左侧 5 个区块（跳转子页） ============
+const sections = [
+  { key: 'soul', title: '灵魂', subtitle: '系统提示词 · 智能体人格', icon: Sparkles },
+  { key: 'skills', title: '技能', subtitle: '能力标签与工具', icon: Wrench },
+  { key: 'connectors', title: '连接器与工具', subtitle: 'MCP 服务与平台内置工具', icon: Cable },
+  { key: 'partners', title: '协助伙伴', subtitle: '协作的数字警员', icon: Users },
+  { key: 'memory', title: '记忆', subtitle: '对当前用户的记忆', icon: Brain },
+]
+
+// 协助伙伴徽标数（来自数字警员装备区，已装备的协助伙伴数量）
+const partnerCount = ref(0)
+async function loadPartnerCount() {
+  const id = agent.value?.id
+  if (!id) return
+  try {
+    const res = await policeEquipApi.listEquipped(id)
+    partnerCount.value = res?.total ?? res?.items?.length ?? 0
+  } catch (_) {
+    partnerCount.value = 0
+  }
+}
+
+// 各区块的徽标数据（来自已加载的 agent / officer）
+const sectionMeta = computed(() => {
+  const caps = agent.value?.capabilities || agent.value?.skills || []
+  const tools = agent.value?.tools || []
+  // Agent 上无 mcp_dependencies 字段，真实连接器/工具配置在 config_json.context.mcps / .tools
+  // 语意：数组为显式白名单；null 表示「默认全部启用」（此处无法获知平台总数，以「全部」标识）
+  const ctx = agent.value?.config_json?.context || {}
+  const mcpArr = Array.isArray(ctx.mcps) ? ctx.mcps : null
+  const toolArr = Array.isArray(ctx.tools) ? ctx.tools : null
+  // 协助伙伴徽标：真实已装备数来自数字警员装备区（officer.partners 字段不存在）
+  return {
+    soul: agent.value?.system_prompt ? '已配置' : '未配置',
+    skills: caps.length + tools.length,
+    connectors:
+      mcpArr === null && toolArr === null ? '全部' : (mcpArr?.length || 0) + (toolArr?.length || 0),
+    partners: partnerCount.value,
+    memory: null,
+  }
 })
+
+function goSection(key) {
+  const id = agent.value?.slug || agent.value?.id
+  if (!id) return
+  router.push({ path: `/agent-manage/${encodeURIComponent(id)}/section/${key}` })
+}
 
 // ============ 右侧统计卡（历史+今日） ============
 const statCards = computed(() => {
@@ -184,98 +221,6 @@ function runStatusBadge(r) {
   return { text: '进行中', cls: '' }
 }
 
-// ============ 留言板 ============
-const commentText = ref('')
-const comments = reactive([])
-const loadingComments = ref(false)
-const showEmojiPicker = ref(false)
-const emojiPickerRef = ref(null)
-
-// 常用表情列表
-const EMOJIS = ['😀', '😃', '😊', '😍', '🤔', '👍', '👎', '🎉', '🔥', '❤️', '🙏', '😂', '🤝', '💪', '✨', '✅', '❌', '⚠️', '💡', '📌']
-
-function toggleEmojiPicker(e) {
-  e.stopPropagation()
-  showEmojiPicker.value = !showEmojiPicker.value
-}
-
-function insertEmoji(emoji) {
-  commentText.value += emoji
-  showEmojiPicker.value = false
-}
-
-async function loadComments() {
-  const agentId = isOfficer.value ? officer.value.id : agent.value?.id
-  if (!agentId) return
-  loadingComments.value = true
-  try {
-    const res = await policeAgentApi.listComments(agentId)
-    comments.length = 0
-    comments.push(...(res.items || []))
-  } catch (e) {
-    console.warn('加载留言失败', e)
-  } finally {
-    loadingComments.value = false
-  }
-}
-
-async function addComment() {
-  const text = commentText.value.trim()
-  if (!text) return
-  const agentId = isOfficer.value ? officer.value.id : agent.value?.id
-  if (!agentId) return
-  try {
-    await policeAgentApi.createComment(agentId, text)
-    commentText.value = ''
-    await loadComments()
-    message.success('留言已发送')
-  } catch (e) {
-    message.error('发送失败: ' + (e.message || e))
-  }
-}
-
-function deleteComment(commentId, e) {
-  e.stopPropagation()
-  Modal.confirm({
-    title: '删除留言',
-    content: '确认删除这条留言？',
-    okText: '删除', okType: 'danger', cancelText: '取消',
-    async onOk() {
-      const agentId = isOfficer.value ? officer.value.id : agent.value?.id
-      if (!agentId) return
-      try {
-        await policeAgentApi.deleteComment(agentId, commentId)
-        const idx = comments.findIndex(c => c.id === commentId)
-        if (idx !== -1) comments.splice(idx, 1)
-        message.success('已删除')
-      } catch (e) {
-        message.error('删除失败: ' + (e.message || e))
-      }
-    }
-  })
-}
-
-// 点击外部关闭表情选择器
-function handleClickOutside(e) {
-  if (showEmojiPicker.value && emojiPickerRef.value && !emojiPickerRef.value.contains(e.target)) {
-    showEmojiPicker.value = false
-  }
-}
-
-// 辅助函数：格式化评论文本
-function formatCommentText(text) {
-  if (!text) return ''
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-}
-
-// 判断是否可以删除评论
-function canDeleteComment(_comment) {
-  return true
-}
-
 // ============ 导航 & 操作 ============
 function goBack() { router.push({ path: '/agent-manage' }) }
 function goChat() {
@@ -315,8 +260,6 @@ async function load() {
     const isBadge = /^DA-[\w-]+$/.test(id || '')
     const policeData = isBadge ? await policeAgentApi.getByBadgeNumber(id).catch(() => null) : null
     if (policeData?.id) {
-      // 单表化：police 记录即 agents 行，officer 与 agent 同源。
-      // 直接以 policeData 作为 agent，避免再用 slug 调 yuxi 详情导致 404。
       officer.value = policeData
       agent.value = policeData
     } else {
@@ -329,8 +272,8 @@ async function load() {
         if (pd && (pd.id || pd.agent_id)) officer.value = pd
       }
     }
+    await loadPartnerCount()
     nextTick(() => { renderChart() })
-    await loadComments()
   } catch (e) { message.error('加载档案失败: ' + (e.message || e)) }
   finally { loading.value = false }
 }
@@ -338,9 +281,8 @@ async function load() {
 onMounted(() => {
   load()
   loadBackends()
-  document.addEventListener('click', handleClickOutside)
 })
-onUnmounted(() => { destroyChart(); document.removeEventListener('click', handleClickOutside) })
+onUnmounted(() => { destroyChart() })
 </script>
 
 <template>
@@ -366,111 +308,56 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
     <div class="ap-main">
       <!-- ========== 左侧 ========== -->
       <div class="ap-left">
-        <!-- Hero：头像 + 名称/职位/状态 + 对话按钮 -->
-        <div class="ap-hero">
-          <!-- 背景色块：圆角带阴影，内含名称/职务/状态与对话按钮 -->
-          <div class="ap-hero-bg">
-            <div class="ap-hero-text">
-              <h1 class="ap-hero-name">{{ agent.name }}</h1>
-              <p class="ap-hero-job">{{ jobTitle }}</p>
+        <!-- 头部卡：头像 + 名称/介绍/状态 + 对话 -->
+        <div class="ap-profile">
+          <div class="ap-profile-top">
+            <div class="ap-profile-avatar">
+              <img :src="avatarUrl" :alt="`${agent.name}头像`" />
+            </div>
+            <div class="ap-profile-head">
+              <h1 class="ap-profile-name">{{ agent.name }}</h1>
               <span class="ap-hero-status" :class="`s-${statusColor}`">
                 <span class="s-dot" /><span>{{ statusText }}</span>
               </span>
             </div>
-            <!-- 对话按钮：背景色块内，上下居中 -->
-            <button type="button" class="ap-chat-btn" @click="goChat" :title="`与 ${agent.name} 对话`">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            </button>
           </div>
-          <!-- 头像：浮在背景色块上方，与 ap-hero 上/左/下保留间距 -->
-          <div class="ap-hero-avatar">
-            <img :src="avatarUrl" :alt="`${agent.name}头像`" />
+          <p class="ap-profile-desc">{{ agent.description || officer?.description || '暂无介绍' }}</p>
+          <div class="ap-profile-meta">
+            <div class="ap-meta-row"><span class="ap-meta-k">入职部门</span><span class="ap-meta-v">{{ officer?.department || '—' }}</span></div>
+            <div class="ap-meta-row"><span class="ap-meta-k">入职时间</span><span class="ap-meta-v">{{ officer?.created_at?.substring(0, 10) || agent.created_at?.substring(0, 10) || '—' }}</span></div>
+            <div class="ap-meta-row"><span class="ap-meta-k">共享范围</span><span class="ap-meta-v">{{ officer?.share_config?.access_level === 'global' ? '全局可见' : officer?.share_config?.access_level === 'department' ? '部门内可见' : officer?.share_config?.access_level === 'user' ? '仅自己' : '—' }}</span></div>
           </div>
+          <button type="button" class="ap-profile-chat" @click="goChat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            与 TA 对话
+          </button>
         </div>
 
-        <!-- 身份统计 + 基本信息合并栏 -->
-        <div class="ap-card ap-info-card">
-          <div class="ap-identity-row">
-            <div v-for="s in identityStats" :key="s.label" class="ap-identity-item">
-              <span class="ap-identity-val">{{ s.value }}</span>
-              <span class="ap-identity-lbl">{{ s.label }}</span>
-            </div>
-          </div>
-          <div class="ap-info-divider"></div>
-          <div class="ap-info-rows">
-            <div class="ap-info-row"><span class="ap-info-k">基本介绍</span><span class="ap-info-v">{{ officer?.description || agent.description || '暂无介绍' }}</span></div>
-            <div class="ap-info-row"><span class="ap-info-k">警号</span><span class="ap-info-v">{{ officer?.is_global_approved ? (officer?.badge_number || '—') : '—' }}</span></div>
-            <div class="ap-info-row"><span class="ap-info-k">入职部门</span><span class="ap-info-v">{{ officer?.department || '—' }}</span></div>
-            <div class="ap-info-row"><span class="ap-info-k">入职时间</span><span class="ap-info-v">{{ officer?.created_at?.substring(0, 10) || agent.created_at?.substring(0, 10) || '—' }}</span></div>
-            <div class="ap-info-row"><span class="ap-info-k">共享范围</span><span class="ap-info-v">{{ officer?.share_config?.access_level === 'global' ? '全局可见' : officer?.share_config?.access_level === 'department' ? '部门内可见' : officer?.share_config?.access_level === 'user' ? '仅自己' : '—' }}</span></div>
-          </div>
-        </div>
-
-        <!-- 留言板 -->
-        <div class="ap-card ap-comment-card">
-          <div class="ap-card-title-row">
-            <h3 class="ap-card-title"><MessageSquare :size="14"/> 留言板</h3>
-            <span class="ap-comment-count">{{ comments.length }} 条留言</span>
-          </div>
-          <div class="ap-comment-input-area" ref="emojiPickerRef">
-            <div class="ap-comment-input">
-              <input
-                v-model="commentText"
-                type="text"
-                :max-length="200"
-                placeholder="添加评论…"
-                class="ap-comment-textarea"
-                @keydown.enter.prevent="addComment"
-              />
-              <div class="ap-comment-actions">
-                <button type="button" class="ap-emoji-btn" @click="toggleEmojiPicker" title="表情">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
-                </button>
-                <button
-                  type="button"
-                  class="ap-comment-send-btn"
-                  :disabled="!commentText.trim()"
-                  @click="addComment"
-                  title="发送"
-                >
-                  <Send :size="16" />
-                </button>
-              </div>
-            </div>
-            <!-- 表情选择器 -->
-            <div v-if="showEmojiPicker" class="ap-emoji-picker">
-              <button v-for="e in EMOJIS" :key="e" type="button" class="ap-emoji-item" @click="insertEmoji(e)">{{ e }}</button>
-            </div>
-          </div>
-          <div class="ap-comment-list">
-            <div v-if="loadingComments" class="ap-comment-loading">
-              <a-spin size="small" />
-            </div>
-            <div v-else v-for="c in comments" :key="c.id" class="ap-comment-item">
-              <div class="ap-comment-avatar">
-                <img v-if="c.user_avatar" :src="c.user_avatar" class="ap-comment-user-img" />
-                <span v-else>U</span>
-              </div>
-              <div class="ap-comment-body">
-                <div class="ap-comment-text" v-html="formatCommentText(c.content)"></div>
-                <div class="ap-comment-meta">
-                  <span>{{ c.created_at?.substring(0, 16).replace('T', ' ') }}</span>
-                  <button v-if="canDeleteComment(c)" type="button" class="ap-comment-del" @click="deleteComment(c.id, $event)">删除</button>
-                </div>
-              </div>
-            </div>
-            <div v-if="!loadingComments && !comments.length" class="ap-comment-empty">
-              <MessageSquare :size="24" />
-              <span>还没有留言，来做第一个留言的人吧</span>
-            </div>
-          </div>
-        </div>
+        <!-- 5 个区块卡（点击跳转子页） -->
+        <button
+          v-for="s in sections"
+          :key="s.key"
+          type="button"
+          class="ap-section-card"
+          @click="goSection(s.key)"
+        >
+          <span class="ap-section-icon"><component :is="s.icon" :size="18" /></span>
+          <span class="ap-section-body">
+            <span class="ap-section-title">{{ s.title }}</span>
+            <span class="ap-section-sub">{{ s.subtitle }}</span>
+          </span>
+          <span class="ap-section-extra">
+            <span v-if="s.key === 'soul'" class="ap-section-tag" :class="sectionMeta.soul === '已配置' ? 'on' : 'off'">{{ sectionMeta.soul }}</span>
+            <span v-else-if="sectionMeta[s.key] != null" class="ap-section-count">{{ sectionMeta[s.key] }}</span>
+          </span>
+          <ChevronRight :size="16" class="ap-section-chevron" />
+        </button>
       </div>
 
-      <!-- ========== 右侧：大卡片整合 ============ -->
+      <!-- ========== 右侧：工作概览 ============ -->
       <div class="ap-right">
         <div class="ap-stats-card">
-          <!-- 历史数据（淡蓝色） -->
+          <!-- 历史数据 -->
           <div class="ap-stats-section ap-stats-history">
             <div class="ap-stats-section-title">历史数据</div>
             <div class="ap-stats-grid">
@@ -481,7 +368,7 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
             </div>
           </div>
 
-          <!-- 今日数据（深蓝色） -->
+          <!-- 今日数据 -->
           <div class="ap-stats-section ap-stats-today">
             <div class="ap-stats-section-title">今日数据</div>
             <div class="ap-stats-grid">
@@ -492,11 +379,11 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
             </div>
           </div>
 
-          <!-- 图表区域（绿色底） -->
+          <!-- 图表区域 -->
           <div class="ap-chart-section">
             <div class="ap-stats-section-title">对话与任务趋势</div>
             <div v-if="dailyRuns.length" ref="chartRef" class="ap-chart" />
-            <div v-else class="ap-chart-empty"><MessageSquare :size="24" /><span>暂无数据</span></div>
+            <div v-else class="ap-chart-empty"><span>暂无数据</span></div>
           </div>
 
           <!-- 今日记录 -->
@@ -513,15 +400,9 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
                 <span class="ap-today-time">{{ r.started_at || '—' }}</span>
               </div>
               <div v-if="!todayRuns.length" class="ap-today-empty">
-                <MessageSquare :size="24" /><span>今日暂无记录</span>
+                <span>今日暂无记录</span>
               </div>
             </div>
-          </div>
-
-          <!-- 装备伙伴（协助伙伴挂载区） -->
-          <div v-if="isOfficer" class="ap-partner-section">
-            <div class="ap-stats-section-title">装备伙伴</div>
-            <EquipPartnersPanel v-if="officer" :agent="officer" />
           </div>
         </div>
       </div>
@@ -564,18 +445,18 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
 
 .ap-main {
   display: grid;
-  grid-template-columns: minmax(0, 520px) 1fr;
+  grid-template-columns: minmax(0, 380px) 1fr;
   gap: 24px;
   align-items: start;
 }
 .ap-left {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 14px;
 }
 
-// ============ 卡片通用 ============
-.ap-card {
+// ============ 头部卡 ============
+.ap-profile {
   background: #ffffff;
   border-radius: 16px;
   border: 1px solid var(--gray-150);
@@ -583,80 +464,80 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
   padding: 20px;
   display: flex;
   flex-direction: column;
+  gap: 14px;
+}
+.ap-profile-top {
+  display: flex;
+  align-items: center;
   gap: 16px;
 }
-.ap-card-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.ap-card-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: #1a365d;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-// ============ Hero 区域 ============
-.ap-hero {
-  position: relative;
+.ap-profile-avatar {
+  width: 96px;
+  height: 96px;
   border-radius: 20px;
-  overflow: visible;
-  min-height: 220px;
-  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  flex-shrink: 0;
+  img { display: block; width: 100%; height: 100%; object-fit: cover; }
 }
-.ap-hero-bg {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 80%;
-  margin: 0;
-  padding: 18px 24px 18px 224px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: linear-gradient(160deg, #eef4fd 0%, #f7f8fa 50%, #eef0f4 100%);
-  border-radius: 20px;
-  box-shadow: 0 4px 16px rgba(16,30,54,.08);
-}
-.ap-hero-text {
-  flex: 1;
-  min-width: 0;
+.ap-profile-head {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
 }
-.ap-hero-avatar {
-  position: absolute;
-  top: 18px;
-  left: 18px;
-  z-index: 2;
-  width: 184px;
-  height: 184px;
-  border-radius: 24px;
-  overflow: hidden;
-  background: transparent; // 透明底色，与档案背景块自然衔接
-  border: 1px solid var(--gray-150);
-  box-shadow: none;
-  img { display: block; width: 100%; height: 100%; object-fit: cover; }
-}
-.ap-hero-name {
+.ap-profile-name {
   margin: 0;
   font-size: 22px;
   font-weight: 700;
   color: #1a365d;
   line-height: 1.2;
 }
-.ap-hero-job {
+.ap-profile-desc {
   margin: 0;
   font-size: 13px;
   color: #475569;
+  line-height: 1.6;
 }
+.ap-profile-meta {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--gray-100);
+  padding-top: 12px;
+}
+.ap-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--gray-100);
+  &:last-child { border-bottom: none; }
+}
+.ap-meta-k { color: var(--gray-500); flex-shrink: 0; }
+.ap-meta-v { color: var(--gray-800); text-align: right; word-break: break-all; }
+.ap-profile-chat {
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 9px 0;
+  border: none;
+  border-radius: 12px;
+  background: var(--main-700);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  &:hover { background: var(--main-800); }
+}
+
+// ============ 状态胶囊 ============
 .ap-hero-status {
   display: inline-flex;
   align-items: center;
@@ -678,259 +559,78 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
   width: 7px; height: 7px; border-radius: 50%;
   background: currentColor;
 }
-.ap-chat-btn {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  border: 1px solid var(--gray-200);
-  background: #ffffff;
-  color: var(--gray-600);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  z-index: 3;
-  &:hover {
-    background: var(--main-700);
-    color: #ffffff;
-    border-color: var(--main-700);
-    transform: scale(1.05);
-  }
-}
 
-// ============ 身份统计 + 基本信息合并栏 ============
-.ap-info-card {
-  gap: 14px;
-}
-.ap-identity-row {
+// ============ 区块卡（跳转子页） ============
+.ap-section-card {
   display: flex;
-  gap: 1px;
-  background: var(--gray-150);
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--gray-150);
-}
-.ap-identity-item {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 12px 8px;
-  background: #ffffff;
-  & + & { border-left: 1px solid var(--gray-150); }
-}
-.ap-identity-val {
-  font-size: 22px;
-  font-weight: 700;
-  color: #1a365d;
-  line-height: 1;
-}
-.ap-identity-lbl {
-  font-size: 12px;
-  color: var(--gray-500);
-  margin-top: 4px;
-}
-.ap-info-divider {
-  height: 1px;
-  background: var(--gray-150);
-  margin: 2px 0;
-}
-.ap-info-rows { display: flex; flex-direction: column; gap: 0; }
-.ap-info-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--gray-100);
   gap: 12px;
-  &:last-child { border-bottom: none; }
-}
-.ap-info-k { font-size: 12px; color: var(--gray-500); flex-shrink: 0; width: 72px; }
-.ap-info-v { font-size: 13px; color: var(--gray-800); text-align: right; word-break: break-all; flex: 1; }
-
-// ============ 留言板 ============
-.ap-comment-card { min-height: 320px; }
-.ap-comment-input-area { position: relative; }
-.ap-comment-input {
-  position: relative;
-  border: 2px solid var(--gray-200);
-  border-radius: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 14px;
   background: #ffffff;
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  &:focus-within {
-    border-color: #0EA5E9;
-    box-shadow: 0 0 0 3px rgba(14,165,233,0.1);
-  }
-}
-.ap-comment-textarea {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  font-size: 14px;
-  color: #1a1a1a;
-  resize: none;
-  :deep(.ant-input) {
-    border: none;
-    background: transparent;
-    box-shadow: none;
-    font-size: 14px;
-    color: #1a1a1a;
-  }
-  :deep(.ant-input[placeholder]) {
-    color: #94a3b8;
-  }
-}
-.ap-comment-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.ap-emoji-btn {
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  font-size: 18px;
+  border: 1px solid var(--gray-150);
+  box-shadow: 0 1px 4px rgba(16,30,54,.04);
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  transition: background 0.15s;
-  &:hover { background: rgba(0,0,0,0.05); }
+  transition: background 0.15s, border-color 0.15s, transform 0.12s;
+  &:hover {
+    background: #f8fafc;
+    border-color: var(--main-300);
+    transform: translateY(-1px);
+  }
 }
-.ap-comment-send-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--gray-500);
+.ap-section-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #eef2ff;
+  color: var(--main-700);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  &:hover {
-    background: rgba(0,0,0,0.05);
-    color: var(--main-700);
-  }
-  &:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
+  flex-shrink: 0;
 }
-.ap-comment-count { font-size: 12px; color: var(--gray-400); }
-.ap-emoji-picker {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  background: #ffffff;
-  border: 1px solid var(--gray-200);
-  border-radius: 12px;
-  padding: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.1);
-  z-index: 10;
-  margin-bottom: 8px;
-  max-width: 280px;
-}
-.ap-emoji-item {
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  font-size: 18px;
-  cursor: pointer;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-  &:hover { background: var(--gray-100); }
-}
-.ap-comment-list {
-  max-height: 260px;
-  overflow-y: auto;
+.ap-section-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-right: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--gray-200) transparent;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
-.ap-comment-loading {
-  display: flex;
-  justify-content: center;
-  padding: 20px 0;
+.ap-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a365d;
 }
-.ap-comment-item {
-  display: flex;
-  gap: 10px;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border-radius: 12px;
-  transition: background 0.15s;
-  &:hover { background: #f1f5f9; }
+.ap-section-sub {
+  font-size: 11px;
+  color: var(--gray-500);
 }
-.ap-comment-avatar {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  background: var(--main-100);
-  color: var(--main-700);
+.ap-section-extra {
+  flex-shrink: 0;
+}
+.ap-section-count {
   font-size: 13px;
   font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  color: var(--main-700);
+  background: #eef2ff;
+  border-radius: 999px;
+  padding: 2px 10px;
+  min-width: 28px;
+  text-align: center;
+}
+.ap-section-tag {
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 10px;
+  &.on { background: #dcfce7; color: #15803d; }
+  &.off { background: #f1f5f9; color: #94a3b8; }
+}
+.ap-section-chevron {
+  color: var(--gray-400);
   flex-shrink: 0;
-  overflow: hidden;
-}
-.ap-comment-user-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.ap-comment-body { flex: 1; min-width: 0; }
-.ap-comment-text { font-size: 13px; color: var(--gray-800); line-height: 1.55; word-break: break-word; white-space: pre-wrap; }
-.ap-comment-meta {
-  font-size: 11px;
-  color: var(--gray-400);
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.ap-comment-del {
-  font-size: 11px;
-  color: var(--gray-400);
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  &:hover { color: #ef4444; }
-}
-.ap-comment-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px 0;
-  color: var(--gray-400);
-  font-size: 13px;
-  svg { color: var(--gray-200); }
 }
 
 // ============ 右侧大卡片 ============
@@ -1009,36 +709,23 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
 }
 .ap-chart-empty {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   height: 160px;
   color: var(--gray-400);
   font-size: 13px;
   background: #ffffff;
   border-radius: 12px;
   border: 1px dashed var(--gray-300);
-  svg { color: var(--gray-300); }
 }
 
 // ============ 今日记录 ============
 .ap-today-section { padding-top: 4px; }
-
-// ============ 装备伙伴 ============
-.ap-partner-section {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--gray-150);
-  .ap-stats-section-title {
-    margin-bottom: 12px;
-  }
-}
 .ap-today-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 240px;
+  max-height: 320px;
   overflow-y: auto;
 }
 .ap-today-item {
@@ -1053,7 +740,7 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
   &:hover { background: var(--gray-50); }
 }
 .ap-today-main { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
-.ap-today-title { font-size: 13px; font-weight: 600; color: #1a202c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.ap-today-title { font-size: 13px; font-weight: 600; color: #1a202c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .ap-today-badge {
   font-size: 11px;
   font-weight: 600;
@@ -1068,17 +755,14 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
 .ap-today-time { font-size: 11px; color: var(--gray-400); flex-shrink: 0; }
 .ap-today-empty {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   padding: 24px 0;
   color: var(--gray-400);
   font-size: 13px;
   background: #ffffff;
   border-radius: 10px;
   border: 1px dashed var(--gray-300);
-  svg { color: var(--gray-300); }
 }
 
 // ============ 加载 ============
@@ -1091,9 +775,8 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
 }
 @media (max-width: 640px) {
   .ap-stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .ap-hero { min-height: 208px; padding: 0; }
-  .ap-hero-bg { position: absolute; left: 0; right: 0; bottom: 0; height: 80%; margin: 0; padding: 14px 16px 14px 142px; }
-  .ap-hero-avatar { width: 116px; height: 116px; border-radius: 18px; left: 14px; top: 14px; }
-  .ap-hero-name { font-size: 18px; }
+  .ap-profile-top { flex-direction: column; align-items: flex-start; }
+  .ap-profile-avatar { width: 80px; height: 80px; border-radius: 18px; }
+  .ap-profile-name { font-size: 18px; }
 }
 </style>
