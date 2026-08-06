@@ -3,10 +3,10 @@
     <div class="agent-view-body">
       <!-- 中间内容区域：三 Tab 均为对话框，仅「皮肤」不同（对齐悟帆：日常办公/能力演进/智能孵化 都是对话框） -->
       <div class="content">
-        <!-- 新建对话 hero（对齐悟帆：欢迎语 + 三 Tab 位于输入框上方） -->
-        <div class="chat-hero">
+        <!-- 新建对话 hero（对齐悟帆：欢迎语 + 三 Tab 位于输入框上方）；历史对话页不展示 -->
+        <div v-if="isNewConversation" class="chat-hero">
           <div class="chat-hero-inner">
-            <template v-if="showHeroGreeting">
+            <template v-if="isNewConversation">
               <p class="chat-hero-sub">{{ heroSub }}</p>
               <h1 class="chat-hero-title">{{ heroTitle }}</h1>
             </template>
@@ -116,9 +116,9 @@
               </a-dropdown>
             </template>
 
-            <!-- 能力演进：输入框上方的子切换条（技能/连接器/协助伙伴 + 打造/诊断优化） -->
+            <!-- 能力演进：输入框上方的子切换条（技能/连接器/协助伙伴 + 打造/诊断优化），仅新建对话页 -->
             <template #before-input>
-              <div v-if="activeTab === 'evolution'" class="evo-subtabs">
+              <div v-if="isNewConversation && activeTab === 'evolution'" class="evo-subtabs">
                 <div class="evo-seg">
                   <button
                     v-for="c in evoCategories"
@@ -146,9 +146,9 @@
               </div>
             </template>
 
-            <!-- 输入框下方推荐语胶囊（按 Tab 不同而不同） -->
+            <!-- 输入框下方推荐语胶囊（按 Tab 不同而不同），仅新建对话页 -->
             <template #after-input>
-              <div class="usecase-row">
+              <div v-if="isNewConversation" class="usecase-row">
                 <button
                   v-for="uc in currentUseCases"
                   :key="uc"
@@ -200,8 +200,9 @@ const tabOptions = [
   { label: '智能孵化', value: 'incubation' }
 ]
 
-// 仅空状态（无选中对话线程）展示欢迎语；进入具体对话后保留 Tab、隐藏问候
-const showHeroGreeting = computed(() => !getRouteThreadId())
+// 仅空状态（无选中对话线程）视为「新建对话页」：展示欢迎语、三 Tab、推荐语；
+// 进入具体对话（历史对话）后隐藏，历史对话页回归纯聊天界面
+const isNewConversation = computed(() => !getRouteThreadId())
 
 // 各 Tab 的欢迎语（对齐悟帆 hero copy）
 const heroCopyMap = {
