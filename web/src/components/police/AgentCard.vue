@@ -227,17 +227,17 @@ function onDelete(e) {
 .card-avatar-container {
   position: absolute;
   left: 0;
-  top: 28px; // 调整使下半部在背景块上方
+  top: 18px; // 放大后保持与背景色块的浮出/底部间隙
   z-index: 2;
 }
 
 .card-avatar {
-  width: 88px;
-  height: 88px;
-  border-radius: 18px;
+  width: 104px;
+  height: 104px;
+  border-radius: 22px;
   overflow: hidden;
-  background: #ffffff;
-  // 与档案页 ap-hero-avatar 保持一致：圆角矩形、白底、无阴影、无描边，浮于背景块之上
+  background: transparent; // 透明底色，靠 officer-default.png 自身轮廓与背景色块形成层次
+  // 与档案页 ap-hero-avatar 保持一致：浮于背景块之上、无描边阴影
 
   img {
     display: block;
@@ -252,7 +252,7 @@ function onDelete(e) {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 14px 14px 102px; // 左侧给头像留空间
+  padding: 14px 14px 14px 118px; // 左侧给放大的头像留空间，保持与头像 14px 间隙
   min-height: 68px;
   background: linear-gradient(135deg, #f7f8fa 0%, #e8ecf2 100%);
   border-radius: 14px;

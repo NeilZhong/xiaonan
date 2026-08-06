@@ -605,7 +605,7 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
   position: relative;
   border-radius: 20px;
   overflow: visible;
-  min-height: 200px;
+  min-height: 220px;
   padding: 0;
 }
 .ap-hero-bg {
@@ -615,7 +615,7 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
   bottom: 0;
   height: 80%;
   margin: 0;
-  padding: 18px 24px 18px 196px;
+  padding: 18px 24px 18px 224px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -633,14 +633,14 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
 }
 .ap-hero-avatar {
   position: absolute;
-  top: 16px;
-  left: 16px;
+  top: 18px;
+  left: 18px;
   z-index: 2;
-  width: 156px;
-  height: 156px;
-  border-radius: 20px;
+  width: 184px;
+  height: 184px;
+  border-radius: 24px;
   overflow: hidden;
-  background: #ffffff;
+  background: transparent; // 透明底色，与档案背景块自然衔接
   border: 1px solid var(--gray-150);
   box-shadow: none;
   img { display: block; width: 100%; height: 100%; object-fit: cover; }
@@ -1091,9 +1091,9 @@ onUnmounted(() => { destroyChart(); document.removeEventListener('click', handle
 }
 @media (max-width: 640px) {
   .ap-stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .ap-hero { min-height: 184px; padding: 0; }
-  .ap-hero-bg { position: absolute; left: 0; right: 0; bottom: 0; height: 80%; margin: 0; padding: 14px 16px 14px 120px; }
-  .ap-hero-avatar { width: 96px; height: 96px; border-radius: 16px; left: 12px; top: 12px; }
+  .ap-hero { min-height: 208px; padding: 0; }
+  .ap-hero-bg { position: absolute; left: 0; right: 0; bottom: 0; height: 80%; margin: 0; padding: 14px 16px 14px 142px; }
+  .ap-hero-avatar { width: 116px; height: 116px; border-radius: 18px; left: 14px; top: 14px; }
   .ap-hero-name { font-size: 18px; }
 }
 </style>
