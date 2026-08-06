@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, provide, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, provide, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
   Activity,
@@ -11,6 +11,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   MessageCirclePlus,
+  MessageSquare,
+  Bell,
   Search,
   Shield,
   Briefcase,
@@ -23,7 +25,6 @@ import { CheckSquareOutlined } from '@ant-design/icons-vue'
 import { useConfigStore } from '@/stores/config'
 import { useAgentStore } from '@/stores/agent'
 import { useChatThreadsStore } from '@/stores/chatThreads'
-import { useChatUIStore } from '@/stores/chatUI'
 import { useDatabaseStore } from '@/stores/database'
 import { useInfoStore } from '@/stores/info'
 import { useTaskerStore } from '@/stores/tasker'
@@ -39,7 +40,6 @@ import ConversationSearchModal from '@/components/ConversationSearchModal.vue'
 const configStore = useConfigStore()
 const agentStore = useAgentStore()
 const chatThreadsStore = useChatThreadsStore()
-const chatUIStore = useChatUIStore()
 const databaseStore = useDatabaseStore()
 const infoStore = useInfoStore()
 const taskerStore = useTaskerStore()
@@ -48,6 +48,66 @@ const { activeCount: activeCountRef, isDrawerOpen } = storeToRefs(taskerStore)
 const { threads, currentThreadId, hasMoreThreads, isLoadingMoreThreads } =
   storeToRefs(chatThreadsStore)
 
+// 三态侧边栏（同款悟帆）：
+//  桌面端常驻，分 展开(240px) / 收起(56px 纯图标栏) 两态
+//  窄屏完全隐藏，汉堡展开为 240px 浮层
+const isExpanded = ref(typeof window !== 'undefined' ? window.innerWidth >= 900 : true)
+const isMobileOpen = ref(false)
+const isMobile = ref(typeof window !== 'undefined' ? window.innerWidth < 900 : false)
+
+// 桌面：展开 / 收起
+const expandSidebar = () => {
+  isExpanded.value = true
+}
+const collapseSidebar = () => {
+  isExpanded.value = false
+}
+// 窄屏浮层：打开 / 关闭
+const openMobileSidebar = () => {
+  isMobileOpen.value = true
+}
+const closeMobileSidebar = () => {
+  isMobileOpen.value = false
+}
+
+// 派生显示状态
+const showWideSidebar = computed(
+  () => (isMobile.value && isMobileOpen.value) || (!isMobile.value && isExpanded.value)
+)
+const showNarrowSidebar = computed(() => !isMobile.value && !isExpanded.value)
+const showHamburger = computed(() => isMobile.value && !isMobileOpen.value)
+const showBackdrop = computed(() => isMobile.value && isMobileOpen.value)
+
+// 点击导航项：窄屏浮层下关闭浮层；桌面无副作用
+const onNavClick = () => {
+  if (isMobile.value) {
+    isMobileOpen.value = false
+  }
+}
+// 窄栏历史/通知等图标：桌面展开宽栏；窄屏浮层下关闭
+const openWideFromNarrow = () => {
+  if (isMobile.value) {
+    isMobileOpen.value = false
+  } else {
+    isExpanded.value = true
+  }
+}
+
+const mobileMq = typeof window !== 'undefined' ? window.matchMedia('(max-width: 900px)') : null
+const onMqChange = (e) => {
+  isMobile.value = e.matches
+  // 跨断点：进入窄屏则收起浮层；宽屏保留用户展开/收起偏好
+  if (e.matches) {
+    isMobileOpen.value = false
+  }
+}
+onMounted(() => {
+  mobileMq?.addEventListener?.('change', onMqChange)
+})
+onBeforeUnmount(() => {
+  mobileMq?.removeEventListener?.('change', onMqChange)
+})
+
 // Add state for debug modal
 const showDebugModal = ref(false)
 
@@ -55,7 +115,6 @@ const showDebugModal = ref(false)
 const showSettingsModal = ref(false)
 const settingsInitialTab = ref('')
 
-const { sidebarCollapsed } = storeToRefs(chatUIStore)
 const conversationSearchOpen = ref(false)
 
 // Provide settings modal methods to child components
@@ -228,14 +287,6 @@ const isNavItemActive = (item) => {
   return activePaths.some((path) => route.path === path || route.path.startsWith(`${path}/`))
 }
 
-const setSidebarCollapsed = (collapsed) => {
-  sidebarCollapsed.value = collapsed
-}
-
-const toggleSidebar = () => {
-  setSidebarCollapsed(!sidebarCollapsed.value)
-}
-
 const openConversationSearch = () => {
   conversationSearchOpen.value = true
 }
@@ -323,132 +374,243 @@ provide('settingsModal', {
 </script>
 
 <template>
-  <div class="app-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
-    <div class="header">
-      <div class="sidebar-brand" @click.stop>
-        <router-link v-if="!sidebarCollapsed" to="/" class="brand-link">
-          <img :src="infoStore.organization.avatar" class="brand-avatar" />
-          <span class="brand-name">{{ organizationName }}</span>
-        </router-link>
-        <button
-          v-else
-          type="button"
-          class="brand-link brand-expand-button"
-          aria-label="展开侧边栏"
-          @click="setSidebarCollapsed(false)"
-        >
-          <img :src="infoStore.organization.avatar" class="brand-avatar brand-avatar-image" />
-          <PanelLeftOpen class="brand-expand-icon" size="20" />
-        </button>
-        <button
-          v-if="!sidebarCollapsed"
-          type="button"
-          class="sidebar-toggle"
-          aria-label="折叠侧边栏"
-          @click="toggleSidebar"
-        >
-          <PanelLeftClose size="18" />
-        </button>
+  <div class="app-layout" :class="{ 'is-mobile': isMobile, 'is-collapsed': !isExpanded && !isMobile }">
+    <!-- 窄屏遮罩：侧边栏浮层展开时点击关闭 -->
+    <div
+      v-if="showBackdrop"
+      class="xn-sidebar-backdrop"
+      @click="closeMobileSidebar"
+    ></div>
+
+    <!-- 同款悟帆 cvo-sidebar：fixed 浮层 + 毛玻璃圆角（桌面常驻 / 窄屏浮层） -->
+    <aside
+      v-show="showWideSidebar"
+      class="xn-sidebar"
+      data-cvo-id="cvo-sidebar"
+    >
+      <div class="xn-sidebar-inner" data-cvo-id="cvo-sidebar-inner">
+        <!-- 顶部品牌栏 -->
+        <div class="xn-sb-header">
+          <router-link to="/" class="xn-brand" @click="onNavClick">
+            <img :src="infoStore.organization.avatar" class="xn-brand-avatar" />
+            <span class="xn-brand-name">{{ organizationName }}</span>
+          </router-link>
+          <button
+            type="button"
+            class="xn-sb-collapse"
+            aria-label="收起侧边栏"
+            title="收起侧边栏"
+            @click="collapseSidebar"
+          >
+            <PanelLeftClose :size="18" />
+          </button>
+        </div>
+        <div class="xn-sb-spacer"></div>
+
+        <!-- 主导航 -->
+        <nav class="xn-primary-nav">
+          <RouterLink
+            v-if="primaryNavItem"
+            :to="primaryNavItem.path"
+            class="xn-nav-entry xn-nav-new"
+            :class="{ active: isNavItemActive(primaryNavItem) }"
+            :active-class="''"
+            @click="onNavClick"
+          >
+            <span class="xn-nav-icon">
+              <component
+                :is="isNavItemActive(primaryNavItem) ? primaryNavItem.activeIcon : primaryNavItem.icon"
+                :size="16"
+              />
+            </span>
+            <span class="xn-nav-text">{{ primaryNavItem.name }}</span>
+          </RouterLink>
+
+          <RouterLink
+            v-for="(item, index) in secondaryNavItems"
+            :key="index"
+            :to="item.path"
+            v-show="!item.hidden"
+            class="xn-nav-entry"
+            :class="{ active: isNavItemActive(item) }"
+            :active-class="''"
+            @click="onNavClick"
+          >
+            <span class="xn-nav-icon">
+              <component
+                :is="isNavItemActive(item) ? item.activeIcon : item.icon"
+                :size="16"
+              />
+            </span>
+            <span class="xn-nav-text">{{ item.name }}</span>
+          </RouterLink>
+        </nav>
+
+        <div class="xn-divider"></div>
+
+        <!-- 对话历史区 -->
+        <section class="xn-history">
+          <div class="xn-history-header">
+            <h2 class="xn-history-title">对话</h2>
+            <button
+              type="button"
+              class="xn-history-action"
+              aria-label="搜索对话"
+              title="搜索对话"
+              @click="openConversationSearch"
+            >
+              <Search :size="14" />
+            </button>
+          </div>
+          <div class="xn-history-scroll">
+            <ConversationNavSection
+              :current-chat-id="activeConversationThreadId"
+              :chats-list="threads"
+              :has-more-chats="hasMoreThreads"
+              :is-loading-more="isLoadingMoreThreads"
+              @select-chat="handleSelectChat"
+              @delete-chat="handleDeleteChat"
+              @rename-chat="handleRenameChat"
+              @toggle-pin="handleTogglePinChat"
+              @load-more-chats="() => chatThreadsStore.loadMoreThreads()"
+            />
+          </div>
+        </section>
+
+        <!-- 底部用户区 -->
+        <div class="xn-footer">
+          <UserInfoComponent :show-role="true">
+            <template v-if="userStore.isAdmin" #actions>
+              <button
+                class="xn-user-task-center"
+                :class="{ active: isDrawerOpen }"
+                type="button"
+                aria-label="任务中心"
+                @click.stop="taskerStore.openDrawer()"
+              >
+                <a-badge
+                  :count="activeTaskCount"
+                  :overflow-count="99"
+                  size="small"
+                >
+                  <ClipboardList :size="16" />
+                </a-badge>
+              </button>
+            </template>
+          </UserInfoComponent>
+        </div>
       </div>
-      <div class="nav">
+    </aside>
+
+    <!-- 窄栏（56px 纯图标栏）：桌面收起态常驻显示，同款悟帆 cvo-sidebar-collapsed -->
+    <aside
+      v-show="showNarrowSidebar"
+      class="xn-sidebar-narrow"
+      data-cvo-id="cvo-sidebar-collapsed"
+    >
+      <div class="xn-narrow-inner">
+        <button
+          type="button"
+          class="xn-narrow-logo"
+          title="展开侧边栏"
+          aria-label="展开侧边栏"
+          @click="expandSidebar"
+        >
+          <img :src="infoStore.organization.avatar" class="xn-narrow-brand-img" />
+        </button>
+        <div class="xn-narrow-spacer"></div>
+
         <RouterLink
           v-if="primaryNavItem"
           :to="primaryNavItem.path"
-          class="nav-item"
+          class="xn-narrow-btn xn-narrow-new"
           :class="{ active: isNavItemActive(primaryNavItem) }"
           :active-class="''"
-          @click.stop
+          :title="primaryNavItem.name"
+          @click="onNavClick"
         >
-          <a-tooltip placement="right" :open="sidebarCollapsed ? undefined : false">
-            <template #title>{{ primaryNavItem.name }}</template>
-            <component
-              class="icon"
-              :is="
-                isNavItemActive(primaryNavItem) ? primaryNavItem.activeIcon : primaryNavItem.icon
-              "
-              size="18"
-            />
-          </a-tooltip>
-          <span class="nav-text">{{ primaryNavItem.name }}</span>
+          <component
+            :is="isNavItemActive(primaryNavItem) ? primaryNavItem.activeIcon : primaryNavItem.icon"
+            :size="18"
+          />
         </RouterLink>
-
-        <button
-          type="button"
-          class="nav-item"
-          :class="{ active: conversationSearchOpen }"
-          @click.stop="openConversationSearch"
-        >
-          <a-tooltip placement="right" :open="sidebarCollapsed ? undefined : false">
-            <template #title>搜索</template>
-            <Search class="icon" size="18" />
-          </a-tooltip>
-          <span class="nav-text">搜索</span>
-        </button>
 
         <RouterLink
           v-for="(item, index) in secondaryNavItems"
           :key="index"
           :to="item.path"
           v-show="!item.hidden"
-          class="nav-item"
+          class="xn-narrow-btn"
           :class="{ active: isNavItemActive(item) }"
           :active-class="''"
-          @click.stop
+          :title="item.name"
+          @click="onNavClick"
         >
-          <a-tooltip placement="right" :open="sidebarCollapsed ? undefined : false">
-            <template #title>{{ item.name }}</template>
-            <component
-              class="icon"
-              :is="isNavItemActive(item) ? item.activeIcon : item.icon"
-              size="18"
-            />
-          </a-tooltip>
-          <span class="nav-text">{{ item.name }}</span>
+          <component
+            :is="isNavItemActive(item) ? item.activeIcon : item.icon"
+            :size="18"
+          />
         </RouterLink>
+
+        <div class="xn-narrow-divider"></div>
+
+        <button
+          type="button"
+          class="xn-narrow-btn"
+          title="对话历史"
+          aria-label="对话历史"
+          @click="openWideFromNarrow"
+        >
+          <MessageSquare :size="16" />
+        </button>
+
+        <div class="xn-narrow-flex"></div>
+
+        <RouterLink
+          to="/police/explore"
+          class="xn-narrow-btn"
+          :active-class="''"
+          title="探索市场"
+          @click="onNavClick"
+        >
+          <Store :size="18" />
+        </RouterLink>
+        <button
+          type="button"
+          class="xn-narrow-btn"
+          title="通知"
+          aria-label="通知"
+          @click="openWideFromNarrow"
+        >
+          <span class="xn-narrow-bell">
+            <Bell :size="16" />
+            <span class="xn-narrow-badge">99+</span>
+          </span>
+        </button>
+        <div class="xn-narrow-spacer"></div>
+        <button
+          type="button"
+          class="xn-narrow-avatar"
+          title="账户设置"
+          aria-label="账户设置"
+          @click="openSettingsModal('account')"
+        >
+          {{ (userStore.username || '?').charAt(0).toUpperCase() }}
+        </button>
       </div>
-      <div class="fill">
-        <ConversationNavSection
-          v-if="!sidebarCollapsed"
-          class="sidebar-conversations"
-          :current-chat-id="activeConversationThreadId"
-          :chats-list="threads"
-          :has-more-chats="hasMoreThreads"
-          :is-loading-more="isLoadingMoreThreads"
-          @select-chat="handleSelectChat"
-          @delete-chat="handleDeleteChat"
-          @rename-chat="handleRenameChat"
-          @toggle-pin="handleTogglePinChat"
-          @load-more-chats="() => chatThreadsStore.loadMoreThreads()"
-        />
-      </div>
-      <div class="foo">
-        <!-- 用户信息组件 -->
-        <div class="nav-item user-info" @click.stop>
-          <UserInfoComponent :show-role="!sidebarCollapsed">
-            <template v-if="userStore.isAdmin" #actions>
-              <a-tooltip placement="top" title="任务中心">
-                <button
-                  class="user-task-center"
-                  :class="{ active: isDrawerOpen }"
-                  type="button"
-                  aria-label="任务中心"
-                  @click.stop="taskerStore.openDrawer()"
-                >
-                  <a-badge
-                    :count="activeTaskCount"
-                    :overflow-count="99"
-                    class="task-center-badge"
-                    size="small"
-                  >
-                    <ClipboardList class="icon" size="16" />
-                  </a-badge>
-                </button>
-              </a-tooltip>
-            </template>
-          </UserInfoComponent>
-        </div>
-      </div>
-    </div>
+    </aside>
+
+    <!-- 汉堡按钮：窄屏完全隐藏侧边栏时显示，用于弹出浮层 -->
+    <button
+      v-if="showHamburger"
+      type="button"
+      class="xn-hamburger"
+      aria-label="打开侧边栏"
+      @click="openMobileSidebar"
+    >
+      <PanelLeftOpen :size="18" />
+    </button>
+
     <div id="app-router-view">
       <router-view v-slot="{ Component, route }">
         <keep-alive v-if="route.meta.keepAlive !== false">
@@ -489,458 +651,582 @@ provide('settingsModal', {
 </template>
 
 <style lang="less" scoped>
-// Less 变量定义
-@sidebar-width: 230px;
-@sidebar-collapsed-width: 56px;
-@sidebar-padding-y: 6px;
-@sidebar-padding-x: 8px;
-@sidebar-padding: @sidebar-padding-y @sidebar-padding-x;
-@sidebar-border-width: 1px;
-@sidebar-item-height: 32px;
-@sidebar-item-padding-x: 10px;
-@sidebar-icon-size: 16px;
-@brand-avatar-size: 28px;
-@sidebar-collapsed-content-width: @sidebar-collapsed-width - (2 * @sidebar-padding-x) -
-  @sidebar-border-width;
-@sidebar-collapsed-icon-padding-x: (
-  (@sidebar-collapsed-content-width - @sidebar-icon-size - (2 * @sidebar-border-width)) / 2
-);
-@sidebar-collapsed-avatar-padding-x: (
-  (@sidebar-collapsed-content-width - @sidebar-item-height - (2 * @sidebar-border-width)) / 2
-);
-@sidebar-collapsed-brand-padding-x: ((@sidebar-collapsed-content-width - @brand-avatar-size) / 2);
-@sidebar-collapsed-brand-icon-padding-x: (
-  (@sidebar-collapsed-content-width - @sidebar-icon-size) / 2
-);
-
+// ===== 同款悟帆侧边栏主题变量（映射小南浅/深主题）=====
 .app-layout {
+  // 侧边栏宽度（与悟帆宽栏一致：240px，外层即卡片，无额外背板）
+  --xn-sidebar-w: 240px;
+  // 收起态窄栏宽度（同款悟帆 56px 纯图标栏）
+  --xn-sidebar-collapsed-w: 56px;
+  // 侧边栏浮起间距：卡片与视口上/左/下边缘的留白，越大悬浮感越强
+  --xn-sidebar-gap: 14px;
+
+  // 浅色主题（默认）
+  --xn-sidebar-bg: rgba(255, 255, 255, 0.82);
+  --xn-sidebar-border: rgba(15, 23, 42, 0.08);
+  --xn-sidebar-shadow: 0 14px 34px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.06);
+  --xn-sidebar-blur: 14px;
+  --xn-text-primary: var(--gray-1000);
+  --xn-text-secondary: var(--gray-700);
+  --xn-text-muted: var(--gray-500);
+  --xn-nav-active-bg: color-mix(in srgb, var(--main-color) 8%, #ffffff);
+  --xn-nav-hover-bg: var(--main-20);
+  --xn-bg-tertiary: rgba(128, 128, 128, 0.1);
+  --xn-bg-secondary: var(--gray-50);
+  --xn-hover-bg: var(--main-20);
+  --xn-logo-text: var(--main-color);
+  --xn-user-avatar-bg: var(--main-100);
+  --xn-user-avatar-text: var(--main-900);
+  --xn-user-avatar-ring: var(--main-200);
+  --xn-divider: var(--gray-200);
+  --xn-panel-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+
   display: flex;
   flex-direction: row;
   width: 100%;
   height: 100vh;
   min-width: var(--min-width);
+  position: relative;
 }
 
-div.header,
-#app-router-view {
-  height: 100%;
-  max-width: 100%;
+// 深色主题（document.documentElement 带 .dark）
+:global(html.dark) .app-layout {
+  --xn-sidebar-bg: rgba(28, 28, 36, 0.72);
+  --xn-sidebar-border: rgba(255, 255, 255, 0.09);
+  --xn-sidebar-shadow: 0 14px 34px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --xn-sidebar-blur: 16px;
+  --xn-text-primary: rgba(255, 255, 255, 0.92);
+  --xn-text-secondary: rgba(255, 255, 255, 0.66);
+  --xn-text-muted: rgba(255, 255, 255, 0.42);
+  --xn-nav-active-bg: rgba(255, 255, 255, 0.12);
+  --xn-nav-hover-bg: rgba(255, 255, 255, 0.08);
+  --xn-bg-tertiary: rgba(255, 255, 255, 0.12);
+  --xn-bg-secondary: rgba(255, 255, 255, 0.06);
+  --xn-hover-bg: rgba(255, 255, 255, 0.08);
+  --xn-logo-text: #ffffff;
+  --xn-user-avatar-bg: rgba(255, 255, 255, 0.16);
+  --xn-user-avatar-text: #ffffff;
+  --xn-user-avatar-ring: rgba(255, 255, 255, 0.2);
+  --xn-divider: rgba(255, 255, 255, 0.1);
+  --xn-panel-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
 }
 
 #app-router-view {
   flex: 1 1 auto;
+  height: 100%;
   overflow-y: auto;
+  transition: margin-left 0.22s ease;
 }
 
-.header {
+// 桌面端：内容跟随侧边栏宽度（展开 240px / 收起 56px）+ 浮起间距
+.app-layout:not(.is-mobile) #app-router-view {
+  margin-left: calc(var(--xn-sidebar-w) + var(--xn-sidebar-gap));
+}
+
+.app-layout:not(.is-mobile).is-collapsed #app-router-view {
+  margin-left: calc(var(--xn-sidebar-collapsed-w) + var(--xn-sidebar-gap));
+}
+
+// ===== 侧边栏浮层（宽栏：桌面常驻 / 窄屏浮层，显隐由 v-show 控制）=====
+// 外层即悬浮卡片：与视口上/左/下边缘留出 --xn-sidebar-gap，营造明显浮起感（同款悟帆 cvo-sidebar）
+.xn-sidebar {
+  position: fixed;
+  top: var(--xn-sidebar-gap);
+  bottom: var(--xn-sidebar-gap);
+  left: var(--xn-sidebar-gap);
+  width: var(--xn-sidebar-w);
+  z-index: 31;
   display: flex;
   flex-direction: column;
-  flex: 0 0 @sidebar-width;
-  justify-content: flex-start;
-  align-items: stretch;
-  gap: 16px;
-  background-color: var(--main-5);
-  height: 100%;
-  width: @sidebar-width;
-  border-right: 1px solid var(--gray-100);
-  padding: @sidebar-padding;
+  border-radius: 16px;
+  background: var(--xn-sidebar-bg);
+  backdrop-filter: blur(var(--xn-sidebar-blur));
+  -webkit-backdrop-filter: blur(var(--xn-sidebar-blur));
+  border: 1px solid var(--xn-sidebar-border);
+  box-shadow: var(--xn-sidebar-shadow);
   overflow: hidden;
-  user-select: none;
-  transition:
-    width 0.18s ease,
-    flex-basis 0.18s ease;
+}
 
-  .nav {
+.xn-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.xn-sidebar-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+// ===== 顶部品牌栏 =====
+.xn-sb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 14px 14px 14px 18px;
+  flex-shrink: 0;
+}
+
+.xn-brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--xn-logo-text);
+  cursor: pointer;
+}
+
+.xn-brand-avatar {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+.xn-brand-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xn-sb-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--xn-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--xn-nav-hover-bg);
+    color: var(--xn-text-primary);
+  }
+}
+
+.xn-sb-spacer {
+  height: 6px;
+  flex-shrink: 0;
+}
+
+// ===== 主导航 =====
+.xn-primary-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px 8px;
+  flex-shrink: 0;
+}
+
+.xn-nav-entry {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--xn-text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  outline: none;
+
+  .xn-nav-icon {
     display: flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    justify-content: flex-start;
-    align-items: stretch;
-    position: relative;
-    gap: 0;
-  }
-
-  .sidebar-conversations {
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .sidebar-brand,
-  :deep(.conversation-nav-section:not(.sidebar-conversations)),
-  .github,
-  .user-info {
     flex-shrink: 0;
-  }
-
-  .fill {
-    flex: 1 1 0;
-    min-height: 0;
-  }
-
-  .sidebar-brand {
-    display: flex;
     align-items: center;
-    justify-content: space-between;
-    height: @sidebar-item-height;
-    gap: 8px;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--xn-text-muted);
   }
 
-  .brand-link {
-    display: flex;
-    flex: 1 1 auto;
-    align-items: center;
+  .xn-nav-text {
     min-width: 0;
-    height: @sidebar-item-height;
-    color: var(--gray-900);
-    text-decoration: none;
-    border: 0;
-    background: transparent;
-    padding: 0 4px;
-    cursor: pointer;
-  }
-
-  .brand-avatar {
-    flex: 0 0 @brand-avatar-size;
-    width: @brand-avatar-size;
-    height: @brand-avatar-size;
-    border-radius: 6px;
-    object-fit: cover;
-  }
-
-  .brand-name {
-    min-width: 0;
-    margin-left: 10px;
     overflow: hidden;
-    color: var(--gray-1000);
-    font-size: 15px;
-    font-weight: 650;
-    line-height: 20px;
+    font-weight: 400;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .sidebar-toggle {
-    display: inline-flex;
-    flex: 0 0 32px;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--gray-600);
-    cursor: pointer;
-    transition:
-      background-color 0.2s ease,
-      border-color 0.2s ease,
-      color 0.2s ease;
+  &:hover {
+    background: var(--xn-nav-hover-bg);
+    color: var(--xn-text-primary);
 
-    &:hover,
-    &:focus-visible {
-      border-color: var(--main-50);
-      background: var(--main-20);
-      color: var(--main-color);
-      outline: none;
+    .xn-nav-icon {
+      color: var(--xn-text-primary);
     }
   }
 
-  .nav-item {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    width: 100%;
-    height: @sidebar-item-height;
-    padding: 0 @sidebar-item-padding-x;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background-color: transparent;
-    color: var(--gray-700);
-    font-size: 14px;
-    font-weight: 450;
-    transition:
-      background-color 0.2s ease-in-out,
-      border-color 0.2s ease-in-out,
-      color 0.2s ease-in-out;
-    margin: 0;
-    text-decoration: none;
-    cursor: pointer;
-    outline: none;
+  &.active {
+    background: var(--xn-nav-active-bg);
+    color: var(--xn-text-primary);
+    font-weight: 500;
 
-    .icon {
-      flex: 0 0 @sidebar-icon-size;
-      width: @sidebar-icon-size;
-      height: @sidebar-icon-size;
+    .xn-nav-icon {
+      color: var(--xn-text-primary);
     }
+  }
 
-    .nav-text {
-      min-width: 0;
-      max-width: 140px;
-      margin-left: 8px;
-      overflow: hidden;
-      line-height: 20px;
-      font-weight: 450;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      transition:
-        opacity 0.12s ease,
-        margin-left 0.18s ease,
-        max-width 0.18s ease;
-    }
+  // 新建对话：同款悟帆「新任务」主操作样式
+  &.xn-nav-new {
+    background: var(--xn-bg-tertiary);
+    color: var(--xn-text-primary);
+    font-weight: 500;
+    margin-bottom: 2px;
 
-    & > svg:focus {
-      outline: none;
-    }
-    & > svg:focus-visible {
-      outline: none;
-    }
-
-    &.active {
-      border-color: transparent;
-      background-color: color-mix(in srgb, var(--main-color) 6%, var(--gray-0));
-      font-weight: 600;
-      color: var(--main-color);
-    }
-
-    &.primary-action {
-      margin-bottom: 8px;
-      border-color: var(--gray-150);
-      background-color: var(--gray-0);
-      color: var(--main-color);
-      box-shadow: 0 3px 4px rgba(0, 10, 20, 0.02);
-
-      &:hover {
-        border-color: var(--gray-200);
-        background-color: var(--gray-0);
-        color: var(--main-color);
-        box-shadow: 0 3px 4px rgba(0, 10, 20, 0.07);
-      }
-    }
-
-    &.warning {
-      color: var(--color-error-500);
+    .xn-nav-icon {
+      color: var(--xn-text-primary);
     }
 
     &:hover {
-      border-color: transparent;
-      background-color: var(--main-20);
-      color: var(--main-color);
+      background: var(--xn-bg-tertiary);
+      color: var(--xn-text-primary);
     }
+  }
 
-    &.github {
-      margin-bottom: 8px;
-      &:hover {
-        border-color: transparent;
-      }
+  &:focus-visible {
+    outline: 2px solid var(--xn-text-muted);
+    outline-offset: 1px;
+  }
+}
 
-      .github-link {
-        display: flex;
-        align-items: center;
-        width: 100%;
-        min-width: 0;
-        color: inherit;
-        text-decoration: none;
-      }
+.xn-divider {
+  margin: 0 12px;
+  height: 1px;
+  background: var(--xn-divider);
+  flex-shrink: 0;
+}
 
-      .icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: @sidebar-icon-size;
-        line-height: 1;
-      }
+// ===== 对话历史区 =====
+.xn-history {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0;
+}
 
-      .github-stars {
-        display: flex;
-        align-items: center;
-        max-width: 48px;
-        margin-left: auto;
-        overflow: hidden;
-        font-size: 12px;
-        color: var(--gray-600);
-        background-color: var(--gray-100);
-        padding: 2px 8px;
-        border-radius: 6px;
-        white-space: nowrap;
-        transition:
-          opacity 0.12s ease,
-          max-width 0.18s ease;
+.xn-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+  padding: 2px 10px 0 14px;
+  flex-shrink: 0;
+}
 
-        .star-count {
-          font-weight: 600;
-        }
-      }
+.xn-history-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--xn-text-muted);
+  opacity: 0.82;
+  letter-spacing: 0.01em;
+}
+
+.xn-history-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--xn-text-muted);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+
+  &:hover {
+    background: var(--xn-nav-hover-bg);
+    color: var(--xn-text-primary);
+    opacity: 1;
+  }
+}
+
+.xn-history-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 2px;
+  scrollbar-gutter: stable;
+}
+
+// 让内嵌的对话列表适配侧边栏配色
+.xn-history :deep(.conversation-nav-section) {
+  margin-top: 0;
+}
+
+.xn-history :deep(.history-label) {
+  padding: 4px 6px 4px 14px;
+  color: var(--xn-text-muted);
+}
+
+.xn-history :deep(.conversation-item) {
+  margin: 0 8px;
+  color: var(--xn-text-secondary);
+
+  &:hover {
+    background: var(--xn-nav-hover-bg);
+    color: var(--xn-text-primary);
+
+    .actions-mask {
+      background: linear-gradient(to right, transparent, var(--xn-nav-hover-bg));
     }
+  }
 
-    &.api-docs {
-      padding: 10px 12px;
-    }
-    &.docs {
-      display: none;
-    }
-    &.theme-toggle-nav {
-      .theme-toggle-icon {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        height: 100%;
-        cursor: pointer;
-        color: var(--gray-1000);
-        transition: color 0.2s ease-in-out;
+  &.active {
+    background-color: var(--xn-nav-active-bg);
+    color: var(--xn-text-primary);
 
-        &:hover {
-          color: var(--main-color);
-        }
-      }
-    }
-    &.user-info {
-      margin-bottom: 8px;
-      padding: 0 3px;
-      overflow: hidden;
-
-      :deep(.user-info-component) {
-        width: 100%;
-      }
-
-      :deep(.user-info-dropdown) {
-        width: 100%;
-        height: @sidebar-item-height;
-        border-radius: 8px;
-        transition:
-          background-color 0.2s ease,
-          color 0.2s ease;
-      }
-
-      :deep(.user-info-dropdown:hover) {
-        background: var(--main-20);
-        color: var(--main-color);
-      }
-      :deep(.user-name) {
-        flex: 1 1 auto;
-      }
-
-      :deep(.user-task-center) {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 28px;
-        height: 28px;
-        padding: 0;
-        border: 1px solid transparent;
-        border-radius: 6px;
-        background: transparent;
-        color: var(--gray-600);
-        cursor: pointer;
-        transition:
-          background-color 0.2s ease,
-          color 0.2s ease;
-
-        &:hover,
-        &.active {
-          background: var(--main-30);
-          color: var(--main-color);
-        }
-
-        .task-center-badge {
-          display: flex;
-          justify-content: center;
-        }
-
-        .icon {
-          display: block;
-          width: 16px;
-          height: 16px;
-        }
-      }
+    .actions-mask {
+      background: linear-gradient(to right, transparent, var(--xn-nav-active-bg) 20px);
     }
   }
 }
 
-.app-layout.sidebar-collapsed {
-  .header {
-    flex-basis: @sidebar-collapsed-width;
-    width: @sidebar-collapsed-width;
-    align-items: stretch;
-    padding: @sidebar-padding;
+// ===== 底部用户区 =====
+.xn-footer {
+  flex-shrink: 0;
+  padding: 10px 12px;
+}
 
-    .sidebar-brand {
-      justify-content: flex-start;
-      width: 100%;
-    }
+.xn-footer :deep(.user-info-component) {
+  width: 100%;
+}
 
-    .brand-expand-button {
-      flex: 0 0 100%;
-      justify-content: flex-start;
-      width: 100%;
-      padding: 0;
-      border-radius: 8px;
+.xn-user-task-center {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--xn-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
 
-      .brand-avatar-image {
-        margin-left: @sidebar-collapsed-brand-padding-x;
-      }
+  &:hover,
+  &.active {
+    background: var(--xn-nav-hover-bg);
+    color: var(--xn-text-primary);
+  }
 
-      .brand-expand-icon {
-        display: none;
-        margin-left: @sidebar-collapsed-brand-icon-padding-x;
-        width: @sidebar-icon-size;
-        height: @sidebar-icon-size;
-        color: var(--main-color);
-      }
+  :deep(.ant-badge) {
+    display: flex;
+    align-items: center;
+  }
 
-      &:hover,
-      &:focus-visible {
-        background: var(--main-20);
-        outline: none;
+  :deep(svg) {
+    display: block;
+    width: 16px;
+    height: 16px;
+  }
+}
 
-        .brand-avatar-image {
-          display: none;
-        }
+// ===== 汉堡按钮 =====
+.xn-hamburger {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 32;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--xn-sidebar-bg);
+  backdrop-filter: blur(var(--xn-sidebar-blur));
+  -webkit-backdrop-filter: blur(var(--xn-sidebar-blur));
+  border: 1px solid var(--xn-sidebar-border);
+  color: var(--xn-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 
-        .brand-expand-icon {
-          display: block;
-        }
-      }
-    }
+  &:hover {
+    color: var(--xn-text-primary);
+    background: var(--xn-nav-hover-bg);
+  }
+}
 
-    .nav {
-      align-items: stretch;
-      width: 100%;
-    }
+// ===== 窄栏（56px 纯图标栏，同款悟帆 cvo-sidebar-collapsed）=====
+.xn-sidebar-narrow {
+  position: fixed;
+  top: var(--xn-sidebar-gap);
+  bottom: var(--xn-sidebar-gap);
+  left: var(--xn-sidebar-gap);
+  width: var(--xn-sidebar-collapsed-w);
+  z-index: 31;
+  overflow: hidden;
+  pointer-events: none;
+}
 
-    .nav-item {
-      justify-content: flex-start;
-      width: 100%;
-      padding: 0 @sidebar-collapsed-icon-padding-x;
+.xn-narrow-inner {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  border-radius: 16px;
+  background: var(--xn-sidebar-bg);
+  backdrop-filter: blur(var(--xn-sidebar-blur));
+  -webkit-backdrop-filter: blur(var(--xn-sidebar-blur));
+  border: 1px solid var(--xn-sidebar-border);
+  box-shadow: var(--xn-sidebar-shadow);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  pointer-events: auto;
 
-      .nav-text,
-      .github-stars {
-        max-width: 0;
-        margin-left: 0;
-        opacity: 0;
-        pointer-events: none;
-      }
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
 
-      &.github {
-        .github-link {
-          justify-content: flex-start;
-        }
-      }
+.xn-narrow-logo {
+  width: 32px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 4px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
 
-      &.user-info {
-        padding: 0 @sidebar-collapsed-avatar-padding-x;
+.xn-narrow-brand-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: cover;
+}
 
-        :deep(.user-info-component),
-        :deep(.user-info-dropdown) {
-          justify-content: flex-start;
-        }
+.xn-narrow-spacer {
+  height: 16px;
+  flex-shrink: 0;
+}
 
-        :deep(.user-info-actions) {
-          display: none;
-        }
-      }
+.xn-narrow-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: 2px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--xn-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  text-decoration: none;
+
+  &:hover {
+    background: var(--xn-nav-hover-bg);
+    color: var(--xn-text-primary);
+  }
+
+  &.active {
+    background: var(--xn-nav-active-bg);
+    color: var(--xn-text-primary);
+  }
+
+  // 新建对话：同款主操作背景
+  &.xn-narrow-new {
+    background: var(--xn-bg-tertiary);
+    color: var(--xn-text-primary);
+
+    &:hover {
+      background: var(--xn-bg-tertiary);
+      color: var(--xn-text-primary);
     }
   }
+}
+
+.xn-narrow-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--xn-divider);
+  margin: 10px 0;
+  flex-shrink: 0;
+}
+
+.xn-narrow-flex {
+  flex: 1 1 auto;
+  min-height: 8px;
+}
+
+.xn-narrow-bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.xn-narrow-badge {
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: linear-gradient(rgb(251, 110, 110), rgb(229, 72, 77));
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--xn-sidebar-bg), 0 1px 3px rgba(229, 72, 77, 0.45);
+  pointer-events: none;
+}
+
+.xn-narrow-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--xn-user-avatar-bg);
+  color: var(--xn-user-avatar-text);
+  box-shadow: inset 0 0 0 1px var(--xn-user-avatar-ring);
 }
 </style>

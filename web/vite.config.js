@@ -18,6 +18,11 @@ export default defineConfig(({ mode }) => {
         '@': fileURLToPath(new URL('./src', import.meta.url))
       }
     },
+    // preset-engineering 引入 three.js 等重型渲染器，esbuild 预打包会失败；
+    // 该包本身为纯 ESM，排除预打包后由浏览器以原生 ESM 直接加载即可
+    optimizeDeps: {
+      exclude: ['@file-viewer/preset-engineering']
+    },
     server: {
       proxy: {
         '^/api': {
