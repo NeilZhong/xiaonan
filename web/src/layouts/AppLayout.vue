@@ -665,7 +665,6 @@ provide('settingsModal', {
   --xn-text-muted: var(--gray-500);
   --xn-nav-active-bg: color-mix(in srgb, var(--main-color) 8%, #ffffff);
   --xn-nav-hover-bg: var(--main-20);
-  --xn-bg-tertiary: rgba(128, 128, 128, 0.1);
   --xn-bg-secondary: var(--gray-50);
   --xn-hover-bg: var(--main-20);
   --xn-logo-text: var(--main-color);
@@ -694,7 +693,6 @@ provide('settingsModal', {
   --xn-text-muted: rgba(255, 255, 255, 0.42);
   --xn-nav-active-bg: rgba(255, 255, 255, 0.12);
   --xn-nav-hover-bg: rgba(255, 255, 255, 0.08);
-  --xn-bg-tertiary: rgba(255, 255, 255, 0.12);
   --xn-bg-secondary: rgba(255, 255, 255, 0.06);
   --xn-hover-bg: rgba(255, 255, 255, 0.08);
   --xn-logo-text: #ffffff;
@@ -882,9 +880,8 @@ provide('settingsModal', {
     }
   }
 
-  // 新建对话：同款悟帆「新任务」主操作样式
+  // 新建对话：与普通导航项一致，透明背景，仅 hover/active 时显示底色
   &.xn-nav-new {
-    background: var(--xn-bg-tertiary);
     color: var(--xn-text-primary);
     font-weight: 500;
     margin-bottom: 2px;
@@ -894,7 +891,7 @@ provide('settingsModal', {
     }
 
     &:hover {
-      background: var(--xn-bg-tertiary);
+      background: var(--xn-nav-hover-bg);
       color: var(--xn-text-primary);
     }
   }
@@ -1231,13 +1228,12 @@ provide('settingsModal', {
     color: var(--xn-text-primary);
   }
 
-  // 新建对话：同款主操作背景
+  // 新建对话：与普通按钮一致，hover 才显示底色
   &.xn-narrow-new {
-    background: var(--xn-bg-tertiary);
     color: var(--xn-text-primary);
 
     &:hover {
-      background: var(--xn-bg-tertiary);
+      background: var(--xn-nav-hover-bg);
       color: var(--xn-text-primary);
     }
   }

@@ -45,12 +45,15 @@ export async function apiRequest(url, options = {}, requiresAuth = true, respons
       let errorMessage = `请求失败: ${response.status}, ${response.statusText}`
       let errorData = null
 
-      console.log('API请求失败:', {
-        url,
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries())
-      })
+      // silent 请求（如探测文件是否存在）不打印 4xx 错误日志，避免噪音
+      if (!options.silent) {
+        console.log('API请求失败:', {
+          url,
+          status: response.status,
+          statusText: response.statusText,
+          headers: Object.fromEntries(response.headers.entries())
+        })
+      }
 
       try {
         errorData = await response.json()
@@ -142,7 +145,7 @@ export async function apiRequest(url, options = {}, requiresAuth = true, respons
       return response
     }
   } catch (error) {
-    if (error.name !== 'AbortError') {
+    if (!options.silent && error.name !== 'AbortError') {
       console.error('API请求错误:', error)
     }
     throw error

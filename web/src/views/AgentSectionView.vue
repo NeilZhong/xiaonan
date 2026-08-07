@@ -247,7 +247,8 @@ const memoryFiltered = computed(() => {
 async function loadMemory() {
   memoryLoading.value = true
   try {
-    const blob = await getWorkspaceFileContent('MEMORY.md')
+    // silent：MEMORY.md 可能尚未创建，404 属预期，不打印错误日志
+    const blob = await getWorkspaceFileContent('MEMORY.md', { silent: true })
     const raw = await blob.text()
     try {
       const j = JSON.parse(raw)
@@ -256,7 +257,7 @@ async function loadMemory() {
       memoryText.value = raw
     }
     memoryMissing.value = false
-  } catch (e) {
+  } catch {
     memoryMissing.value = true
     memoryText.value = ''
   } finally {
