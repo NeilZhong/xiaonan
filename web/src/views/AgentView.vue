@@ -111,28 +111,10 @@
             <template #before-input>
               <div v-if="isNewConversation && activeTab === 'evolution'" class="evo-subtabs">
                 <div class="evo-seg">
-                  <button
-                    v-for="c in evoCategories"
-                    :key="c.value"
-                    type="button"
-                    class="evo-seg-btn"
-                    :class="{ active: evoCategory === c.value }"
-                    @click="evoCategory = c.value"
-                  >
-                    {{ c.label }}
-                  </button>
+                  <SlidingTabs v-model="evoCategory" :options="evoCategories" />
                 </div>
                 <div class="evo-seg">
-                  <button
-                    v-for="a in evoActions"
-                    :key="a.value"
-                    type="button"
-                    class="evo-seg-btn"
-                    :class="{ active: evoAction === a.value }"
-                    @click="evoAction = a.value"
-                  >
-                    {{ a.label }}
-                  </button>
+                  <SlidingTabs v-model="evoAction" :options="evoActions" />
                 </div>
               </div>
             </template>
@@ -512,36 +494,7 @@ useOutsidePointerdown(agentDropdownOpen, [agentDropdownTriggerRef, agentDropdown
 .evo-seg {
   display: inline-flex;
   align-items: center;
-  height: 32px;
-  padding: 2px;
-  border-radius: 10px;
-  background: var(--gray-100, #edf2f7);
-  gap: 2px;
   flex-shrink: 0;
-}
-.evo-seg-btn {
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-  height: 100%;
-  padding: 0 11px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--gray-500, #718096);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.18s, font-weight 0.18s, background 0.18s;
-}
-.evo-seg-btn:hover {
-  color: var(--gray-700, #4a5568);
-}
-.evo-seg-btn.active {
-  background: var(--gray-0, #fff);
-  color: var(--gray-900, #1a202c);
-  font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 /* ═══════ 推荐语胶囊（输入框下方，按 Tab 不同） ═══════ */
