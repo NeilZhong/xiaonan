@@ -19,17 +19,18 @@ const loading = ref(false)
 const stats = ref(null)
 
 // ── 概览指标卡定义 ──
+// 颜色一律用语义 token（明暗自适应），不用裸 hex
 const overviewCards = computed(() => {
   const o = stats.value?.overview || {}
   return [
-    { key: 'total', label: '任务总数', value: o.total || 0, color: 'var(--main-color, #24839b)' },
-    { key: 'completed', label: '已完成', value: o.completed || 0, color: '#38A169' },
-    { key: 'in_progress', label: '进行中', value: o.in_progress || 0, color: '#3182CE' },
-    { key: 'pending', label: '待处理', value: o.pending || 0, color: '#718096' },
-    { key: 'review', label: '待审核', value: o.review || 0, color: '#D69E2E' },
-    { key: 'overdue', label: '已逾期', value: o.overdue || 0, color: '#E53E3E' },
-    { key: 'unclaimed', label: '待认领', value: o.unclaimed || 0, color: '#9F7AEA' },
-    { key: 'time_undetermined', label: '时限待定', value: o.time_undetermined || 0, color: '#4A5568' },
+    { key: 'total', label: '任务总数', value: o.total || 0, color: 'var(--main-color)' },
+    { key: 'completed', label: '已完成', value: o.completed || 0, color: 'var(--color-success-500)' },
+    { key: 'in_progress', label: '进行中', value: o.in_progress || 0, color: 'var(--color-info-500)' },
+    { key: 'pending', label: '待处理', value: o.pending || 0, color: 'var(--gray-500)' },
+    { key: 'review', label: '待审核', value: o.review || 0, color: 'var(--color-warning-500)' },
+    { key: 'overdue', label: '已逾期', value: o.overdue || 0, color: 'var(--color-error-500)' },
+    { key: 'assigned', label: '已分配', value: o.assigned || 0, color: 'var(--color-accent-500)' },
+    { key: 'unclaimed', label: '待认领', value: o.unclaimed || 0, color: 'var(--chart-palette-5)' },
   ]
 })
 
@@ -58,7 +59,7 @@ async function loadStats() {
   try {
     const res = await policeCaseApi.getStats(props.caseId)
     stats.value = res.data || null
-  } catch (e) {
+  } catch {
     stats.value = null
   } finally {
     loading.value = false
@@ -79,12 +80,12 @@ function renderStatusChart() {
   statusChart = echarts.init(statusChartRef.value)
   const o = stats.value.overview || {}
   const items = [
-    { name: '已完成', value: o.completed || 0, color: '#38A169' },
-    { name: '进行中', value: o.in_progress || 0, color: '#3182CE' },
-    { name: '待处理', value: o.pending || 0, color: '#718096' },
-    { name: '待审核', value: o.review || 0, color: '#D69E2E' },
-    { name: '已逾期', value: o.overdue || 0, color: '#E53E3E' },
-    { name: '待认领', value: o.unclaimed || 0, color: '#9F7AEA' },
+    { name: '已完成', value: o.completed || 0, color: 'var(--color-success-500)' },
+    { name: '进行中', value: o.in_progress || 0, color: 'var(--color-info-500)' },
+    { name: '待处理', value: o.pending || 0, color: 'var(--gray-500)' },
+    { name: '待审核', value: o.review || 0, color: 'var(--color-warning-500)' },
+    { name: '已逾期', value: o.overdue || 0, color: 'var(--color-error-500)' },
+    { name: '待认领', value: o.unclaimed || 0, color: 'var(--chart-palette-5)' },
   ]
   statusChart.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -119,7 +120,7 @@ function renderWorkerChart() {
       label: { color: chartTextColor() },
       data: data.map((d, idx) => ({
         ...d,
-        itemStyle: { color: idx === 0 ? '#3182CE' : '#9F7AEA' },
+        itemStyle: { color: idx === 0 ? 'var(--task-human)' : 'var(--task-agent)' },
       })),
     }],
   })
@@ -137,8 +138,8 @@ function renderBurndownChart() {
     xAxis: { type: 'category', data: list.map(d => d.date), axisLabel: { color: chartTextColor(), hideOverlap: true } },
     yAxis: { type: 'value', axisLabel: { color: chartTextColor() }, splitLine: { lineStyle: { color: themeStore.isDark ? '#2d3748' : '#edf2f7' } } },
     series: [
-      { name: '已完成累计', type: 'line', smooth: true, data: list.map(d => d.completed), itemStyle: { color: '#38A169' }, areaStyle: { opacity: 0.12 } },
-      { name: '剩余', type: 'line', smooth: true, data: list.map(d => d.remaining), itemStyle: { color: '#E53E3E' } },
+      { name: '已完成累计', type: 'line', smooth: true, data: list.map(d => d.completed), itemStyle: { color: 'var(--color-success-500)' }, areaStyle: { opacity: 0.12 } },
+      { name: '剩余', type: 'line', smooth: true, data: list.map(d => d.remaining), itemStyle: { color: 'var(--color-error-500)' } },
     ],
   })
 }
@@ -195,6 +196,20 @@ watch(() => themeStore.isDark, () => nextTick(renderCharts))
           </a-col>
         </a-row>
 
+        <!-- 截止提醒 -->
+        <a-card title="截止提醒" size="small" class="chart-card risk-card">
+          <a-empty v-if="!stats.reminders?.length" description="暂无到期任务提醒" />
+          <ul v-else class="risk-list">
+            <li v-for="r in stats.reminders" :key="'rem-' + r.task_id + r.type" class="risk-item">
+              <a-tag :color="r.type === 'overdue' ? 'red' : 'orange'">
+                {{ r.type === 'overdue' ? '已逾期' : '即将到期' }}
+              </a-tag>
+              <span class="risk-title">{{ r.title }}</span>
+              <span class="risk-detail">{{ r.detail }}</span>
+            </li>
+          </ul>
+        </a-card>
+
         <!-- 风险清单 -->
         <a-card title="风险预警" size="small" class="chart-card risk-card">
           <a-empty v-if="!stats.risks?.length" description="暂无风险预警" />
@@ -227,9 +242,9 @@ watch(() => themeStore.isDark, () => nextTick(renderCharts))
 @media (max-width: 900px) { .overview-cards { grid-template-columns: repeat(2, 1fr); } }
 
 .ov-card {
-  background: var(--gray-10, #f7fafc);
-  border: 1px solid var(--gray-50, #e2e8f0);
-  border-radius: 10px;
+  background: var(--task-card-muted-bg, #f7fafc);
+  border: 1px solid var(--task-card-border, #e4e6e6);
+  border-radius: var(--radius-md, 8px);
   padding: 14px 16px;
   text-align: center;
 }

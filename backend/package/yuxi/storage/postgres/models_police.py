@@ -239,6 +239,7 @@ class PoliceTask(Base):
     result = Column(JSON, nullable=True)
     instructions = Column(Text, nullable=True)
     due_date = Column(DateTime, nullable=True)
+    assigned_at = Column(DateTime, nullable=True)  # 分配时间（任务时间链：创建/分配/开始/完成）
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     # 证据链防篡改签名 (POLICE_REQUIREMENTS §9.5)
@@ -285,6 +286,7 @@ class PoliceTask(Base):
             "result": self.result,
             "instructions": self.instructions,
             "due_date": format_utc_datetime(self.due_date),
+            "assigned_at": format_utc_datetime(self.assigned_at),
             "started_at": format_utc_datetime(self.started_at),
             "completed_at": format_utc_datetime(self.completed_at),
             "reviewed_by": self.reviewed_by,
@@ -388,6 +390,33 @@ class TaskEvent(Base):
             "event_type": self.event_type,
             "event_data": self.event_data,
             "created_by": self.created_by,
+            "created_at": format_utc_datetime(self.created_at),
+        }
+
+
+class PoliceTaskComment(Base):
+    """★ 任务评论区（任务详情弹窗「添加评论」）
+
+    民警/数字警员可就任务展开讨论，评论持久化到数据库；
+    轻量实现：复用 agent 评论模式，不引入独立评论服务。
+    """
+
+    __tablename__ = "police_task_comments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("police_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, nullable=True)  # NULL = 系统/匿名
+    user_name = Column(String(100), nullable=True)  # 冗余展示名（评论时快照）
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "task_id": self.task_id,
+            "user_id": self.user_id,
+            "user_name": self.user_name,
+            "content": self.content,
             "created_at": format_utc_datetime(self.created_at),
         }
 
@@ -959,4 +988,36 @@ class PoliceReflectionRecord(Base):
             "reviewed_at": format_utc_datetime(self.reviewed_at) if self.reviewed_at else None,
             "created_at": format_utc_datetime(self.created_at),
             "updated_at": format_utc_datetime(self.updated_at),
+        }
+
+
+class PoliceNotification(Base):
+    """★ 站内通知表 — 用于任务截止提醒等面向民警的通知
+
+    由 ARQ 定时任务扫描到期任务写入；前端可查询未读通知。
+    """
+
+    __tablename__ = "police_notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False, index=True)  # 接收人 users.id
+    case_id = Column(Integer, nullable=True, index=True)
+    task_id = Column(Integer, nullable=True, index=True)
+    type = Column(String(30), nullable=False)  # due_soon / overdue
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=True)
+    read_at = Column(DateTime, nullable=True)  # 为空=未读
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "case_id": self.case_id,
+            "task_id": self.task_id,
+            "type": self.type,
+            "title": self.title,
+            "content": self.content,
+            "read_at": format_utc_datetime(self.read_at),
+            "created_at": format_utc_datetime(self.created_at),
         }

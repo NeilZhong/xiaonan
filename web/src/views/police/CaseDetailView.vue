@@ -12,6 +12,8 @@ import TaskTreeView from '@/components/police/TaskTreeView.vue'
 import TaskCalendarView from '@/components/police/TaskCalendarView.vue'
 import TaskKanbanView from '@/components/police/TaskKanbanView.vue'
 import CaseStatsTab from '@/components/police/CaseStatsTab.vue'
+import TaskDetailModal from '@/components/police/TaskDetailModal.vue'
+import TaskCreateModal from '@/components/police/TaskCreateModal.vue'
 import { message } from 'ant-design-vue'
 import {
   ArrowLeftOutlined, UserOutlined, ClockCircleOutlined,
@@ -45,6 +47,7 @@ const taskColumns = [
   { title: '状态', dataIndex: 'status', key: 'status', width: 100 },
   { title: '执行人', dataIndex: 'assignees', key: 'assignees', width: 180 },
   { title: '优先级', dataIndex: 'priority', key: 'priority', width: 80 },
+  { title: '截止', dataIndex: 'due_date', key: 'due_date', width: 110 },
   { title: '操作', key: 'action', width: 80 },
 ]
 
@@ -59,6 +62,8 @@ const typeText = {
 }
 
 const priorityColor = { urgent: 'red', high: 'orange', medium: 'blue', low: 'default' }
+// 优先级中文文案（表格视图展示中文，避免裸英文 value）
+const priorityText = { urgent: '紧急', high: '高', medium: '中', low: '低' }
 
 const phaseSteps = [
   { key: 'research', title: '前期研判' },
@@ -73,25 +78,7 @@ const currentPhaseIndex = computed(() => {
 })
 
 // ── 创建任务 ──────────────────────────────────────────────
-const taskForm = ref({
-  title: '', type: 'evidence_collection', assignee_type: 'human',
-  assignee_id: null, assignee_name: '', priority: 'medium',
-  instructions: '',
-})
-
-const taskTypes = [
-  { label: '笔录分析', value: 'transcript_analysis' },
-  { label: '资金分析', value: 'fund_analysis' },
-  { label: '调证生成', value: 'evidence_collection' },
-  { label: '证据提交', value: 'evidence_submission' },
-  { label: '法制审核', value: 'legal_review' },
-  { label: '文书生成', value: 'document_generation' },
-  { label: '侦查', value: 'investigation' },
-  { label: '审讯', value: 'interrogation' },
-  { label: '抓捕', value: 'arrest' },
-  { label: '网警查询', value: 'cyber_inquiry' },
-  { label: '知识抽取', value: 'knowledge_extraction' },
-]
+// 表单逻辑已下沉到 TaskCreateModal.vue，此处仅保留弹窗开关状态
 
 async function loadCase() {
   loading.value = true
@@ -135,21 +122,7 @@ async function loadAgents() {
 }
 
 /** 当前分配选项（根据 assignee_type 切换） */
-const currentAssigneeOptions = computed(() =>
-  taskForm.value.assignee_type === 'agent' ? agentOptions.value : humanOptions.value
-)
-
-function handleAssigneeChange(value, option) {
-  taskForm.value.assignee_id = value
-  taskForm.value.assignee_name = option?.name || option?.label || ''
-}
-
-function handleAssigneeTypeChange(val) {
-  // 切换类型时清空已选分配对象
-  taskForm.value.assignee_type = val
-  taskForm.value.assignee_id = null
-  taskForm.value.assignee_name = ''
-}
+// 注：创建任务的分配逻辑已下沉 TaskCreateModal；此处保留的 human/agent 选项供「列表内分配弹窗」使用
 
 // ── 任务列表内分配已有任务（表格行 / 看板卡片共用） ──
 const assignModalVisible = ref(false)
@@ -224,26 +197,6 @@ function formatAssignees(task) {
   return `${assignees[0].assignee_name} 等 ${assignees.length} 人`
 }
 
-async function handleCreateTask() {
-  if (!taskForm.value.title) {
-    message.warning('请填写任务标题')
-    return
-  }
-  try {
-    await policeStore.createTask({
-      ...taskForm.value,
-      case_id: caseId.value,
-      phase: caseData.value?.phase,
-    })
-    message.success('任务创建成功')
-    showCreateTaskModal.value = false
-    taskForm.value = { title: '', type: 'evidence_collection', assignee_type: 'human', assignee_id: null, assignee_name: '', priority: 'medium', instructions: '' }
-    await policeStore.loadTasks({ case_id: caseId.value, page_size: 100 })
-  } catch (e) {
-    message.error('创建失败')
-  }
-}
-
 async function handlePhaseChange(phase) {
   try {
     await policeStore.updatePhase(caseId.value, phase)
@@ -254,8 +207,24 @@ async function handlePhaseChange(phase) {
   }
 }
 
+// 任务详情弹窗（点击任务 → 弹窗展示，替代整页路由跳转）
+const detailModalVisible = ref(false)
+const detailTaskId = ref(null)
+
 function goTask(taskId) {
-  router.push(`/police/tasks/${taskId}`)
+  detailTaskId.value = taskId
+  detailModalVisible.value = true
+}
+
+function closeTaskDetail() {
+  detailModalVisible.value = false
+  detailTaskId.value = null
+}
+
+/** 任务是否已逾期（有截止、未关闭、当前时间超过截止） */
+function isOverdue(task) {
+  if (!task.due_date || ['completed', 'cancelled', 'terminated'].includes(task.status)) return false
+  return new Date(task.due_date) < new Date()
 }
 
 function reloadTasks() {
@@ -302,63 +271,68 @@ watch(caseId, loadCase)
 
     <!-- Tab 区域 -->
     <a-tabs v-model:activeKey="activeTab" class="case-tabs">
-      <!-- 概览 -->
+      <!-- 概览（信息卡片 + 统计图表 左右分栏） -->
       <a-tab-pane key="overview" tab="概览">
-        <div class="overview-grid">
-          <div class="info-card">
-            <h3>案件信息</h3>
-            <div class="info-list">
-              <div class="info-item">
-                <span class="info-label">案件编号</span>
-                <span class="info-value">{{ caseData.case_number }}</span>
+        <div class="overview-layout">
+          <!-- 左栏：信息卡片 -->
+          <div class="overview-left">
+            <div class="info-card">
+              <h3>案件信息</h3>
+              <div class="info-list">
+                <div class="info-item">
+                  <span class="info-label">案件编号</span>
+                  <span class="info-value">{{ caseData.case_number }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">案件类型</span>
+                  <span class="info-value">{{ caseData.case_type || '—' }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">当前阶段</span>
+                  <span class="info-value"><a-tag color="blue">{{ phaseText[caseData.phase] }}</a-tag></span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">案件状态</span>
+                  <span class="info-value"><a-tag>{{ statusText[caseData.status] }}</a-tag></span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label"><DollarOutlined /> 涉案金额</span>
+                  <span class="info-value">{{ caseData.total_amount ? '¥' + Number(caseData.total_amount).toLocaleString() : '—' }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label"><EnvironmentOutlined /> 案发地点</span>
+                  <span class="info-value">{{ caseData.incident_location || '—' }}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label"><ClockCircleOutlined /> 创建时间</span>
+                  <span class="info-value">{{ caseData.created_at?.substring(0, 10) }}</span>
+                </div>
               </div>
-              <div class="info-item">
-                <span class="info-label">案件类型</span>
-                <span class="info-value">{{ caseData.case_type || '—' }}</span>
+            </div>
+
+            <div class="info-card">
+              <h3>案件描述</h3>
+              <div class="case-description">
+                {{ caseData.description || '暂无描述' }}
               </div>
-              <div class="info-item">
-                <span class="info-label">当前阶段</span>
-                <span class="info-value"><a-tag color="blue">{{ phaseText[caseData.phase] }}</a-tag></span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">案件状态</span>
-                <span class="info-value"><a-tag>{{ statusText[caseData.status] }}</a-tag></span>
-              </div>
-              <div class="info-item">
-                <span class="info-label"><DollarOutlined /> 涉案金额</span>
-                <span class="info-value">{{ caseData.total_amount ? '¥' + Number(caseData.total_amount).toLocaleString() : '—' }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label"><EnvironmentOutlined /> 案发地点</span>
-                <span class="info-value">{{ caseData.incident_location || '—' }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label"><ClockCircleOutlined /> 创建时间</span>
-                <span class="info-value">{{ caseData.created_at?.substring(0, 10) }}</span>
+            </div>
+
+            <div class="info-card">
+              <h3>受害人信息</h3>
+              <div class="case-description">
+                <template v-if="caseData.victim_info && Object.keys(caseData.victim_info).length">
+                  <pre>{{ JSON.stringify(caseData.victim_info, null, 2) }}</pre>
+                </template>
+                <template v-else>暂无</template>
               </div>
             </div>
           </div>
 
-          <div class="info-card">
-            <h3>案件描述</h3>
-            <div class="case-description">
-              {{ caseData.description || '暂无描述' }}
-            </div>
-
-            <h3 style="margin-top: 24px">受害人信息</h3>
-            <div class="case-description">
-              <template v-if="caseData.victim_info && Object.keys(caseData.victim_info).length">
-                <pre>{{ JSON.stringify(caseData.victim_info, null, 2) }}</pre>
-              </template>
-              <template v-else>暂无</template>
-            </div>
+          <!-- 右栏：统计图表 -->
+          <div class="overview-right">
+            <CaseStatsTab :case-id="caseId" />
           </div>
         </div>
-      </a-tab-pane>
-
-      <!-- 统计 -->
-      <a-tab-pane key="stats" tab="统计">
-        <CaseStatsTab :case-id="caseId" />
       </a-tab-pane>
 
       <!-- 任务（整合看板/表格双视图） -->
@@ -387,9 +361,16 @@ watch(caseId, loadCase)
                 <a-badge :status="taskStatusColor[record.status]" :text="taskStatusText[record.status]" />
               </template>
               <template v-else-if="column.key === 'priority'">
-                <a-tag :color="{ urgent: 'red', high: 'orange', medium: 'blue', low: 'default' }[record.priority]">
-                  {{ record.priority }}
+                <a-tag v-if="record.priority === 'urgent'" color="red" class="priority-urgent">紧急</a-tag>
+                <a-tag v-else :color="priorityColor[record.priority]">
+                  {{ priorityText[record.priority] || record.priority }}
                 </a-tag>
+              </template>
+              <template v-else-if="column.key === 'due_date'">
+                <span v-if="record.due_date" :class="{ 'due-overdue': isOverdue(record) }">
+                  {{ String(record.due_date).substring(0, 10) }}
+                </span>
+                <span v-else class="text-gray">—</span>
               </template>
               <template v-else-if="column.key === 'assignees'">
                 <span v-if="record.assignees && record.assignees.length">
@@ -470,59 +451,14 @@ watch(caseId, loadCase)
       </a-tab-pane>
     </a-tabs>
 
-    <!-- 创建任务弹窗 -->
-    <a-modal v-model:open="showCreateTaskModal" title="创建任务" @ok="handleCreateTask" width="560px">
-      <a-form layout="vertical" style="margin-top: 16px">
-        <a-form-item label="任务标题" required>
-          <a-input v-model:value="taskForm.title" placeholder="如: 调取工行账户6222****1234流水" />
-        </a-form-item>
-        <a-row :gutter="16">
-          <a-col :span="12">
-            <a-form-item label="任务类型">
-              <a-select v-model:value="taskForm.type">
-                <a-select-option v-for="t in taskTypes" :key="t.value" :value="t.value">{{ t.label }}</a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-          <a-col :span="12">
-            <a-form-item label="优先级">
-              <a-select v-model:value="taskForm.priority">
-                <a-select-option value="urgent">紧急</a-select-option>
-                <a-select-option value="high">高</a-select-option>
-                <a-select-option value="medium">中</a-select-option>
-                <a-select-option value="low">低</a-select-option>
-              </a-select>
-            </a-form-item>
-          </a-col>
-        </a-row>
-        <a-form-item label="分配给">
-          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-            <a-radio-group v-model:value="taskForm.assignee_type" size="small" @change="(e) => handleAssigneeTypeChange(e.target.value)">
-              <a-radio-button value="human">
-                <UserOutlined /> 办案民警
-              </a-radio-button>
-              <a-radio-button value="agent">
-                <TeamOutlined /> 智能体
-              </a-radio-button>
-            </a-radio-group>
-          </div>
-          <a-select
-            v-model:value="taskForm.assignee_id"
-            :options="currentAssigneeOptions"
-            :placeholder="taskForm.assignee_type === 'agent' ? '选择智能体' : '选择办案民警'"
-            :loading="taskForm.assignee_type === 'agent' ? agentsLoading : loading"
-            allow-clear
-            show-search
-            option-filter-prop="label"
-            @change="handleAssigneeChange"
-            :not-found-content="taskForm.assignee_type === 'agent' ? (agentsLoading ? '加载中...' : '暂无可用智能体') : '暂无案件成员'"
-          />
-        </a-form-item>
-        <a-form-item label="任务指引">
-          <a-textarea v-model:value="taskForm.instructions" :rows="3" placeholder="任务详细要求和注意事项" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
+    <!-- 创建任务弹窗（与详情弹窗统一风格） -->
+    <TaskCreateModal
+      :visible="showCreateTaskModal"
+      :case-id="caseId"
+      :phase="caseData.phase"
+      @close="showCreateTaskModal = false"
+      @created="reloadTasks"
+    />
 
     <!-- 阶段切换弹窗 -->
     <a-modal v-model:open="showPhaseModal" title="切换案件阶段" :footer="null" width="400px">
@@ -532,7 +468,11 @@ watch(caseId, loadCase)
           :key="step.key"
           class="phase-select-item"
           :class="{ current: step.key === caseData.phase }"
+          role="button"
+          :tabindex="0"
+          :aria-label="`切换到${step.title}阶段`"
           @click="handlePhaseChange(step.key)"
+          @keydown="(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handlePhaseChange(step.key) } }"
         >
           <span>{{ step.title }}</span>
           <a-tag v-if="step.key === caseData.phase" color="blue">当前</a-tag>
@@ -588,6 +528,14 @@ watch(caseId, loadCase)
         </div>
       </a-form>
     </a-modal>
+
+    <!-- 任务详情弹窗（点击任务 → 弹窗展示） -->
+    <TaskDetailModal
+      :visible="detailModalVisible"
+      :task-id="detailTaskId"
+      @close="closeTaskDetail"
+      @refresh="reloadTasks"
+    />
   </div>
   <div v-else class="loading-state">
     <a-spin size="large" />
@@ -724,17 +672,34 @@ export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
   gap: 8px;
 }
 
-/* 概览 */
-.overview-grid {
+/* 概览 — 信息卡 + 统计图表 左右分栏 */
+.overview-layout {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.overview-left {
+  display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 
+.overview-right {
+  min-width: 0;
+}
+
+@media (max-width: 1200px) {
+  .overview-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .info-card {
-  background: var(--gray-10, #f7fafc);
-  border: 1px solid var(--gray-50, #e2e8f0);
-  border-radius: 10px;
+  background: var(--task-card-muted-bg, #f7fafc);
+  border: 1px solid var(--task-card-border, #e4e6e6);
+  border-radius: var(--radius-md, 8px);
   padding: 20px;
 }
 
@@ -821,18 +786,22 @@ export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
   align-items: center;
   padding: 12px 16px;
   border: 1px solid var(--gray-50, #e2e8f0);
-  border-radius: 8px;
+  border-radius: var(--radius-md, 8px);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--motion-instant, 150ms);
   font-size: 14px;
 }
 
 .phase-select-item:hover {
   border-color: var(--main-color, #24839b);
 }
+.phase-select-item:focus-visible {
+  outline: 2px solid var(--main-color, #24839b);
+  outline-offset: 2px;
+}
 
 .phase-select-item.current {
-  background: var(--main-color, #24839b)10;
+  background: var(--color-accent-10, #eef4ff);
   border-color: var(--main-color, #24839b);
 }
 
@@ -856,14 +825,22 @@ export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
   gap: 6px;
   align-items: center;
   padding: 12px;
-  background: #f6f8fa;
-  border-radius: 8px;
+  background: var(--task-card-muted-bg, #f6f8fa);
+  border-radius: var(--radius-md, 8px);
   margin-top: 4px;
 }
 .assign-count {
-  font-size: 12px;
-  color: #718096;
+  font-size: var(--task-font-size-sm, 12px);
+  color: var(--gray-500, #718096);
   margin-left: 4px;
 }
-.text-gray { color: #a0aec0; }
+.text-gray { color: var(--gray-400, #a0aec0); }
+
+.priority-urgent {
+  font-weight: 600;
+}
+.due-overdue {
+  color: var(--color-error-500, #e53e3e);
+  font-weight: 600;
+}
 </style>

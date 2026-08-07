@@ -950,6 +950,8 @@ class PostgresManager(metaclass=SingletonMeta):
             # v2.1 §4.3 / §9.2 审核人字段（幂等加列）
             "ALTER TABLE police_tasks ADD COLUMN IF NOT EXISTS reviewer_id INTEGER REFERENCES users(id)",
             "ALTER TABLE police_tasks ADD COLUMN IF NOT EXISTS require_approval INTEGER DEFAULT 0",
+            # 任务时间链：分配时间（配合 created_at/started_at/completed_at/due_date，供燃尽/日历/甘特）
+            "ALTER TABLE police_tasks ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ",
             # 任务流转规则表
             """
             CREATE TABLE IF NOT EXISTS police_task_flow_rules (
@@ -980,6 +982,34 @@ class PostgresManager(metaclass=SingletonMeta):
             """,
             "CREATE INDEX IF NOT EXISTS ix_police_task_events_case ON police_task_events(case_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_task_events_task ON police_task_events(task_id)",
+            # 任务评论区（任务详情弹窗「添加评论」）
+            """
+            CREATE TABLE IF NOT EXISTS police_task_comments (
+                id SERIAL PRIMARY KEY,
+                task_id INTEGER NOT NULL REFERENCES police_tasks(id) ON DELETE CASCADE,
+                user_id INTEGER,
+                user_name VARCHAR(100),
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_task_comments_task ON police_task_comments(task_id)",
+            # 站内通知表（任务截止提醒等）
+            """
+            CREATE TABLE IF NOT EXISTS police_notifications (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                case_id INTEGER,
+                task_id INTEGER,
+                type VARCHAR(30) NOT NULL,
+                title VARCHAR(200) NOT NULL,
+                content TEXT,
+                read_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_police_notifications_user ON police_notifications(user_id)",
+            "CREATE INDEX IF NOT EXISTS ix_police_notifications_task ON police_notifications(task_id)",
             # 证据材料表
             """
             CREATE TABLE IF NOT EXISTS police_evidence (

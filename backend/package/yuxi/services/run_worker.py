@@ -671,8 +671,23 @@ async def _worker_shutdown(ctx):
     await pg_manager.close()
 
 
+async def police_due_reminder_cron(ctx):
+    """每日扫描到期任务并写入站内提醒（best-effort）。"""
+    from yuxi.services.police_due_reminder_service import police_due_reminder_service
+
+    try:
+        written = await police_due_reminder_service.scan_and_notify()
+        logger.info(f"[police_due_reminder] scanned, {written} notifications written")
+    except Exception as exc:  # noqa: BLE001 — 定时任务失败不应影响 worker 生命周期
+        logger.error(f"[police_due_reminder] scan failed: {exc}")
+
+
 class WorkerSettings:
-    functions = [process_agent_run]
+    functions = [process_agent_run, police_due_reminder_cron]
+    cron_jobs = [
+        # 每日 08:30 扫描任务截止提醒（worker 本地时区）
+        {"cron": {"hour": 8, "minute": 30}, "func": police_due_reminder_cron, "unique": True},
+    ]
     max_tries = 2
     retry_jobs = True
     job_timeout = 3600
