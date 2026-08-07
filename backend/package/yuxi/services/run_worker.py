@@ -6,6 +6,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass, field
+from arq import cron
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
@@ -686,7 +687,7 @@ class WorkerSettings:
     functions = [process_agent_run, police_due_reminder_cron]
     cron_jobs = [
         # 每日 08:30 扫描任务截止提醒（worker 本地时区）
-        {"cron": {"hour": 8, "minute": 30}, "func": police_due_reminder_cron, "unique": True},
+        cron(police_due_reminder_cron, hour=8, minute=30, unique=True),
     ]
     max_tries = 2
     retry_jobs = True

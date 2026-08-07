@@ -444,20 +444,6 @@ const segmentOptions = [
 const activeSegment = computed(() => (props.showSegmented ? currentSegment.value : props.segment))
 // 空配置项文案错落上浮（TextsReveal）：出现时播放一次
 const segmentEmptyShown = ref(false)
-watch(
-  isCurrentSegmentEmpty,
-  (v) => {
-    if (v) {
-      segmentEmptyShown.value = false
-      nextTick(() => {
-        segmentEmptyShown.value = true
-      })
-    } else {
-      segmentEmptyShown.value = false
-    }
-  },
-  { immediate: true }
-)
 const isToolResourceKind = (kind) => isDefaultAllAgentResourceKind(kind)
 const KNOWLEDGE_BASE_SKILL_SLUG = 'knowledge-base'
 
@@ -499,6 +485,22 @@ const filteredConfigurableItems = computed(() => {
 
 const isCurrentSegmentEmpty = computed(
   () => !isEmptyConfig.value && Object.keys(filteredConfigurableItems.value).length === 0
+)
+
+// 空配置项文案错落上浮（TextsReveal）：出现时播放一次
+watch(
+  isCurrentSegmentEmpty,
+  (v) => {
+    if (v) {
+      segmentEmptyShown.value = false
+      nextTick(() => {
+        segmentEmptyShown.value = true
+      })
+    } else {
+      segmentEmptyShown.value = false
+    }
+  },
+  { immediate: true }
 )
 
 // 判断是否为需要跳转的配置类型
