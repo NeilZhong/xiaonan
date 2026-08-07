@@ -1170,7 +1170,7 @@ class PostgresManager(metaclass=SingletonMeta):
                 version_label VARCHAR(20) NOT NULL,
                 change_summary VARCHAR(500),
                 config_snapshot JSON,
-                release_mode VARCHAR(20) NOT NULL DEFAULT 'rolling',
+                release_mode VARCHAR(20) NOT NULL DEFAULT 'controlled',
                 status VARCHAR(20) NOT NULL DEFAULT 'active',
                 created_by INTEGER,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -1184,13 +1184,16 @@ class PostgresManager(metaclass=SingletonMeta):
             CREATE TABLE IF NOT EXISTS police_agent_release_state (
                 id SERIAL PRIMARY KEY,
                 agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-                release_mode VARCHAR(20) NOT NULL DEFAULT 'rolling',
+                release_mode VARCHAR(20) NOT NULL DEFAULT 'controlled',
                 current_version_id INTEGER,
                 draft_version_id INTEGER,
                 updated_at TIMESTAMPTZ DEFAULT NOW()
             )
             """,
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_police_agent_release_state_agent ON police_agent_release_state(agent_id)",
+            # 运行模式默认改为受控发布（controlled）：修正已存在表的列默认值
+            "ALTER TABLE IF EXISTS police_agent_versions ALTER COLUMN release_mode SET DEFAULT 'controlled'",
+            "ALTER TABLE IF EXISTS police_agent_release_state ALTER COLUMN release_mode SET DEFAULT 'controlled'",
             # 数字民警办案复盘记录（模块 I.1：任务后反思三环节 + 技能自修复修订建议，待审流）
             """
             CREATE TABLE IF NOT EXISTS police_reflection_records (

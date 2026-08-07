@@ -619,7 +619,7 @@ class PoliceAgentVersion(Base):
     version_label = Column(String(20), nullable=False)  # v0.1 / v0.2 ...
     change_summary = Column(String(500), nullable=True)
     config_snapshot = Column(JSON, nullable=True)  # 全量 config_json 快照
-    release_mode = Column(String(20), default="rolling")  # rolling / controlled
+    release_mode = Column(String(20), default="controlled")  # rolling / controlled（默认受控发布）
     status = Column(String(20), default="active", index=True)  # active / superseded / rolled_back / draft
     created_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
@@ -649,7 +649,7 @@ class PoliceAgentReleaseState(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     agent_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
-    release_mode = Column(String(20), default="rolling")  # rolling / controlled
+    release_mode = Column(String(20), default="controlled")  # rolling / controlled（默认受控发布）
     current_version_id = Column(Integer, nullable=True)
     draft_version_id = Column(Integer, nullable=True)
     updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)

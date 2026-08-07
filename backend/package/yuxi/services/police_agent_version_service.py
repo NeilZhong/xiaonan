@@ -23,13 +23,14 @@ from yuxi.storage.postgres.models_police import (
     PoliceAgentVersion,
 )
 from yuxi.utils import logger
+from yuxi.utils.datetime_utils import utc_now_naive
 
 
 async def _get_or_create_release_state(session, agent_id: int) -> PoliceAgentReleaseState:
     stmt = select(PoliceAgentReleaseState).where(PoliceAgentReleaseState.agent_id == agent_id)
     state = (await session.execute(stmt)).scalar_one_or_none()
     if not state:
-        state = PoliceAgentReleaseState(agent_id=agent_id, release_mode="rolling")
+        state = PoliceAgentReleaseState(agent_id=agent_id, release_mode="controlled")
         session.add(state)
         await session.flush()
     return state
@@ -68,7 +69,7 @@ class PoliceAgentVersionService:
                 release_mode=state.release_mode,
                 status="draft" if state.release_mode == "controlled" else "active",
                 created_by=created_by,
-                created_at=__import__("yuxi.utils.datetime_utils", fromlist=["utc_now_naive"]).utc_now_naive(),
+                created_at=utc_now_naive(),
                 published_at=None,
             )
             session.add(new_version)
@@ -119,7 +120,7 @@ class PoliceAgentVersionService:
         return {
             "items": items,
             "total": len(items),
-            "release_mode": state.release_mode if state else "rolling",
+            "release_mode": state.release_mode if state else "controlled",
             "current_version_id": state.current_version_id if state else None,
             "draft_version_id": state.draft_version_id if state else None,
         }
@@ -175,7 +176,7 @@ class PoliceAgentVersionService:
             if not draft or draft.status != "draft":
                 raise ValueError("草稿版本不存在或已发布")
             draft.status = "active"
-            draft.published_at = __import__("yuxi.utils.datetime_utils", fromlist=["utc_now_naive"]).utc_now_naive()
+            draft.published_at = utc_now_naive()
             if state.current_version_id:
                 old = await session.get(PoliceAgentVersion, state.current_version_id)
                 if old:
@@ -224,8 +225,8 @@ class PoliceAgentVersionService:
                 release_mode=state.release_mode,
                 status="active",
                 created_by=current_user.id,
-                created_at=__import__("yuxi.utils.datetime_utils", fromlist=["utc_now_naive"]).utc_now_naive(),
-                published_at=__import__("yuxi.utils.datetime_utils", fromlist=["utc_now_naive"]).utc_now_naive(),
+                created_at=utc_now_naive(),
+                published_at=utc_now_naive(),
             )
             session.add(new_version)
             await session.flush()
@@ -276,7 +277,7 @@ class PoliceAgentVersionService:
                 synced = False
         return {
             "synced": synced,
-            "release_mode": state.release_mode if state else "rolling",
+            "release_mode": state.release_mode if state else "controlled",
             "current_version_label": latest.version_label if latest and latest.status == "active" else None,
             "draft_count": 1 if (state and state.draft_version_id) else 0,
             "details": details,

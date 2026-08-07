@@ -37,10 +37,30 @@ from yuxi.services.agent_run_service import (
 from yuxi.services.input_message_service import build_chat_input_message
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import User
+from yuxi.utils import logger
 
 from server.utils.auth_middleware import get_admin_user, get_db, get_required_user
 
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
+
+
+async def _snapshot_agent_version(agent, current_user: User, summary: str, publish_baseline: bool = False) -> None:
+    """数字警员保存后自动生成版本快照（运行中心）。
+
+    仅对数字警员（非协助伙伴、非平台内置）生效。受控发布（默认）下新版本进草稿，
+    流动模式立即生效；publish_baseline=True 时（首次创建）将初始版本直接发布为当前版本，
+    建立可回退基线。失败不阻断主流程。
+    """
+    try:
+        from yuxi.services.police_agent_version_service import police_agent_version_service
+        is_digital_officer = not getattr(agent, "is_subagent", False) and not getattr(agent, "is_system", False)
+        if not is_digital_officer:
+            return
+        await police_agent_version_service.create_snapshot(agent_id=agent.id, change_summary=summary)
+        if publish_baseline:
+            await police_agent_version_service.publish_draft(agent_id=agent.id, current_user=current_user)
+    except Exception as exc:
+        logger.warning(f"数字警员版本快照失败 (agent={getattr(agent, 'id', None)}): {exc}")
 
 
 class AgentCreate(BaseModel):
@@ -198,6 +218,8 @@ async def create_agent(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # 数字警员首次创建：发布初始版本作为可回退基线
+    await _snapshot_agent_version(item, current_user, "初始版本", publish_baseline=True)
     return {"agent": await _serialize_agent(repo, item, current_user, include_configurable_items=True)}
 
 
@@ -254,6 +276,11 @@ async def update_agent(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # 数字警员定义改动：自动生成版本快照（受控默认进草稿，流动立即生效）
+    snap_keys = {"name", "system_prompt", "config_json", "category", "agent_type", "status"}
+    changed = snap_keys & fields_set
+    if changed:
+        await _snapshot_agent_version(updated, current_user, f"更新：{', '.join(sorted(changed))}")
     return {"agent": await _serialize_agent(repo, updated, current_user, include_configurable_items=True)}
 
 

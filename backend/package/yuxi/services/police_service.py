@@ -869,11 +869,13 @@ class PoliceAgentService:
         await police_agent_repository.update(agent.id, {"config_json": {"context": cfg_ctx}})
         await self._audit_agent(agent_id, "update", data)
         agent = await police_agent_repository.get_by_id(agent_id)
-        # 版本自动快照（运行中心：灵魂/资产改动 → 新版本；rolling 立即生效 / controlled 进草稿）
+        # 版本自动快照（运行中心：仅数字警员，灵魂/资产改动 → 新版本；
+        # controlled 默认进草稿待发布，rolling 立即生效）
         try:
             from yuxi.services.police_agent_version_service import police_agent_version_service
             changed_keys = [k for k in ("system_prompt", "model_config", "tools", "skills", "sop_ids") if k in fields]
-            if changed_keys:
+            is_digital_officer = not getattr(agent, "is_subagent", False) and not getattr(agent, "is_system", False)
+            if changed_keys and is_digital_officer:
                 await police_agent_version_service.create_snapshot(
                     agent_id=agent_id,
                     change_summary=f"更新：{', '.join(changed_keys)}",
