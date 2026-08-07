@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import select
 
 from yuxi.repositories.police_agent_repository import police_agent_repository
+from yuxi.services.police_governance_service import get_default_release_mode
 from yuxi.services.police_service import write_audit_log
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import Agent, User
@@ -27,10 +28,11 @@ from yuxi.utils.datetime_utils import utc_now_naive
 
 
 async def _get_or_create_release_state(session, agent_id: int) -> PoliceAgentReleaseState:
+    """取发布状态；首次建立时采用管理员在运行中心设定的平台默认模式（默认受控发布）。"""
     stmt = select(PoliceAgentReleaseState).where(PoliceAgentReleaseState.agent_id == agent_id)
     state = (await session.execute(stmt)).scalar_one_or_none()
     if not state:
-        state = PoliceAgentReleaseState(agent_id=agent_id, release_mode="controlled")
+        state = PoliceAgentReleaseState(agent_id=agent_id, release_mode=await get_default_release_mode())
         session.add(state)
         await session.flush()
     return state

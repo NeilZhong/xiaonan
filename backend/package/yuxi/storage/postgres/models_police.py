@@ -702,6 +702,27 @@ class PoliceAgentReleaseState(Base):
         }
 
 
+class PoliceGovernanceConfig(Base):
+    """★ 治理后台全局配置（单行表，id 恒为 1）
+
+    目前仅承载平台默认运行模式：新智能体首次建立发布状态时取此值，
+    默认 controlled（受控发布）——每次改动进草稿待管理员复审。
+    """
+
+    __tablename__ = "police_governance_config"
+
+    id = Column(Integer, primary_key=True)  # 固定为 1，保证全局唯一
+    default_release_mode = Column(String(20), nullable=False, default="controlled")  # rolling / controlled
+    updated_by = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=utc_now_naive, onupdate=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "default_release_mode": self.default_release_mode,
+            "updated_by": self.updated_by,
+            "updated_at": format_utc_datetime(self.updated_at),
+        }
+
 
 class PoliceSOP(Base):
     """★ SOP 流程技能定义表 (融合 StaffDeck 状态机驱动 SOP 概念)

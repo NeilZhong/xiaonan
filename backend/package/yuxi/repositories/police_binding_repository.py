@@ -63,6 +63,16 @@ class AgentBindingRepository:
             )
             return {row[0] for row in (await session.execute(stmt)).all()}
 
+    async def count_active_by_agent(self) -> dict[int, int]:
+        """全平台各智能体的 active 绑定数（治理后台状态总览用，单次聚合避免 N+1）。"""
+        async with pg_manager.get_async_session_context() as session:
+            stmt = (
+                select(PoliceAgentConnection.agent_id, func.count(PoliceAgentConnection.id))
+                .where(PoliceAgentConnection.status == "active")
+                .group_by(PoliceAgentConnection.agent_id)
+            )
+            return {row[0]: row[1] for row in (await session.execute(stmt)).all()}
+
     async def ensure_connection(
         self, *, user_id: int, agent_id: int, status: str = "active",
     ) -> tuple[PoliceAgentConnection, bool]:

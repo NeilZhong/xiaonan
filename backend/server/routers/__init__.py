@@ -37,6 +37,7 @@ from server.routers.police_partner_router import (
     connection_router as police_connection_router,
 )
 from server.routers.police_agent_version_router import version_router as police_version_router
+from server.routers.police_governance_router import governance_router as police_governance_router
 from server.routers.police_market_router import market_router as police_market_router
 from server.routers.police_reflection_router import reflection_router as police_reflection_router
 from server.routers.police_incubation_router import incubation_router as police_incubation_router
@@ -86,6 +87,7 @@ router.include_router(police_partner_router)         # /api/police/partners/* �
 router.include_router(police_equip_router)           # /api/police/agents/:id/partners/* 数字警员装备区
 router.include_router(police_connection_router)      # /api/police/agent-connections/* 用户↔数字警员连接
 router.include_router(police_version_router)         # /api/police/agents/:id/(versions|switch-mode|health) 版本与发布控制
+router.include_router(police_governance_router)      # /api/police/admin/* 治理后台：审核台与运行中心
 router.include_router(police_notification_router)    # /api/police/notifications/* 站内通知（截止提醒）
 
 if not _LITE_MODE:

@@ -40,6 +40,8 @@
 - 智能体系统提示词修复（Phase 3.3）：对话时 LLM 回复模型默认身份而非自定义角色。两层修复：① `chat_service._resolve_agent_runtime()` 增加 DA- 前缀 slug 检测 + police_agents 表兜底读取（防 yuxi config 被覆盖丢失）；② `prompt.py build_prompt_with_context()` 改为自定义 system_prompt **前置为主身份**、基础 PROMPT（"你是小南"）降级追加在后（原顺序导致模型优先采纳基础身份声明，忽略末尾的自定义角色）。14 项单测覆盖兜底+排序两种场景。
 - 文件预览去 LibreOffice 依赖：移除后端 office→PDF 转换链路（`convert_office_to_pdf` 及 PDF 缓存/落盘），docx/doc/pptx/ppt/xlsx/xls/odt/ods/odp 全部原样回传字节，由前端 File Viewer 渲染；xlsx 等表格类从「不支持」改为可预览。
 
+- 新增治理后台（管理员，P3）：后端新增 `police_governance_service.py` + `police_governance_router.py`（前缀 `/api/police/admin`，超管专属），提供审核台（`GET /review/pending` 待审聚合、`GET /review/{agent_id}` 详情、`POST /review/{agent_id}/preview` 内嵌试跑、`POST /review/{request_type}/{request_id}/decide` 通过/驳回并落审计）与运行中心（`GET /runtime-config` + `PUT /runtime-config` 平台默认运行模式开关、`GET /runtime-overview` 在线/下线 + 绑定数总览）；新增 `police_governance_config` 单行表（默认受控发布），新智能体首发状态取平台默认；审核试跑回显真实生效模型便于判断可信度；全局共享审批经市场 approve 链路并补充 reason 入审计。新增集成测试 `test_police_governance_router.py`，容器内 E2E（临时超管）全绿。另修复 P2c `manager.py` 非法 `ALTER TABLE IF NOT EXISTS ... ADD COLUMN IF NOT EXISTS` 语法致 schema 初始化整体回滚的问题（加列移至 guarded 块）。
+
 ## v0.7.1 (2026-07-17)
 
 ### 安全

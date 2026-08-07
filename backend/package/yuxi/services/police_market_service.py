@@ -317,9 +317,9 @@ class PoliceMarketService:
 
     async def approve(
         self, *, request_type: str, request_id: int, approved: bool,
-        reviewer_id: int,
+        reviewer_id: int, reason: str | None = None,
     ) -> dict[str, Any]:
-        """超管审批市场申请。template 无审批链（MVP）。"""
+        """超管审批市场申请。template 无审批链（MVP）。reason 为驳回/通过理由，仅入审计。"""
         if request_type == "agent":
             result = await police_agent_service.approve_agent(
                 request_id, approved=approved, reviewer_id=reviewer_id,
@@ -337,7 +337,7 @@ class PoliceMarketService:
 
         await write_audit_log(
             action="market.approve", resource_type=request_type, resource_id=request_id,
-            user_id=reviewer_id, details={"approved": approved},
+            user_id=reviewer_id, details={"approved": approved, "reason": reason},
         )
         return {"ok": True, "status": "approved" if approved else "rejected"}
 

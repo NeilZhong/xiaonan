@@ -1166,11 +1166,8 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_user ON police_agent_connections(user_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_agent ON police_agent_connections(agent_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_status ON police_agent_connections(status)",
-            "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_pinned ON police_agent_connections(pinned_version_id)",
-            # 绑定表新增字段（P2c：版本 pin / 昵称 / 通知偏好）移至独立事务加列（见下方 guarded 块）
-            "ALTER TABLE IF NOT EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ",
-            "ALTER TABLE IF NOT EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS nickname VARCHAR(80)",
-            "ALTER TABLE IF NOT EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS notify_new_version BOOLEAN NOT NULL DEFAULT TRUE",
+            # 绑定表新增字段（P2c：版本 pin / 昵称 / 通知偏好）及其索引统一在下方独立事务处理，
+            # 因为老库尚无这些列，放在共享 stmts 里会先于加列执行而整体回滚。
             # 数字警察 ↔ 协助伙伴 关联表（定义侧关联，添加时级联；不复制警员身份）
             """
             CREATE TABLE IF NOT EXISTS agent_associated_partners (
@@ -1215,6 +1212,17 @@ class PostgresManager(metaclass=SingletonMeta):
             # 运行模式默认改为受控发布（controlled）：修正已存在表的列默认值
             "ALTER TABLE IF EXISTS police_agent_versions ALTER COLUMN release_mode SET DEFAULT 'controlled'",
             "ALTER TABLE IF EXISTS police_agent_release_state ALTER COLUMN release_mode SET DEFAULT 'controlled'",
+            # 治理后台全局配置（单行，id 恒为 1）：平台默认运行模式
+            """
+            CREATE TABLE IF NOT EXISTS police_governance_config (
+                id INTEGER PRIMARY KEY,
+                default_release_mode VARCHAR(20) NOT NULL DEFAULT 'controlled',
+                updated_by INTEGER,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """,
+            "INSERT INTO police_governance_config (id, default_release_mode) VALUES (1, 'controlled') "
+            "ON CONFLICT (id) DO NOTHING",
             # 数字民警办案复盘记录（模块 I.1：任务后反思三环节 + 技能自修复修订建议，待审流）
             """
             CREATE TABLE IF NOT EXISTS police_reflection_records (
@@ -1367,10 +1375,20 @@ class PostgresManager(metaclass=SingletonMeta):
         # P2c 绑定表新增字段（版本 pin / 昵称 / 通知偏好）：独立事务加列，确保不被共享 stmts 事务回滚影响
         try:
             async with self.async_engine.begin() as conn:
-                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS pinned_version_id INTEGER"))
-                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ"))
-                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS nickname VARCHAR(80)"))
-                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS notify_new_version BOOLEAN NOT NULL DEFAULT TRUE"))
+                for column_ddl in (
+                    "pinned_version_id INTEGER",
+                    "pinned_at TIMESTAMPTZ",
+                    "nickname VARCHAR(80)",
+                    "notify_new_version BOOLEAN NOT NULL DEFAULT TRUE",
+                ):
+                    await conn.execute(text(
+                        "ALTER TABLE IF EXISTS police_agent_connections "
+                        f"ADD COLUMN IF NOT EXISTS {column_ddl}"
+                    ))
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_pinned "
+                    "ON police_agent_connections(pinned_version_id)"
+                ))
         except Exception as e:
             logger.warning(f"加列 police_agent_connections 绑定字段失败（可安全重试）: {e}")
 
