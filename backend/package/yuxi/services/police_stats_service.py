@@ -153,15 +153,26 @@ class PoliceCaseStatsService:
                 d = ref_time.date()
                 completed_by_date[d] = completed_by_date.get(d, 0) + 1
 
+        # 新建累计：按 created_at 累加，反映案件工作量（待办）的流入
+        created_by_date: dict = {}
+        for t in tasks:
+            ct = _as_utc(t.created_at)
+            if ct:
+                d = ct.date()
+                created_by_date[d] = created_by_date.get(d, 0) + 1
+
         series: list[dict[str, Any]] = []
         cum = 0
+        cum_created = 0
         cur = start
         while cur <= end:
             cum += completed_by_date.get(cur, 0)
+            cum_created += created_by_date.get(cur, 0)
             series.append({
                 "date": cur.isoformat(),
                 "completed": cum,
                 "remaining": total - cum,
+                "created": cum_created,
             })
             cur += timedelta(days=1)
         return series

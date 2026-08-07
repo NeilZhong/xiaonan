@@ -18,6 +18,23 @@ const themeStore = useThemeStore()
 const loading = ref(false)
 const stats = ref(null)
 
+// ── 图表配色（真实 hex，不可写 var(--...)：ECharts 渲染到 canvas 无法解析 CSS 变量，会回退成黑色）──
+// 取值与上方「概览指标卡」数字颜色严格一一对应（见 base.css 语义 token），整体偏柔和、不刺眼。
+const CHART_COLORS = {
+  total: '#174591',       // 任务总数（main-color）
+  completed: '#52c41a',   // 已完成（success-500）
+  inProgress: '#1890ff',  // 进行中（info-500）
+  pending: '#979999',     // 待处理（gray-500）
+  review: '#faad14',      // 待审核（warning-500）
+  overdue: '#ff4d4f',     // 已逾期（error-500）
+  assigned: '#2e6dce',    // 已分配（accent-500）
+  unclaimed: '#9581cc',   // 待认领（chart-palette-5）
+  human: '#1890ff',       // 办案民警（info-500，与进行中同族）
+  agent: '#2e6dce',       // 数字民警（accent-500，与已分配同族）
+  remaining: '#fa8c16',   // 剩余（柔和橙，非 error 红，避免与逾期混淆）
+  velocity: '#9581cc',    // 每日完成数（紫，与待认领同族）
+}
+
 // ── 概览指标卡定义 ──
 // 颜色一律用语义 token（明暗自适应），不用裸 hex
 const overviewCards = computed(() => {
@@ -80,12 +97,12 @@ function renderStatusChart() {
   statusChart = echarts.init(statusChartRef.value)
   const o = stats.value.overview || {}
   const items = [
-    { name: '已完成', value: o.completed || 0, color: 'var(--color-success-500)' },
-    { name: '进行中', value: o.in_progress || 0, color: 'var(--color-info-500)' },
-    { name: '待处理', value: o.pending || 0, color: 'var(--gray-500)' },
-    { name: '待审核', value: o.review || 0, color: 'var(--color-warning-500)' },
-    { name: '已逾期', value: o.overdue || 0, color: 'var(--color-error-500)' },
-    { name: '待认领', value: o.unclaimed || 0, color: 'var(--chart-palette-5)' },
+    { name: '已完成', value: o.completed || 0, color: CHART_COLORS.completed },
+    { name: '进行中', value: o.in_progress || 0, color: CHART_COLORS.inProgress },
+    { name: '待处理', value: o.pending || 0, color: CHART_COLORS.pending },
+    { name: '待审核', value: o.review || 0, color: CHART_COLORS.review },
+    { name: '已逾期', value: o.overdue || 0, color: CHART_COLORS.overdue },
+    { name: '待认领', value: o.unclaimed || 0, color: CHART_COLORS.unclaimed },
   ]
   statusChart.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
@@ -112,16 +129,14 @@ function renderWorkerChart() {
   workerChart.setOption({
     tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
     legend: { bottom: 0, textStyle: { color: chartTextColor() } },
+    color: [CHART_COLORS.human, CHART_COLORS.agent],
     series: [{
       type: 'pie',
       radius: ['45%', '70%'],
       center: ['50%', '45%'],
       avoidLabelOverlap: true,
       label: { color: chartTextColor() },
-      data: data.map((d, idx) => ({
-        ...d,
-        itemStyle: { color: idx === 0 ? 'var(--task-human)' : 'var(--task-agent)' },
-      })),
+      data,
     }],
   })
 }
@@ -131,15 +146,40 @@ function renderBurndownChart() {
   if (burndownChart) { burndownChart.dispose(); burndownChart = null }
   burndownChart = echarts.init(burndownChartRef.value)
   const list = stats.value.burndown || []
+  const dates = list.map(d => d.date)
+  const completed = list.map(d => d.completed || 0)
+  const remaining = list.map(d => d.remaining || 0)
+  // 日完成数 = 已完成累计的逐日差分（吞吐量）
+  const velocity = completed.map((v, i) => (i === 0 ? v : v - completed[i - 1]))
+  // 任务总数：全程恒定（任务范围），以水平直线呈现
+  const totalVal = list.length ? (completed[list.length - 1] + remaining[list.length - 1]) : 0
+  const total = list.map(() => totalVal)
+
+  const lineBase = (color) => ({
+    type: 'line', smooth: true,
+    showSymbol: false,
+    lineStyle: { width: 2, color },
+    itemStyle: { color },
+    emphasis: { focus: 'none', lineStyle: { width: 3 } },
+  })
+
   burndownChart.setOption({
-    tooltip: { trigger: 'axis' },
-    legend: { data: ['已完成累计', '剩余'], bottom: 0, textStyle: { color: chartTextColor() } },
-    grid: { left: 8, right: 16, top: 16, bottom: 32, containLabel: true },
-    xAxis: { type: 'category', data: list.map(d => d.date), axisLabel: { color: chartTextColor(), hideOverlap: true } },
-    yAxis: { type: 'value', axisLabel: { color: chartTextColor() }, splitLine: { lineStyle: { color: themeStore.isDark ? '#2d3748' : '#edf2f7' } } },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', label: { backgroundColor: '#666' } },
+    },
+    legend: {
+      data: ['任务总数', '任务剩余数', '日完成数', '完成累计数'],
+      bottom: 0, textStyle: { color: chartTextColor() },
+    },
+    grid: { left: 8, right: 16, top: 24, bottom: 48, containLabel: true },
+    xAxis: { type: 'category', boundaryGap: false, data: dates, axisLabel: { color: chartTextColor(), hideOverlap: true } },
+    yAxis: { type: 'value', name: '任务数', nameTextStyle: { color: chartTextColor() }, axisLabel: { color: chartTextColor() }, splitLine: { lineStyle: { color: themeStore.isDark ? '#2d3748' : '#edf2f7' } } },
     series: [
-      { name: '已完成累计', type: 'line', smooth: true, data: list.map(d => d.completed), itemStyle: { color: 'var(--color-success-500)' }, areaStyle: { opacity: 0.12 } },
-      { name: '剩余', type: 'line', smooth: true, data: list.map(d => d.remaining), itemStyle: { color: 'var(--color-error-500)' } },
+      { name: '任务总数', ...lineBase(CHART_COLORS.total), data: total },
+      { name: '任务剩余数', ...lineBase(CHART_COLORS.remaining), data: remaining },
+      { name: '日完成数', ...lineBase(CHART_COLORS.velocity), data: velocity },
+      { name: '完成累计数', ...lineBase(CHART_COLORS.completed), data: completed, areaStyle: { opacity: 0.1 } },
     ],
   })
 }
@@ -190,7 +230,7 @@ watch(() => themeStore.isDark, () => nextTick(renderCharts))
 
         <a-row :gutter="16" class="chart-row">
           <a-col :span="24">
-            <a-card title="任务燃尽图（累计完成 / 剩余）" size="small" class="chart-card">
+            <a-card title="任务燃尽图（任务总数 / 剩余 / 日完成 / 累计完成）" size="small" class="chart-card">
               <div ref="burndownChartRef" class="chart chart-tall"></div>
             </a-card>
           </a-col>
