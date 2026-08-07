@@ -43,13 +43,25 @@ const assigneeName = computed(() =>
 const dueText = computed(() =>
   props.task.due_date ? String(props.task.due_date).substring(0, 10) : ''
 )
+
+/** 键盘可达：Enter / Space 触发点击（DESIGN.md 键盘优先） */
+function onKeydown(e) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    emit('click', props.task)
+  }
+}
 </script>
 
 <template>
   <div
     class="task-card"
     :class="{ 'is-draft': isDraft, 'is-agent': isAgent }"
+    role="button"
+    :tabindex="0"
+    :aria-label="`打开任务：${task.title}`"
     @click="emit('click', task)"
+    @keydown="onKeydown"
   >
     <div class="card-top">
       <a-tag size="small" class="type-tag">{{ typeLabel }}</a-tag>
@@ -84,25 +96,30 @@ const dueText = computed(() =>
 
 <style scoped>
 .task-card {
-  background: var(--gray-0, #fff);
-  border: 1px solid var(--gray-50, #e2e8f0);
-  border-left: 3px solid var(--gray-50, #e2e8f0);
-  border-radius: 8px;
+  background: var(--task-card-bg, #fff);
+  border: 1px solid var(--task-card-border, #e4e6e6);
+  border-left: 3px solid var(--task-card-border, #e4e6e6);
+  border-radius: var(--radius-md, 8px);
   padding: 12px;
   margin-bottom: 8px;
   cursor: pointer;
-  transition: box-shadow 0.15s, border-color 0.15s;
+  transition: box-shadow var(--motion-instant, 150ms) ease, border-color var(--motion-instant, 150ms) ease;
 }
 .task-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-2, rgba(0, 0, 0, 0.08));
   border-color: var(--main-color, #24839b);
 }
+.task-card:focus-visible {
+  outline: 2px solid var(--main-color, #24839b);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-2, rgba(0, 0, 0, 0.08));
+}
 .task-card.is-draft {
-  border-left-color: #d69e2e;
-  background: #fffdf5;
+  border-left-color: var(--task-status-review, #d69e2e);
+  background: var(--color-warning-10, #fffdf5);
 }
 .task-card.is-agent {
-  border-left-color: #8b5cf6;
+  border-left-color: var(--task-agent, #8b5cf6);
 }
 
 .card-top {
@@ -121,21 +138,21 @@ const dueText = computed(() =>
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 11px;
+  font-size: var(--task-font-size-xs, 11px);
   font-weight: 600;
-  color: #8b5cf6;
-  background: #f5f3ff;
-  border: 1px solid #ede9fe;
-  border-radius: 4px;
+  color: var(--task-agent, #8b5cf6);
+  background: var(--color-accent-10, #f5f3ff);
+  border: 1px solid var(--color-accent-50, #ede9fe);
+  border-radius: var(--radius-xs, 4px);
   padding: 0 5px;
   line-height: 18px;
 }
 .draft-badge {
-  font-size: 11px;
+  font-size: var(--task-font-size-xs, 11px);
   font-weight: 600;
-  color: #b45309;
-  background: #fef3c7;
-  border-radius: 4px;
+  color: var(--task-status-review, #b45309);
+  background: var(--color-warning-50, #fef3c7);
+  border-radius: var(--radius-xs, 4px);
   padding: 0 5px;
   line-height: 18px;
 }
@@ -198,5 +215,10 @@ const dueText = computed(() =>
 }
 .case-id {
   color: var(--gray-400, #a0aec0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-card {
+    transition: none;
+  }
 }
 </style>

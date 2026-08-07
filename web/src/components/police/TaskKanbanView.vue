@@ -22,21 +22,37 @@ const typeText = {
   knowledge_extraction: '知识抽取',
 }
 const priorityColor = { urgent: 'red', high: 'orange', medium: 'blue', low: 'default' }
+const priorityText = { urgent: '紧急', high: '高', medium: '中', low: '低' }
+
+/** 任务是否已逾期（有截止、未关闭、当前时间超过截止） */
+function isOverdue(task) {
+  if (!task.due_date || ['completed', 'cancelled', 'terminated'].includes(task.status)) return false
+  return new Date(task.due_date) < new Date()
+}
+
+/** 任务是否即将到期（截止在 3 天内） */
+function isDueSoon(task) {
+  if (!task.due_date || isOverdue(task)) return false
+  const due = new Date(task.due_date)
+  const daysLeft = Math.ceil((due - new Date()) / 86400000)
+  return daysLeft <= 3
+}
 
 // ── 分组维度（Plane 的 GROUP_FIELD_MAP 思路） ──
 const groupBy = ref('status')
+// 列色一律用语义 token（明暗自适应），不用裸 hex
 const statusColumns = [
-  { key: 'pending', title: '待处理', color: '#718096' },
-  { key: 'in_progress', title: '进行中', color: '#3182CE' },
-  { key: 'review', title: '待审核', color: '#D69E2E' },
-  { key: 'completed', title: '已完成', color: '#38A169' },
-  { key: 'blocked', title: '已驳回', color: '#E53E3E' },
+  { key: 'pending', title: '待处理', color: 'var(--task-status-pending)' },
+  { key: 'in_progress', title: '进行中', color: 'var(--task-status-progress)' },
+  { key: 'review', title: '待审核', color: 'var(--task-status-review)' },
+  { key: 'completed', title: '已完成', color: 'var(--task-status-completed)' },
+  { key: 'blocked', title: '已驳回', color: 'var(--task-status-blocked)' },
 ]
 const priorityColumns = [
-  { key: 'urgent', title: '紧急', color: '#E53E3E' },
-  { key: 'high', title: '高', color: '#ED8936' },
-  { key: 'medium', title: '中', color: '#3182CE' },
-  { key: 'low', title: '低', color: '#718096' },
+  { key: 'urgent', title: '紧急', color: 'var(--task-priority-urgent)' },
+  { key: 'high', title: '高', color: 'var(--task-priority-high)' },
+  { key: 'medium', title: '中', color: 'var(--task-priority-medium)' },
+  { key: 'low', title: '低', color: 'var(--task-priority-low)' },
 ]
 const assigneeColumns = computed(() => {
   const map = new Map()
@@ -44,7 +60,7 @@ const assigneeColumns = computed(() => {
     for (const a of (t.assignees || [])) {
       const k = `${a.assignee_id}_${a.assignee_type}`
       if (!map.has(k)) {
-        map.set(k, { key: k, id: a.assignee_id, name: a.assignee_name, type: a.assignee_type, color: a.assignee_type === 'agent' ? '#9F7AEA' : '#3182CE' })
+        map.set(k, { key: k, id: a.assignee_id, name: a.assignee_name, type: a.assignee_type, color: a.assignee_type === 'agent' ? 'var(--task-agent)' : 'var(--task-human)' })
       }
     }
   }
@@ -99,10 +115,21 @@ async function applyDrop(id, col) {
     }
     message.success('任务已更新')
     emit('refresh')
-  } catch (e) {
+  } catch {
     message.error('更新失败')
   }
 }
+
+/** 键盘可达：Enter / Space 打开任务（DESIGN.md 键盘优先） */
+function onCardKeydown(e, task) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    emit('open-task', task.id)
+  }
+}
+
+/** 拖拽降级提示：写入拖拽说明，供 aria 与 tooltip 复用 */
+const dragHint = computed(() => '拖拽卡片到目标列可改' + ({ status: '状态', priority: '优先级', assignee: '执行人' }[groupBy.value] || ''))
 </script>
 
 <template>
@@ -114,7 +141,7 @@ async function applyDrop(id, col) {
         <a-radio-button value="priority">按优先级</a-radio-button>
         <a-radio-button value="assignee">按执行人</a-radio-button>
       </a-radio-group>
-      <span class="group-hint">拖拽卡片到目标列即可改{{ { status: '状态', priority: '优先级', assignee: '执行人' }[groupBy] }}</span>
+      <span class="group-hint">{{ dragHint }}</span>
     </div>
 
     <div class="kanban-board">
@@ -137,15 +164,22 @@ async function applyDrop(id, col) {
             :key="task.id"
             class="kanban-card"
             :class="{ dragging: draggingId === task.id }"
+            :tabindex="0"
+            role="button"
+            :aria-label="`打开任务：${task.title}`"
             draggable="true"
             @dragstart="onDragStart(task)"
             @dragend="onDragEnd"
             @click="emit('open-task', task.id)"
+            @keydown="onCardKeydown($event, task)"
           >
             <div class="card-title">{{ task.title }}</div>
             <div class="card-meta">
               <a-tag size="small">{{ typeText[task.type] || task.type }}</a-tag>
-              <a-tag :color="priorityColor[task.priority]" size="small">{{ task.priority }}</a-tag>
+              <a-tag v-if="task.priority === 'urgent'" color="red" size="small" class="priority-urgent">紧急</a-tag>
+              <a-tag v-else :color="priorityColor[task.priority]" size="small">{{ priorityText[task.priority] || task.priority }}</a-tag>
+              <a-tag v-if="task.due_date && isOverdue(task)" color="red" size="small" class="due-tag">已逾期</a-tag>
+              <a-tag v-else-if="task.due_date && isDueSoon(task)" color="orange" size="small" class="due-tag">即将到期</a-tag>
             </div>
             <div class="card-footer">
               <span class="card-assignee">
@@ -186,12 +220,15 @@ async function applyDrop(id, col) {
   min-width: 240px;
   flex: 1;
   max-width: 300px;
-  background: var(--gray-10, #f7fafc);
-  border: 1px solid var(--gray-50, #e2e8f0);
-  border-radius: 10px;
+  background: var(--gray-10, #fbfcfc);
+  border: 1px solid var(--task-card-border, #e4e6e6);
+  border-radius: var(--radius-md, 8px);
   display: flex;
   flex-direction: column;
-  transition: box-shadow 0.15s, border-color 0.15s;
+  transition: box-shadow var(--motion-instant, 150ms) ease, border-color var(--motion-instant, 150ms) ease;
+}
+:root.dark .kanban-column {
+  background: var(--gray-10, #080808);
 }
 .kanban-column.drag-over {
   border-color: var(--main-color, #24839b);
@@ -207,33 +244,50 @@ async function applyDrop(id, col) {
 }
 .column-title { font-size: 13px; font-weight: 600; }
 .column-count {
-  font-size: 11px;
+  font-size: var(--task-font-size-xs, 11px);
   background: var(--gray-50, #e2e8f0);
   padding: 2px 8px;
   border-radius: 10px;
   color: var(--gray-600, #4a5568);
 }
+:root.dark .column-count {
+  background: var(--gray-200, #4c4d4d);
+  color: var(--gray-400, #979999);
+}
 .kanban-column-body { padding: 8px; flex: 1; min-height: 80px; }
 .kanban-card {
-  background: var(--gray-0, #fff);
-  border: 1px solid var(--gray-50, #e2e8f0);
-  border-radius: 8px;
+  background: var(--task-card-bg, #fff);
+  border: 1px solid var(--task-card-border, #e4e6e6);
+  border-radius: var(--radius-md, 8px);
   padding: 10px 12px;
   margin-bottom: 8px;
   cursor: grab;
-  transition: box-shadow 0.15s, opacity 0.15s;
+  transition: box-shadow var(--motion-instant, 150ms) ease, opacity var(--motion-instant, 150ms) ease;
 }
-.kanban-card:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08); }
+.kanban-card:hover { box-shadow: var(--shadow-2, rgba(0, 0, 0, 0.08)); }
+.kanban-card:focus-visible {
+  outline: 2px solid var(--main-color, #24839b);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-2, rgba(0, 0, 0, 0.08));
+}
 .kanban-card.dragging { opacity: 0.4; }
-.card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; line-height: 1.4; }
+.card-title { font-size: var(--task-font-size, 13px); font-weight: 500; margin-bottom: 6px; line-height: 1.4; }
 .card-meta { display: flex; gap: 4px; margin-bottom: 6px; flex-wrap: wrap; }
+.priority-urgent { font-weight: 600; }
+.due-tag { font-weight: 500; }
 .card-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: var(--task-font-size-sm, 12px);
   color: var(--gray-500, #718096);
 }
 .card-assignee { display: flex; align-items: center; gap: 4px; }
-.kanban-empty { text-align: center; color: var(--gray-400, #a0aec0); padding: 20px 0; font-size: 12px; }
+.kanban-empty { text-align: center; color: var(--gray-400, #a0aec0); padding: 20px 0; font-size: var(--task-font-size-sm, 12px); }
+@media (prefers-reduced-motion: reduce) {
+  .kanban-column,
+  .kanban-card {
+    transition: none;
+  }
+}
 </style>

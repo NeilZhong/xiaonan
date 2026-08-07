@@ -38,6 +38,7 @@ function select(key) {
       class="switcher-btn"
       :class="{ active: key === modelValue }"
       :title="LAYOUT_MAP[key].label"
+      :aria-pressed="key === modelValue"
       @click="select(key)"
     >
       <component :is="LAYOUT_MAP[key].icon" :size="15" />
@@ -77,6 +78,10 @@ function select(key) {
 .switcher-btn:hover {
   color: var(--gray-800, #323333);
   background: var(--gray-100, #eef0f0);
+}
+.switcher-btn:focus-visible {
+  outline: 2px solid var(--main-color, #24839b);
+  outline-offset: 2px;
 }
 :root.dark .switcher-btn:hover {
   color: var(--gray-100, #eef0f0);
