@@ -82,6 +82,7 @@
                     :hide-tool-calls="true"
                     :mention="mentionConfig"
                     :sources="row.sources"
+                    :show-avatar="displayItem.isAssistantGroupStart"
                     @retry="retryMessage(displayItem.message)"
                   >
                   </AgentMessageComponent>

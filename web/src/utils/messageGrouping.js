@@ -69,5 +69,20 @@ export const getConversationDisplayItems = (
   })
 
   flushToolGroup()
+
+  // 标记同一轮对话中连续 AI 消息组的起始位置：
+  // 同一次用户提问可能触发智能体多轮思考/工具调用/续写，产生多条 AI 消息，
+  // 视觉上应归为同一“助手回复块”，仅首条显示头像、名称与时间。
+  let lastMessageType = null
+  items.forEach((item) => {
+    if (item.type !== 'message') return
+    if (item.message.type === 'ai') {
+      item.isAssistantGroupStart = lastMessageType !== 'ai'
+      lastMessageType = 'ai'
+    } else {
+      lastMessageType = item.message.type
+    }
+  })
+
   return items
 }

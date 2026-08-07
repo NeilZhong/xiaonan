@@ -37,11 +37,15 @@
             v-for="(chunk, index) in fileGroup.chunks"
             :key="getChunkKey(chunk, index)"
             class="chunk-item"
-            :class="{ 'high-relevance': typeof chunk.score === 'number' && chunk.score > 0.5 }"
+            :class="{
+              'high-relevance': typeof chunk.score === 'number' && chunk.score > 0.5
+            }"
             @click="openChunkDetail(chunk, index + 1)"
           >
             <div class="chunk-summary">
-              <span class="chunk-index">#{{ index + 1 }}</span>
+              <span v-if="getChunkDisplayIndex(chunk, index)" class="chunk-index"
+                >#{{ getChunkDisplayIndex(chunk, index) }}</span
+              >
               <div class="chunk-scores">
                 <span v-if="typeof chunk.score === 'number'" class="score-item"
                   >相似度 {{ (chunk.score * 100).toFixed(0) }}%</span
@@ -95,6 +99,11 @@ const props = defineProps({
   emptyText: {
     type: String,
     default: '未找到相关知识库内容'
+  },
+  // chunk_id -> 正文角标编号 的映射，用于全局顺序编号
+  citationLabelMap: {
+    type: Map,
+    default: () => new Map()
   }
 })
 
@@ -197,6 +206,20 @@ const getLineRange = (chunk) => {
   const endLine = Number(chunk?.metadata?.end_line || 0)
   if (!startLine || !endLine) return ''
   return startLine === endLine ? `第 ${startLine} 行` : `第 ${startLine}-${endLine} 行`
+}
+
+const getChunkId = (chunk) => String(chunk?.metadata?.chunk_id || '').trim()
+
+// 是否与正文角标体系对齐（存在 citationLabelMap 即表示传入方提供了全局编号）
+const hasGlobalLabels = computed(() => props.citationLabelMap.size > 0)
+
+// 获取 chunk 在面板中展示的编号：优先使用正文全局角标，无则按文件内顺序兜底
+const getChunkDisplayIndex = (chunk, localIndex) => {
+  const chunkId = getChunkId(chunk)
+  if (chunkId && props.citationLabelMap.has(chunkId)) {
+    return props.citationLabelMap.get(chunkId)
+  }
+  return hasGlobalLabels.value ? '' : String(localIndex + 1)
 }
 
 const openChunkDetail = (chunk, index) => {

@@ -166,6 +166,108 @@ export function mapParagraphsToChunks(paragraphs, mappedChunks) {
 }
 
 /**
+ * 归一化文本，用于相似度比较
+ * @param {string} text - 原始文本
+ * @returns {string} - 去除空白并小写后的文本
+ */
+const normalizeForDedup = (text) => String(text || '').replace(/\s+/g, '').toLowerCase()
+
+/**
+ * 计算两段文本基于字符 bigram 的 Jaccard 相似度
+ * @param {string} a - 第一个文本
+ * @param {string} b - 第二个文本
+ * @returns {number} - 相似度 0~1
+ */
+export function computeContentSimilarity(a, b) {
+  const na = normalizeForDedup(a)
+  const nb = normalizeForDedup(b)
+
+  if (na === nb) return 1
+  if (!na || !nb) return 0
+
+  // 互为子串时视为完全重复（检索返回的重叠切片常见这种情况）
+  if (na.length > nb.length) {
+    if (na.includes(nb)) return 1
+  } else if (nb.includes(na)) {
+    return 1
+  }
+
+  const buildBigrams = (s) => {
+    const set = new Set()
+    for (let i = 0; i < s.length - 1; i++) {
+      set.add(s.slice(i, i + 2))
+    }
+    return set
+  }
+
+  const setA = buildBigrams(na)
+  const setB = buildBigrams(nb)
+  if (setA.size === 0 || setB.size === 0) return 0
+
+  let intersection = 0
+  for (const gram of setA) {
+    if (setB.has(gram)) intersection++
+  }
+  return intersection / (setA.size + setB.size - intersection)
+}
+
+/**
+ * 按内容相似度对 chunk 列表去重。
+ * 重叠/近重复的 chunk 会合并为一条，保留最高 score 的元信息。
+ * @param {Array} chunks - chunk 数组
+ * @param {Object} options - 配置
+ * @param {number} options.similarityThreshold - 判定为重复的相似度阈值，默认 0.85
+ * @returns {Array} - 去重后的 chunk 数组
+ */
+export function deduplicateChunksByContent(chunks, { similarityThreshold = 0.85 } = {}) {
+  if (!Array.isArray(chunks) || chunks.length === 0) return []
+
+  const result = []
+
+  for (const chunk of chunks) {
+    const content = typeof chunk.content === 'string' ? chunk.content.trim() : ''
+    if (!content) continue
+
+    let duplicateOf = null
+    for (const existing of result) {
+      if (computeContentSimilarity(existing.content, content) >= similarityThreshold) {
+        duplicateOf = existing
+        break
+      }
+    }
+
+    if (duplicateOf) {
+      const score =
+        typeof chunk.score === 'number'
+          ? chunk.score
+          : typeof chunk.metadata?.score === 'number'
+            ? chunk.metadata.score
+            : null
+      const shouldUpgradeScore =
+        score !== null && (typeof duplicateOf.score !== 'number' || score > duplicateOf.score)
+      const shouldUpgradeContent = content.length > (duplicateOf.content || '').length
+
+      if (shouldUpgradeScore) {
+        duplicateOf.score = score
+      }
+      if (shouldUpgradeScore || shouldUpgradeContent) {
+        if (duplicateOf.metadata && chunk.metadata) {
+          duplicateOf.metadata = { ...duplicateOf.metadata, ...chunk.metadata }
+        }
+      }
+      if (shouldUpgradeContent) {
+        duplicateOf.content = content
+      }
+      continue
+    }
+
+    result.push({ ...chunk })
+  }
+
+  return result
+}
+
+/**
  * 获取chunk的预览文本
  * @param {string} content - chunk内容
  * @param {number} maxLength - 最大长度

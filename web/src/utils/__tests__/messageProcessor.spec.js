@@ -115,6 +115,49 @@ const run = () => {
   })
   assert.deepEqual(assistantBody, { content: '最终答案', reasoningContent: '推理过程' })
 
+  // 7. 内容高度相似但 chunk_id 不同的切片应合并为一条来源
+  const overlapConv = {
+    messages: [
+      {
+        type: 'ai',
+        tool_calls: [
+          {
+            name: '财税库',
+            tool_call_result: {
+              content: JSON.stringify([
+                {
+                  content:
+                    '3.2 智能体模式 智能体模式用于复杂研判、多任务协同，支持自定义智能体',
+                  score: 0.61,
+                  metadata: { source: 'doc-a', chunk_id: 'c1', file_id: 'f1' }
+                },
+                {
+                  content:
+                    '3.2 智能体模式 智能体模式用于复杂研判、多任务协同，支持自定义智能体、定时任务',
+                  score: 0.6,
+                  metadata: { source: 'doc-a', chunk_id: 'c2', file_id: 'f1' }
+                },
+                {
+                  content: '1 引言 本文档为智能助手完整操作手册，用于指导一线业务人员',
+                  score: 0.55,
+                  metadata: { source: 'doc-a', chunk_id: 'c3', file_id: 'f1' }
+                }
+              ])
+            }
+          }
+        ]
+      }
+    ]
+  }
+  const overlapChunks = MessageProcessor.extractKnowledgeChunksFromConversation(overlapConv, [
+    { name: '财税库' }
+  ])
+  assert.equal(overlapChunks.length, 2)
+  assert.equal(
+    overlapChunks.filter((c) => c.content.includes('智能体模式')).length,
+    1
+  )
+
   console.log('messageProcessor extractKnowledgeChunksFromConversation: all assertions passed')
 }
 

@@ -64,7 +64,12 @@
 
     <!-- 来源详情面板 -->
     <div v-if="isSourcesExpanded" class="sources-panel-body">
-      <KnowledgeSourceSection v-if="knowledgeChunks.length > 0" :chunks="knowledgeChunks" />
+      <KnowledgeSourceSection
+        v-if="knowledgeChunks.length > 0"
+        :chunks="knowledgeChunks"
+        :cited-chunk-ids="citedChunkIds"
+        :citation-label-map="citationLabelMap"
+      />
       <WebSearchSourceSection v-if="webSources.length > 0" :sources="webSources" />
     </div>
   </div>
@@ -93,6 +98,7 @@
 import { ref, computed, reactive, watch } from 'vue'
 import { useClipboard } from '@vueuse/core'
 import { message as antMessage } from 'ant-design-vue'
+import { MessageProcessor } from '@/utils/messageProcessor'
 import {
   ThumbsUp,
   ThumbsDown,
@@ -121,10 +127,37 @@ const props = defineProps({
   sources: {
     type: Object,
     default: () => ({})
+  },
+  // 正文中实际引用过的 chunk_id 集合
+  citedChunkIds: {
+    type: Set,
+    default: () => new Set()
+  },
+  // chunk_id -> 正文角标编号 的映射
+  citationLabelMap: {
+    type: Map,
+    default: () => new Map()
   }
 })
 
 const msg = ref(props.message)
+
+// 引用角标兜底：外部调用方（如对话底部 RefsComponent）可能未传
+// citedChunkIds / citationLabelMap，这里从消息正文自行解析，保证全局编号或“已引用”标识不失效。
+const citedChunkIds = computed(() => {
+  if (props.citedChunkIds.size > 0) return props.citedChunkIds
+  const ids = MessageProcessor.extractCitedChunkIds(msg.value?.content)
+  return new Set(ids)
+})
+
+const citationLabelMap = computed(() => {
+  if (props.citationLabelMap.size > 0) return props.citationLabelMap
+  const map = new Map()
+  MessageProcessor.extractCitedChunkIds(msg.value?.content).forEach((id, index) => {
+    map.set(id, String(index + 1))
+  })
+  return map
+})
 
 // Sources state
 const isSourcesExpanded = ref(false)
@@ -138,7 +171,13 @@ const webSources = computed(() =>
 
 const hasSources = computed(() => knowledgeChunks.value.length > 0 || webSources.value.length > 0)
 
-const sourceCount = computed(() => knowledgeChunks.value.length + webSources.value.length)
+// 知识库来源数 = 仅统计正文实际引用的 chunk（与面板「知识库来源 (N)」一致），webSources 全量计入。
+const sourceCount = computed(() => {
+  const citedKbCount = knowledgeChunks.value.filter((chunk) =>
+    citedChunkIds.value.has(String(chunk?.metadata?.chunk_id || '').trim())
+  ).length
+  return citedKbCount + webSources.value.length
+})
 
 const toggleSources = () => {
   isSourcesExpanded.value = !isSourcesExpanded.value

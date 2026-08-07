@@ -1,3 +1,5 @@
+import { deduplicateChunksByContent } from './chunkUtils.js'
+
 /**
  * 统一知识库检索工具名（新架构不再按知识库名注册工具）
  */
@@ -257,13 +259,18 @@ export class MessageProcessor {
       }
     }
 
-    normalizedChunks.sort((a, b) => {
+    // 对检索返回的重叠/近重复切片做二次去重，避免同一句话因不同切分窗口被标成多个来源。
+    const deduplicatedChunks = deduplicateChunksByContent(normalizedChunks, {
+      similarityThreshold: 0.85
+    })
+
+    deduplicatedChunks.sort((a, b) => {
       const scoreA = typeof a.score === 'number' ? a.score : Number.NEGATIVE_INFINITY
       const scoreB = typeof b.score === 'number' ? b.score : Number.NEGATIVE_INFINITY
       return scoreB - scoreA
     })
 
-    return normalizedChunks
+    return deduplicatedChunks
   }
 
   /**
@@ -358,6 +365,41 @@ export class MessageProcessor {
       knowledgeChunks: MessageProcessor.extractKnowledgeChunksFromConversation(conv, databases),
       webSources: MessageProcessor.extractWebSourcesFromConversation(conv)
     }
+  }
+
+  /**
+   * 支持的引用 token 格式（原始输出 / 已渲染 HTML）：
+   * - 模型原始输出：`[ref:CHUNK_ID]`（半角）或 `【ref:CHUNK_ID】`（全角）
+   * - 渲染后：`<cite data-chunk-id="CHUNK_ID">`
+   */
+  static get CITATION_TOKEN_PATTERNS() {
+    return [
+      /<cite[^>]+data-chunk-id=["']([^"']+)["'][^>]*>/g,
+      /\[ref:\s*([^\]\s]+)\s*\]/g,
+      /【ref:\s*([^】\s]+)\s*】/g
+    ]
+  }
+
+  /**
+   * 从正文内容中提取实际被引用的 chunk_id，按出现顺序去重。
+   * @param {string} content - 助手消息正文（原始输出或已渲染 HTML）
+   * @returns {Array<string>} 按引用顺序去重后的 chunk_id 列表
+   */
+  static extractCitedChunkIds(content) {
+    if (typeof content !== 'string' || !content) return []
+    const ids = []
+    const seen = new Set()
+    for (const regex of MessageProcessor.CITATION_TOKEN_PATTERNS) {
+      let match
+      while ((match = regex.exec(content)) !== null) {
+        const id = match[1].trim()
+        if (id && !seen.has(id)) {
+          seen.add(id)
+          ids.push(id)
+        }
+      }
+    }
+    return ids
   }
 
   /**

@@ -11,9 +11,9 @@
   <div
     v-if="message.type !== 'system'"
     class="msg-row"
-    :class="isUserMessage ? 'msg-row--user' : 'msg-row--agent'"
+    :class="[isUserMessage ? 'msg-row--user' : 'msg-row--agent', { 'no-avatar': !shouldShowAvatar }]"
   >
-    <div class="msg-avatar">
+    <div v-if="shouldShowAvatar" class="msg-avatar">
       <FallbackAvatar
         :src="avatarSrc"
         :name="displayName"
@@ -23,7 +23,7 @@
       />
     </div>
     <div class="msg-body" :class="isUserMessage ? 'msg-body--user' : 'msg-body--agent'">
-      <div class="msg-meta">
+      <div v-if="shouldShowAvatar" class="msg-meta">
         <span class="msg-name">{{ displayName }}</span>
         <span v-if="timeText" class="msg-time">{{ timeText }}</span>
       </div>
@@ -115,6 +115,8 @@
           :show-refs="showRefs"
           :is-latest-message="isLatestMessage"
           :sources="messageSources"
+          :cited-chunk-ids="citedChunkIds"
+          :citation-label-map="citationLabelMap"
           @retry="emit('retry')"
           @openRefs="emit('openRefs', $event)"
         />
@@ -246,6 +248,12 @@ const props = defineProps({
   agent: {
     type: Object,
     default: null
+  },
+  // 是否展示头像与名称/时间元信息。用于同一轮连续 AI 消息组中，
+  // 仅首条显示头像，后续步骤隐藏以避免视觉重复。
+  showAvatar: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -370,11 +378,30 @@ const messageSources = computed(() => {
 // === 知识库引用角标 ===
 const CITATION_TOOLTIP_MAX = 160
 
-// 以 chunk_id 为锚点构建角标数据；序号按前端展示顺序统一分配，避免模型编号漂移
+// 正文里实际出现的引用 chunk_id 集合，用于在来源面板区分“检索到”和“被引用”。
+const citedChunkIds = computed(() => {
+  const ids = MessageProcessor.extractCitedChunkIds(parsedData.value?.content)
+  return new Set(ids)
+})
+
+// chunk_id -> 正文角标编号的映射，按正文引用顺序分配，与来源面板对齐。
+const citationLabelMap = computed(() => {
+  const map = new Map()
+  MessageProcessor.extractCitedChunkIds(parsedData.value?.content).forEach((id, index) => {
+    map.set(id, String(index + 1))
+  })
+  return map
+})
+
+// 以 chunk_id 为锚点构建角标数据；只包含正文实际引用的 chunk，序号与正文 [N] 一致。
 const citations = computed(() =>
   (messageSources.value.knowledgeChunks || [])
-    .filter((chunk) => String(chunk?.metadata?.chunk_id || '').trim())
-    .map((chunk, index) => {
+    .filter((chunk) => {
+      const chunkId = String(chunk?.metadata?.chunk_id || '').trim()
+      return chunkId && citationLabelMap.value.has(chunkId)
+    })
+    .map((chunk) => {
+      const chunkId = String(chunk.metadata.chunk_id).trim()
       const source = chunk?.metadata?.source || chunk?.kb_name || '知识库片段'
       const raw = String(chunk?.content || '')
         .replace(/\s+/g, ' ')
@@ -382,8 +409,8 @@ const citations = computed(() =>
       const snippet =
         raw.length > CITATION_TOOLTIP_MAX ? `${raw.slice(0, CITATION_TOOLTIP_MAX)}…` : raw
       return {
-        chunkId: String(chunk.metadata.chunk_id).trim(),
-        label: String(index + 1),
+        chunkId,
+        label: citationLabelMap.value.get(chunkId),
         tooltip: snippet ? `${source}\n${snippet}` : source,
         chunk
       }
@@ -411,6 +438,8 @@ const activeAgent = computed(() => props.agent || fallbackAgent.value)
 const isUserMessage = computed(
   () => props.message.type === 'human' || props.message.type === 'sent'
 )
+// 用户消息始终展示头像与元信息；助手消息在同一轮连续组中仅首条展示。
+const shouldShowAvatar = computed(() => isUserMessage.value || props.showAvatar !== false)
 const displayName = computed(() =>
   isUserMessage.value ? '你' : activeAgent.value?.name || '智能体'
 )
@@ -636,6 +665,13 @@ const parsedData = computed(() => {
   &.msg-row--user {
     flex-direction: row-reverse;
     justify-content: flex-start;
+  }
+
+  // 同一轮连续助手消息组中，后续步骤不重复展示头像，
+  // 通过 padding-left 与首条消息气泡左对齐，并缩小顶部间距。
+  &.msg-row--agent.no-avatar {
+    padding-left: 44px;
+    margin-top: 0.25rem;
   }
 }
 
