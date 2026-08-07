@@ -13,8 +13,7 @@ import { Sparkles, Wrench, Cable, Users, Brain, ChevronRight } from 'lucide-vue-
 import * as echarts from 'echarts'
 
 import { agentApi } from '@/apis/agent_api'
-import { policeAgentApi, policeEquipApi } from '@/apis/police_api'
-import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
+import { policeAgentApi, policeEquipApi, policeConnectionApi } from '@/apis/police_api'
 import AgentRuntimeCenter from '@/components/police/AgentRuntimeCenter.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import { resolveAgentAvatar } from '@/utils/policeAvatar'
@@ -26,8 +25,6 @@ const agentStore = useAgentStore()
 const agent = ref(null)
 const officer = ref(null)
 const loading = ref(false)
-const agentEditModalRef = ref(null)
-const backendOptions = ref([])
 const runtimeCenterOpen = ref(false)
 
 const isOfficer = computed(() => !!officer.value)
@@ -228,7 +225,91 @@ function goChat() {
   if (slug) router.push({ path: '/agent', query: { agent_id: slug } })
   else router.push('/agent')
 }
-function openEdit() { agentEditModalRef.value?.openEdit(agent.value?.slug || agent.value?.id) }
+
+// ── P4：绑定感知版本区块（当前用户是否已添加该数字警员） ──
+const myBinding = ref(null)
+const myBindingVersions = ref(null)
+const bindingBusy = ref('')
+
+const hasMyBinding = computed(() => !!myBinding.value)
+const bindingRunningLabel = computed(() => {
+  const b = myBinding.value
+  if (!b) return ''
+  if (b.pinned_version_id) {
+    return b.pinned_version ? `已钉住 ${b.pinned_version.version_label || `#${b.pinned_version.id}`}` : `已钉住 #${b.pinned_version_id}`
+  }
+  return '跟随最新'
+})
+const bindingHasNew = computed(() => {
+  const b = myBinding.value
+  const info = myBindingVersions.value
+  if (!b || !info?.current_version_id) return false
+  return !!b.pinned_version_id && info.current_version_id !== b.pinned_version_id
+})
+
+async function loadMyBinding() {
+  const targetId = officer.value?.id ?? agent.value?.id
+  if (targetId == null) return
+  try {
+    const res = await policeConnectionApi.mine()
+    const found = (res.items || []).find(
+      (b) => String(b.agent_id) === String(targetId) && (b.status === 'active' || !b.status)
+    )
+    myBinding.value = found || null
+    if (found) {
+      const versions = await policeAgentApi.listVersions(found.agent_id)
+      myBindingVersions.value = versions
+    } else {
+      myBindingVersions.value = null
+    }
+  } catch (_) {
+    myBinding.value = null
+    myBindingVersions.value = null
+  }
+}
+
+async function runBindingAction(action, fn) {
+  if (bindingBusy.value) return
+  bindingBusy.value = action
+  try {
+    await fn()
+    message.success(action === 'pin' ? '已套用该版本' : '已恢复跟随最新')
+    await loadMyBinding()
+  } catch (e) {
+    message.error(e.message || '操作失败')
+  } finally {
+    bindingBusy.value = ''
+  }
+}
+
+function bindingApplyLatest() {
+  const b = myBinding.value
+  const info = myBindingVersions.value
+  if (!b || !info?.current_version_id) {
+    message.warning('暂无可套用的最新版本')
+    return
+  }
+  runBindingAction('pin', () => policeConnectionApi.pin(b.id, info.current_version_id))
+}
+
+function bindingFollowLatest() {
+  const b = myBinding.value
+  if (!b?.pinned_version_id) return
+  Modal.confirm({
+    title: '恢复跟随最新版本？',
+    content: '取消钉住后，该数字警员将自动跟随源智能体的最新版本。',
+    okText: '跟随最新',
+    cancelText: '取消',
+    async onOk() {
+      await runBindingAction('unpin', () => policeConnectionApi.unpin(b.id))
+    }
+  })
+}
+
+function openEdit() {
+  const id = agent.value?.slug || agent.value?.id
+  if (id) router.push({ path: '/agent-manage/studio', query: { id } })
+}
 async function onEdited() { await load() }
 async function handleDelete() {
   const name = agent.value?.name || '该智能体'
@@ -247,12 +328,6 @@ async function handleDelete() {
   })
 }
 // ============ 数据加载 ============
-async function loadBackends() {
-  try {
-    const res = await agentApi.getAgentBackends()
-    backendOptions.value = (res.backends || []).map((b) => ({ label: b.name || b.backend_id, value: b.backend_id }))
-  } catch (_) {}
-}
 async function load() {
   loading.value = true
   try {
@@ -273,6 +348,7 @@ async function load() {
       }
     }
     await loadPartnerCount()
+    await loadMyBinding()
     nextTick(() => { renderChart() })
   } catch (e) { message.error('加载档案失败: ' + (e.message || e)) }
   finally { loading.value = false }
@@ -280,7 +356,6 @@ async function load() {
 
 onMounted(() => {
   load()
-  loadBackends()
 })
 onUnmounted(() => { destroyChart() })
 </script>
@@ -408,8 +483,30 @@ onUnmounted(() => { destroyChart() })
       </div>
     </div>
 
-    <!-- 编辑弹窗 -->
-    <AgentEditModal ref="agentEditModalRef" :backend-options="backendOptions" @saved="onEdited" />
+    <!-- P4：我的绑定版本区块（已添加该数字警员时展示） -->
+    <div v-if="hasMyBinding" class="ap-binding-block">
+      <div class="ap-binding-head">
+        <span class="ap-binding-title">我的版本</span>
+        <a-tag v-if="bindingHasNew" color="orange">有新版本可套用</a-tag>
+      </div>
+      <div class="ap-binding-line">{{ bindingRunningLabel }}</div>
+      <div class="ap-binding-actions">
+        <a-button
+          size="small"
+          type="primary"
+          :loading="bindingBusy === 'pin'"
+          :disabled="!myBindingVersions?.current_version_id || !bindingHasNew"
+          @click="bindingApplyLatest"
+        >套用最新</a-button>
+        <a-button
+          v-if="myBinding?.pinned_version_id"
+          size="small"
+          :loading="bindingBusy === 'unpin'"
+          @click="bindingFollowLatest"
+        >跟随最新</a-button>
+        <a-button size="small" @click="router.push('/police/my-agents')">管理我的数字警员</a-button>
+      </div>
+    </div>
 
     <!-- 运行中心抽屉 -->
     <AgentRuntimeCenter v-model:open="runtimeCenterOpen" :agent="officer || agent" />
@@ -767,6 +864,46 @@ onUnmounted(() => { destroyChart() })
 
 // ============ 加载 ============
 .ap-loading { display: flex; justify-content: center; padding: 120px 0; }
+
+// ============ P4 绑定版本区块 ============
+.ap-binding-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid var(--gray-150);
+  box-shadow: 0 2px 10px rgba(16,30,54,.05);
+}
+.ap-binding-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ap-binding-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--gray-900);
+}
+.ap-binding-line {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--gray-25);
+  color: var(--gray-700);
+  font-size: 12px;
+  font-weight: 500;
+}
+.ap-binding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 
 // ============ 响应式 ============
 @media (max-width: 1100px) {

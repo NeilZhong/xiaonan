@@ -96,6 +96,13 @@ const router = createRouter({
           meta: { keepAlive: false, requiresAuth: true }
         },
         {
+          // P4：全屏 Agent Studio（静态路径优先于 :id）
+          path: 'studio',
+          name: 'AgentStudio',
+          component: () => import('../views/police/AgentStudioView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
           path: ':id',
           name: 'AgentProfileComp',
           component: () => import('../views/AgentProfileView.vue'),
@@ -201,6 +208,13 @@ const router = createRouter({
           path: 'partners',
           name: 'PolicePartners',
           component: () => import('../views/police/PartnerManageView.vue'),
+          meta: { keepAlive: false, requiresAuth: true }
+        },
+        {
+          // P4：我的数字警员（绑定列表 + 版本套用/回退）
+          path: 'my-agents',
+          name: 'PoliceMyAgents',
+          component: () => import('../views/police/MyAgentsView.vue'),
           meta: { keepAlive: false, requiresAuth: true }
         },
         {

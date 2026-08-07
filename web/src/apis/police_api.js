@@ -2,7 +2,7 @@
  * ★ 公安业务 API 模块
  * 案件管理、任务管理、证据管理、工作台
  */
-import { apiGet, apiPost, apiPut, apiDelete } from './base'
+import { apiGet, apiPost, apiPut, apiDelete, apiPatch } from './base'
 
 // ── 工作台 ──────────────────────────────────────────────────
 export const policeDashboardApi = {
@@ -187,6 +187,17 @@ export const policeConnectionApi = {
   },
   apply: (agentId) => apiPost('/api/police/agent-connections', { agent_id: agentId }),
   remove: (connectionId) => apiDelete(`/api/police/agent-connections/${connectionId}`),
+  // ── 我的数字警员（P2c 富视图 / P4 版本套用回退）────────────────
+  /** 当前用户全部绑定：items[] 含 agent 摘要、pinned_version、associated_partners */
+  mine: () => apiGet('/api/police/agent-connections/mine'),
+  /** 钉住某版本（version_id 须属于该智能体） */
+  pin: (connectionId, versionId) =>
+    apiPost(`/api/police/agent-connections/${connectionId}/pin`, { version_id: versionId }),
+  /** 取消钉版本（恢复跟随源智能体当前版本） */
+  unpin: (connectionId) => apiDelete(`/api/police/agent-connections/${connectionId}/pin`),
+  /** 修改绑定偏好：昵称 / 新版通知 */
+  setPrefs: (connectionId, { nickname, notify_new_version } = {}) =>
+    apiPatch(`/api/police/agent-connections/${connectionId}`, { nickname, notify_new_version }),
 }
 
 // ── 案件独立工作区（树状节点）────────────────────────────────

@@ -6,7 +6,6 @@ import { useRouter } from 'vue-router'
 
 import { agentApi } from '@/apis/agent_api'
 import { policeAgentApi } from '@/apis/police_api'
-import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import PageShoulder from '@/components/shared/PageShoulder.vue'
 import AgentCard from '@/components/police/AgentCard.vue'
@@ -32,11 +31,9 @@ const AGENT_CATEGORIES = [
 ]
 const activeCategory = ref('')
 
-const agentBackendOptions = ref([])
 const managedAgents = ref([])
 /** 数字警员原始列表（用于与 agents 表数据合并） */
 const policeAgentsRaw = ref([])
-const agentEditModalRef = ref(null)
 
 const normalizeAgent = (agent) => {
   const rawId = agent?.id            // yuxi 智能体 int 主键（关联 police_agents.agent_id）
@@ -181,15 +178,17 @@ const openAgentChat = (agent) => {
   router.push({ name: 'AgentComp', query: { agent_id: chatId } })
 }
 
-// ============ 编辑 / 删除（统一使用 AgentEditModal） ============
+// ============ 编辑 / 删除（编辑跳转全屏 Agent Studio，P4） ============
 
 const openCreateAgentModal = () => {
-  agentEditModalRef.value?.openCreate()
+  router.push({ path: '/agent-manage/studio', query: { create: '1' } })
 }
 
 const openEditAgentModal = (agent) => {
   if (!canManageAgent(agent)) return
-  agentEditModalRef.value?.openEdit(agent)
+  const id = agent?.slug || agent?.id
+  if (!id) return
+  router.push({ path: '/agent-manage/studio', query: { id } })
 }
 
 const refreshAgentLists = async () => {
@@ -234,18 +233,6 @@ const deleteAgent = async (agent) => {
 
 // ============ 数据加载 ============
 
-const loadAgentBackends = async () => {
-  try {
-    const response = await agentApi.getAgentBackends()
-    agentBackendOptions.value = (response.backends || []).map((backend) => ({
-      label: backend.name || backend.backend_id,
-      value: backend.backend_id
-    }))
-  } catch (error) {
-    message.error(error.message || '加载智能体后端失败')
-  }
-}
-
 const loadAgents = async () => {
   agentLoading.value = true
   try {
@@ -268,7 +255,7 @@ const loadAgents = async () => {
 }
 
 onMounted(async () => {
-  await Promise.all([loadAgentBackends(), loadAgents()])
+  await loadAgents()
 })
 
 watch(activeCategory, () => {
@@ -343,11 +330,6 @@ defineExpose({
       </section>
     </template>
 
-    <AgentEditModal
-      ref="agentEditModalRef"
-      :backend-options="agentBackendOptions"
-      @saved="refreshAgentLists"
-    />
   </div>
 </template>
 

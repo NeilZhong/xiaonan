@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
   Handshake,
   Store,
+  UsersRound,
   ShieldCheck,
   Gauge
 } from 'lucide-vue-next'
@@ -230,6 +231,14 @@ const mainList = computed(() => {
     icon: Handshake,
     activeIcon: Handshake,
     activePaths: ['/police/partners']
+  })
+
+  items.push({
+    name: '我的数字警员',
+    path: '/police/my-agents',
+    icon: UsersRound,
+    activeIcon: UsersRound,
+    activePaths: ['/police/my-agents']
   })
 
   items.push({

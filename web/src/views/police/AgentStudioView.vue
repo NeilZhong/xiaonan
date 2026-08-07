@@ -1,7 +1,19 @@
 <script setup>
-import { computed, nextTick, reactive, ref } from 'vue'
+/**
+ * ★ 全屏 Agent Studio（P4 前端重构）
+ *
+ * 替代原 AgentEditModal 弹窗：把「基本信息 / 模型配置 / 工具配置 / 其他配置」
+ * 收拢为全屏单页，左侧导航分区，右侧为表单主体。
+ *
+ * 路由：
+ *   /agent-manage/studio?create=1         新建智能体（可选「参考已有智能体」复制草稿）
+ *   /agent-manage/studio?id=:slugOrId     编辑已有智能体
+ */
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
+  ArrowLeft,
   Bot,
   Dices,
   Info,
@@ -28,11 +40,8 @@ import {
 } from '@/utils/policeAvatar'
 import { MAX_IMAGE_UPLOAD_SIZE_BYTES, MAX_IMAGE_UPLOAD_SIZE_MB } from '@/utils/upload_limits'
 
-const props = defineProps({
-  backendOptions: { type: Array, default: () => [] }
-})
-
-const emit = defineEmits(['saved'])
+const route = useRoute()
+const router = useRouter()
 
 const userStore = useUserStore()
 const agentStore = useAgentStore()
@@ -41,11 +50,11 @@ const DEFAULT_AGENT_BACKEND_ID = 'ChatbotAgent'
 
 const runtimeAgentModalTabs = ['model', 'tools', 'other']
 
-const showAgentModal = ref(false)
+const saving = ref(false)
+const loading = ref(false)
 const editingAgentId = ref(null)
 const agentModalActiveTab = ref('basic')
 const agentIconUploading = ref(false)
-const saving = ref(false)
 const runtimeConfigFormRef = ref(null)
 const shareConfigFormRef = ref(null)
 const shareConfig = ref({ access_level: 'user', department_ids: [], user_uids: [] })
@@ -60,6 +69,11 @@ const agentForm = reactive({
   icon: ''
 })
 
+// ── P4-4「基于已有智能体复制草稿」：新建模式下可选来源 ──
+const templateOptions = ref([])
+const templateLoading = ref(false)
+const selectedTemplateId = ref(null)
+
 const normalizeAgent = (agent) => {
   const agentId = agent?.agent_id || agent?.slug || agent?.id
   return agentId
@@ -67,39 +81,24 @@ const normalizeAgent = (agent) => {
     : agent
 }
 
-const agentModalMenuItems = computed(() => {
-  return [
-    { key: 'basic', label: '基本信息', icon: Info },
-    { key: 'model', label: '模型配置', icon: SlidersHorizontal },
-    { key: 'tools', label: '工具配置', icon: Wrench },
-    { key: 'other', label: '其他配置', icon: Settings2 }
-  ]
-})
+const agentModalMenuItems = computed(() => [
+  { key: 'basic', label: '基本信息', icon: Info },
+  { key: 'model', label: '模型配置', icon: SlidersHorizontal },
+  { key: 'tools', label: '工具配置', icon: Wrench },
+  { key: 'other', label: '其他配置', icon: Settings2 }
+])
 
-const showAgentModalSidebar = computed(() => true)
 const runtimeConfigSegment = computed(() =>
   runtimeAgentModalTabs.includes(agentModalActiveTab.value) ? agentModalActiveTab.value : 'model'
 )
 const isRuntimeAgentModalTab = (key) => runtimeAgentModalTabs.includes(key)
-const getDefaultBackendId = () => DEFAULT_AGENT_BACKEND_ID
 
 const isEditingBuiltinAgent = computed(() => isBuiltinAgent({ id: editingAgentId.value }))
-
-const agentModalTitle = computed(() => (editingAgentId.value ? '编辑智能体' : '新增智能体'))
+const pageTitle = computed(() => (editingAgentId.value ? '编辑智能体' : '新增智能体'))
 const agentPreviewDefaultIcon = computed(() =>
   editingAgentId.value ? getOfficerAvatar(editingAgentId.value) : ''
 )
 const agentPreviewName = computed(() => agentForm.name || editingAgentId.value || '智能体')
-const selectedBackendOption = computed(() =>
-  props.backendOptions.find((backend) => backend.value === agentForm.backend_id)
-)
-const selectedBackendLabel = computed(
-  () => selectedBackendOption.value?.label || agentForm.backend_id || '未选择'
-)
-const selectedBackendIcon = computed(() => {
-  const backendText = `${agentForm.backend_id} ${selectedBackendLabel.value}`.toLowerCase()
-  return backendText.includes('deep') || backendText.includes('search') ? Microscope : Bot
-})
 
 const resetAgentForm = () => {
   Object.assign(agentForm, {
@@ -110,6 +109,10 @@ const resetAgentForm = () => {
     icon: ''
   })
   currentAvatarId.value = ''
+}
+
+function getDefaultBackendId() {
+  return DEFAULT_AGENT_BACKEND_ID
 }
 
 /**
@@ -144,90 +147,15 @@ const focusAgentNameInput = async () => {
   agentNameInputRef.value?.focus?.()
 }
 
-const handleAgentModalAfterOpenChange = (open) => {
-  if (open && !editingAgentId.value) focusAgentNameInput()
-}
-
-const openCreate = () => {
-  editingAgentId.value = null
-  agentModalActiveTab.value = 'basic'
-  resetAgentForm()
-  agentStore.resetAgentConfig()
-  // 确保知识库配置初始化为数组（避免未定义）
-  if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
-    agentStore.agentConfig.knowledges = []
-  }
-  // 新建数字警员时默认随机分配一个漫画警察形象
-  const avatar = generateRandomPoliceAvatar()
-  agentForm.icon = avatar.url
-  currentAvatarId.value = avatar.id
-  showAgentModal.value = true
-}
-
-const openEdit = async (agent) => {
-  const agentId = typeof agent === 'string' ? agent : agent?.id
-  if (!agentId) return
-
-  const detail = await agentStore.fetchAgentDetail(agentId, true)
-  // 数字警员（police agent）通过 _officer 标记识别；内置智能助手、数字警员
-  // 默认可管理，不依赖 yuxi 的 can_manage（其桥接记录 created_by 不匹配当前用户）
-  const isOfficer = !!agent?._officer || !!detail?._officer
-  const manageable = !!detail?.can_manage || isOfficer || isBuiltinAgent(detail)
-  if (!manageable) {
-    message.warning('当前智能体不可编辑')
-    return
-  }
-  // 同步给下游配置表单（模型/工具/其他配置依赖 selectedAgent.can_manage 判定只读）
-  detail.can_manage = manageable
-
-  editingAgentId.value = detail.id
-  agentModalActiveTab.value = 'basic'
-  Object.assign(agentForm, {
-    slug: detail.id || detail.slug || '',
-    name: detail.name || '',
-    backend_id: detail.backend_id || DEFAULT_AGENT_BACKEND_ID,
-    description: detail.description || '',
-    icon: detail.icon || ''
-  })
-  await agentStore.selectAgent(detail.id, { allowSubagent: true })
-  await agentStore.fetchMentionResources()
-  if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
-    agentStore.agentConfig.knowledges = []
-  }
-  // 初始化共享范围配置（单表化：从 share_config 读取，而非已废弃的顶层 share_scope）
-  const sc = detail?.share_config || {}
-  const scope = sc.access_level || 'user'
-  shareConfig.value = {
-    access_level: scope === 'global' ? 'global' : scope === 'department' ? 'department' : 'user',
-    department_ids: sc.department_ids || [],
-    user_uids: sc.user_uids || []
-  }
-  showAgentModal.value = true
-}
-
-const restoreChatAgentSelectionIfNeeded = async () => {
-  if (!agentStore.selectedAgent?.is_subagent) return
-  const fallbackAgentId = (agentStore.agents || []).find((agent) => !agent.is_subagent)?.id
-  if (fallbackAgentId) await agentStore.selectAgent(fallbackAgentId)
-}
-
-const closeAgentModal = async () => {
-  if (saving.value || agentIconUploading.value) return
-  showAgentModal.value = false
-  await restoreChatAgentSelectionIfNeeded()
-}
-
 const beforeAgentIconUpload = (file) => {
   if (!file.type.startsWith('image/')) {
     message.error('只能上传图片文件')
     return false
   }
-
   if (file.size > MAX_IMAGE_UPLOAD_SIZE_BYTES) {
     message.error(`图片大小不能超过 ${MAX_IMAGE_UPLOAD_SIZE_MB}MB`)
     return false
   }
-
   uploadAgentIcon(file)
   return false
 }
@@ -245,6 +173,61 @@ const uploadAgentIcon = async (file) => {
   }
 }
 
+// ── P4-4：加载「参考已有智能体」候选（用户可管理的非模板智能体） ──
+const loadTemplateOptions = async () => {
+  templateLoading.value = true
+  try {
+    const [policeRes] = await Promise.all([
+      policeAgentApi.list({ page_size: 200 }).catch(() => ({ items: [] })),
+      agentStore.fetchAgents()
+    ])
+    const policeList = (policeRes.items || policeRes.agents || []).filter(
+      (p) => !p.is_template && !p.is_subagent
+    )
+    const yuxiAgents = agentStore.agents || []
+    const seen = new Set()
+    const merged = []
+    for (const p of policeList) {
+      seen.add(p.id)
+      merged.push({ id: p.id, name: p.name, icon: p.icon, _officer: true, description: p.description })
+    }
+    for (const a of yuxiAgents) {
+      if (a.is_subagent || seen.has(a.id)) continue
+      merged.push({ id: a.id, name: a.name, icon: a.icon, _officer: false, description: a.description })
+    }
+    templateOptions.value = merged
+  } catch (error) {
+    message.error(error.message || '加载参考智能体列表失败')
+  } finally {
+    templateLoading.value = false
+  }
+}
+
+/**
+ * 选定参考来源：拉取其全量详情，预填名称/描述/图标与运行配置草稿，
+ * 保存时以新智能体创建（来源不受影响）。
+ */
+const applyTemplateDraft = async (templateId) => {
+  if (!templateId) return
+  try {
+    const detail = await agentStore.fetchAgentDetail(templateId, true)
+    if (!detail) return
+    Object.assign(agentForm, {
+      name: detail.name || '',
+      description: detail.description || '',
+      icon: detail.icon || ''
+    })
+    await agentStore.selectAgent(templateId, { allowSubagent: true })
+    await agentStore.fetchMentionResources()
+    if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
+      agentStore.agentConfig.knowledges = []
+    }
+    message.success('已载入参考配置草稿，可修改后另存为新智能体')
+  } catch (error) {
+    message.error(error.message || '载入参考配置失败')
+  }
+}
+
 const buildAgentPayload = () => {
   const payload = {
     name: agentForm.name.trim(),
@@ -256,9 +239,9 @@ const buildAgentPayload = () => {
   if (!editingAgentId.value) {
     payload.slug = agentForm.slug.trim() || undefined
     payload.backend_id = agentForm.backend_id
-    // 新建智能体默认个人使用，共享权限在档案页单独设置
+    // 新建智能体默认个人使用，共享权限在档案页/其他配置单独设置
     payload.share_config = { access_level: 'user', department_ids: [], user_uids: [] }
-    // 新建智能体默认不关联任何子智能体（子智能体为内部运行时委派细节，不在 UI 暴露）
+    // 新建默认不关联任何子智能体（子智能体为内部运行时委派细节，不在 UI 暴露）
     payload.config_json = { context: { subagents: [] } }
   }
 
@@ -293,8 +276,6 @@ const saveAgent = async () => {
       if (configForm && configForm.validate) {
         const validate = configForm.validate()
         if (validate.valid) {
-          // 后端支持 personal / department / user / global 四种共享范围；
-          // 「指定人」(user) 会持久化 shared_user_uids，被分享用户即可在智能体页面看到该智能体。
           const scope = shareConfig.value.access_level
           await policeAgentApi.shareAgent(editingAgentId.value, {
             scope,
@@ -304,15 +285,18 @@ const saveAgent = async () => {
           })
         }
       }
-      emit('saved', { mode: 'edit', agent: updated })
       message.success('智能体已保存')
     } else {
+      // 新建：若选择了参考来源，把已载入的运行配置一并带入新智能体
+      if (selectedTemplateId.value && agentStore.agentConfig) {
+        payload.config_json = { context: { ...agentStore.agentConfig } }
+      }
       const created = await agentStore.createAgent(payload)
-      emit('saved', { mode: 'create', agent: normalizeAgent(created) })
       message.success('智能体已创建')
+      goBack(normalizeAgent(created))
+      return
     }
-    showAgentModal.value = false
-    await restoreChatAgentSelectionIfNeeded()
+    goBack()
   } catch (error) {
     message.error(error.message || '保存智能体失败')
   } finally {
@@ -320,43 +304,112 @@ const saveAgent = async () => {
   }
 }
 
-defineExpose({
-  openCreate,
-  openEdit,
-  close: closeAgentModal
+const goBack = (created = null) => {
+  if (created) {
+    router.push({ name: 'AgentProfileComp', params: { id: created.slug || created.id } })
+    return
+  }
+  // 有来源页则返回，否则回智能体管理列表
+  if (window.history.length > 1) router.back()
+  else router.push({ path: '/agent-manage' })
+}
+
+const initFromRoute = async () => {
+  loading.value = true
+  try {
+    const id = route.query.id
+    if (id) {
+      editingAgentId.value = String(id)
+      agentModalActiveTab.value = 'basic'
+      const detail = await agentStore.fetchAgentDetail(editingAgentId.value, true)
+      const isOfficer = !!detail?._officer
+      const manageable = !!detail?.can_manage || isOfficer || isBuiltinAgent(detail)
+      if (!manageable) {
+        message.warning('当前智能体不可编辑')
+        goBack()
+        return
+      }
+      detail.can_manage = manageable
+      Object.assign(agentForm, {
+        slug: detail.id || detail.slug || '',
+        name: detail.name || '',
+        backend_id: detail.backend_id || DEFAULT_AGENT_BACKEND_ID,
+        description: detail.description || '',
+        icon: detail.icon || ''
+      })
+      await agentStore.selectAgent(detail.id, { allowSubagent: true })
+      await agentStore.fetchMentionResources()
+      if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
+        agentStore.agentConfig.knowledges = []
+      }
+      // 初始化共享范围配置（单表化：从 share_config 读取）
+      const sc = detail?.share_config || {}
+      const scope = sc.access_level || 'user'
+      shareConfig.value = {
+        access_level: scope === 'global' ? 'global' : scope === 'department' ? 'department' : 'user',
+        department_ids: sc.department_ids || [],
+        user_uids: sc.user_uids || []
+      }
+    } else {
+      // 新建模式
+      editingAgentId.value = null
+      agentModalActiveTab.value = 'basic'
+      resetAgentForm()
+      agentStore.resetAgentConfig()
+      if (!Array.isArray(agentStore.agentConfig?.knowledges)) {
+        agentStore.agentConfig.knowledges = []
+      }
+      const avatar = generateRandomPoliceAvatar()
+      agentForm.icon = avatar.url
+      currentAvatarId.value = avatar.id
+      await loadTemplateOptions()
+      await nextTick(focusAgentNameInput)
+    }
+  } catch (error) {
+    message.error(error.message || '加载智能体失败')
+    goBack()
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(initFromRoute)
+watch(() => route.query.id, (nv, ov) => {
+  if (nv !== ov) initFromRoute()
 })
 </script>
 
 <template>
-  <a-modal
-    v-model:open="showAgentModal"
-    class="agent-edit-modal"
-    :width="820"
-    :footer="null"
-    :closable="false"
-    @cancel="closeAgentModal"
-    @after-open-change="handleAgentModalAfterOpenChange"
-  >
-    <template #title>
-      <div class="agent-modal-titlebar">
-        <span class="agent-modal-title">{{ agentModalTitle }}</span>
-        <div class="agent-modal-actions">
-          <a-button :disabled="saving" @click="closeAgentModal">取消</a-button>
-          <a-button type="primary" :loading="saving" @click="saveAgent">
-            {{ agentStore.hasConfigChanges ? '保存（有修改）' : '保存' }}
-          </a-button>
-        </div>
+  <div class="studio-page">
+    <!-- ===== 顶部栏 ===== -->
+    <header class="studio-topbar">
+      <div class="studio-topbar-left">
+        <button type="button" class="studio-back-btn" aria-label="返回" @click="goBack()">
+          <ArrowLeft :size="16" />
+        </button>
+        <h1 class="studio-title">{{ pageTitle }}</h1>
+        <a-tag v-if="isEditingBuiltinAgent" color="blue">内置</a-tag>
       </div>
-    </template>
-    <div
-      class="agent-modal-content"
-    >
-      <aside v-if="showAgentModalSidebar" class="agent-modal-sidebar" aria-label="智能体配置分组">
+      <div class="studio-topbar-actions">
+        <a-button :disabled="saving" @click="goBack()">取消</a-button>
+        <a-button type="primary" :loading="saving" @click="saveAgent">
+          {{ agentStore.hasConfigChanges ? '保存（有修改）' : '保存' }}
+        </a-button>
+      </div>
+    </header>
+
+    <div v-if="loading" class="studio-loading">
+      <a-spin tip="加载智能体配置中..." />
+    </div>
+
+    <div v-else class="studio-body">
+      <!-- ===== 左侧导航 ===== -->
+      <aside class="studio-sidebar" aria-label="智能体配置分组">
         <button
           v-for="item in agentModalMenuItems"
           :key="item.key"
           type="button"
-          class="agent-modal-nav-item"
+          class="studio-nav-item"
           :class="{ active: agentModalActiveTab === item.key }"
           @click="agentModalActiveTab = item.key"
         >
@@ -366,10 +419,36 @@ defineExpose({
           </span>
           <span v-if="item.key === 'model' && agentStore.hasConfigChanges" class="nav-dirty-dot" />
         </button>
+
+        <!-- P4-4：新建模式参考来源 -->
+        <div v-if="!editingAgentId" class="studio-template-pick">
+          <div class="studio-template-label">参考已有智能体</div>
+          <a-select
+            v-model:value="selectedTemplateId"
+            :loading="templateLoading"
+            placeholder="可选，复制其配置为草稿"
+            allow-clear
+            show-search
+            option-filter-prop="label"
+            class="studio-template-select"
+            @change="applyTemplateDraft"
+          >
+            <a-select-option v-for="t in templateOptions" :key="t.id" :value="t.id" :label="t.name">
+              <span class="template-option">
+                <span class="template-option-avatar">{{ t.name?.slice(0, 1) || '?' }}</span>
+                <span class="template-option-name">{{ t.name }}</span>
+                <a-tag v-if="t._officer" size="small" color="green">数字警员</a-tag>
+              </span>
+            </a-select-option>
+          </a-select>
+          <p class="studio-template-hint">选择后将预填基本信息与运行配置，保存时创建独立新智能体。</p>
+        </div>
       </aside>
 
-      <div class="agent-modal-main">
-        <section v-show="agentModalActiveTab === 'basic'" class="agent-modal-section">
+      <!-- ===== 右侧主体 ===== -->
+      <div class="studio-main">
+        <!-- 基本信息 -->
+        <section v-show="agentModalActiveTab === 'basic'" class="studio-section">
           <div class="agent-profile-header">
             <div class="agent-icon-preview" aria-label="智能体图标、名称与类型">
               <div class="agent-profile-main">
@@ -408,7 +487,6 @@ defineExpose({
                     </div>
                   </a-upload>
 
-                  <!-- 新建模式：随机生成漫画警察形象 -->
                   <button
                     v-if="!editingAgentId"
                     type="button"
@@ -437,9 +515,7 @@ defineExpose({
                     placeholder="标识可选，留空自动生成"
                     aria-label="智能体标识"
                   />
-                  <span v-else class="agent-inline-slug">{{
-                    agentForm.slug || editingAgentId
-                  }}</span>
+                  <span v-else class="agent-inline-slug">{{ agentForm.slug || editingAgentId }}</span>
                 </div>
               </div>
             </div>
@@ -450,14 +526,15 @@ defineExpose({
               <a-textarea
                 v-model:value="agentForm.description"
                 class="agent-description-textarea"
-                :rows="3"
+                :rows="4"
                 placeholder="可选"
               />
             </label>
           </div>
         </section>
 
-        <section v-show="agentModalActiveTab === 'other'" class="agent-modal-section">
+        <!-- 其他配置（共享范围） -->
+        <section v-show="agentModalActiveTab === 'other'" class="studio-section">
           <div class="agent-share-section">
             <h4 class="section-title">共享范围</h4>
             <p class="section-desc">设置该智能体的访问范围，其他用户将无法在智能体页面看到或使用此智能体。</p>
@@ -467,7 +544,8 @@ defineExpose({
           </div>
         </section>
 
-        <section v-show="isRuntimeAgentModalTab(agentModalActiveTab)" class="agent-modal-section runtime-section">
+        <!-- 模型 / 工具 / 其他运行配置 -->
+        <section v-show="isRuntimeAgentModalTab(agentModalActiveTab)" class="studio-section runtime-section">
           <AgentRuntimeConfigForm
             ref="runtimeConfigFormRef"
             :segment="runtimeConfigSegment"
@@ -476,86 +554,126 @@ defineExpose({
         </section>
       </div>
     </div>
-  </a-modal>
+  </div>
 </template>
 
 <style lang="less" scoped>
-.agent-modal-titlebar {
+.studio-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--gray-0);
+  color: var(--gray-900);
+}
+
+// ============ 顶部栏 ============
+.studio-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
   gap: 16px;
-  width: 100%;
-}
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--gray-150);
+  background: var(--gray-0);
 
-.agent-modal-title {
-  color: var(--gray-900);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.agent-modal-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-
-  :deep(.ant-btn) {
-    min-width: 70px;
-    height: 36px;
-    border-radius: 8px;
-    font-weight: 500;
+  .studio-topbar-left {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 12px;
   }
 
-  :deep(.ant-btn-primary) {
-    border-color: var(--main-700);
-    background: var(--main-700);
+  .studio-back-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--gray-200);
+    border-radius: 8px;
+    background: var(--gray-10);
+    color: var(--gray-700);
+    cursor: pointer;
+    transition: all 0.16s ease;
 
-    &:hover,
-    &:focus {
-      border-color: var(--main-800);
-      background: var(--main-800);
+    &:hover {
+      border-color: var(--main-300);
+      background: var(--main-30);
+      color: var(--main-700);
+    }
+  }
+
+  .studio-title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--gray-900);
+  }
+
+  .studio-topbar-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+
+    :deep(.ant-btn) {
+      min-width: 70px;
+      height: 36px;
+      border-radius: 8px;
+      font-weight: 500;
+    }
+
+    :deep(.ant-btn-primary) {
+      border-color: var(--main-700);
+      background: var(--main-700);
+
+      &:hover,
+      &:focus {
+        border-color: var(--main-800);
+        background: var(--main-800);
+      }
     }
   }
 }
 
-.agent-modal-content {
-  display: grid;
-  grid-template-columns: 144px minmax(0, 1fr);
-  height: min(72vh, 640px);
+.studio-loading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
   min-height: 0;
-  overflow: hidden;
-  background: var(--gray-0);
-
-  &.without-sidebar {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  &.create-mode {
-    height: auto;
-    min-height: 360px;
-  }
 }
 
-.agent-modal-sidebar {
+// ============ 主体 ============
+.studio-body {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.studio-sidebar {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-height: 0;
-  padding: 14px 10px;
+  padding: 16px 12px;
   overflow-y: auto;
   border-right: 1px solid var(--gray-150);
-  background: transparent;
+  background: var(--gray-10);
 }
 
-.agent-modal-nav-item {
+.studio-nav-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  min-height: 38px;
-  padding: 8px 10px;
+  min-height: 40px;
+  padding: 9px 12px;
   border: 1px solid transparent;
-  border-radius: 7px;
+  border-radius: 8px;
   background: transparent;
   color: var(--gray-800);
   font-size: 13px;
@@ -600,7 +718,7 @@ defineExpose({
   }
 }
 
-.agent-modal-nav-item.active .nav-item-main svg {
+.studio-nav-item.active .nav-item-main svg {
   color: var(--main-700);
 }
 
@@ -611,12 +729,65 @@ defineExpose({
   background: var(--color-warning-600);
 }
 
-.agent-modal-main {
+// ============ P4-4 参考来源 ============
+.studio-template-pick {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--gray-300);
+}
+
+.studio-template-label {
+  margin-bottom: 8px;
+  color: var(--gray-600);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.studio-template-select {
+  width: 100%;
+}
+
+.template-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  .template-option-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    background: var(--main-30);
+    color: var(--main-700);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .template-option-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.studio-template-hint {
+  margin: 8px 0 0;
+  color: var(--gray-500);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+// ============ 右侧主体 ============
+.studio-main {
   min-width: 0;
   min-height: 0;
   overflow: hidden auto;
   overscroll-behavior: contain;
-  padding: 22px 18px 24px 24px;
+  padding: 24px 28px 40px;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
   scrollbar-color: var(--gray-300) transparent;
@@ -624,25 +795,23 @@ defineExpose({
   &::-webkit-scrollbar {
     width: 6px;
   }
-
   &::-webkit-scrollbar-track {
     background: transparent;
   }
-
   &::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
     border-radius: 999px;
     background: var(--gray-300);
     background-clip: content-box;
   }
-
   &::-webkit-scrollbar-thumb:hover {
     background: var(--gray-400);
     background-clip: content-box;
   }
 }
 
-.agent-modal-section {
+.studio-section {
+  max-width: 720px;
   min-height: 0;
   background: var(--gray-0);
 }
@@ -691,16 +860,7 @@ defineExpose({
   }
 }
 
-.section-heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 12px;
-  color: var(--gray-900);
-  font-size: 14px;
-  font-weight: 600;
-}
-
+// ============ 基本信息（沿用弹窗样式，去弹窗外壳） ============
 .agent-profile-header {
   margin-bottom: 16px;
 }
@@ -797,7 +957,7 @@ defineExpose({
 }
 
 .agent-inline-name-input {
-  width: 200px;
+  width: 240px;
   max-width: 100%;
   padding: 1px 4px;
   border: 1px solid transparent;
@@ -833,7 +993,7 @@ defineExpose({
 .agent-inline-slug,
 .agent-inline-slug-input {
   padding: 1px 4px;
-  width: 200px;
+  width: 240px;
   max-width: 100%;
   overflow: hidden;
   color: var(--gray-500);
@@ -859,86 +1019,6 @@ defineExpose({
   }
 }
 
-.agent-backend-summary {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 10px;
-  width: 190px;
-  min-height: 56px;
-  padding: 10px 12px;
-  border: 1px solid var(--gray-200);
-  border-radius: 12px;
-  background: var(--gray-10);
-  color: var(--gray-700);
-
-  &.editable {
-    padding-right: 8px;
-  }
-}
-
-.agent-backend-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  background: var(--gray-100);
-  color: var(--gray-700);
-}
-
-.agent-backend-text {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  gap: 3px;
-  line-height: 1.2;
-}
-
-.agent-backend-label {
-  color: var(--gray-500);
-  font-size: 11px;
-}
-
-.agent-backend-name {
-  max-width: 128px;
-  overflow: hidden;
-  color: var(--gray-900);
-  font-size: 13px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-backend-select {
-  width: 128px;
-  margin: -3px 0 -5px -11px;
-
-  :deep(.ant-select-selector) {
-    background: transparent !important;
-    box-shadow: none !important;
-  }
-
-  :deep(.ant-select-selection-item) {
-    color: var(--gray-900);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  :deep(.ant-select-arrow) {
-    color: var(--gray-500);
-  }
-}
-
-.share-config-block {
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid var(--gray-150);
-}
-
 .modal-form {
   display: flex;
   flex-direction: column;
@@ -958,7 +1038,7 @@ defineExpose({
 }
 
 .agent-description-textarea {
-  min-height: 80px;
+  min-height: 96px;
   padding: 10px 12px;
   border-color: var(--gray-200);
   border-radius: 8px;
@@ -1054,37 +1134,19 @@ defineExpose({
 }
 
 @media (max-width: 768px) {
-  .agent-modal-content {
+  .studio-body {
     grid-template-columns: 1fr;
-    height: min(78vh, 680px);
   }
 
-  .agent-modal-sidebar {
+  .studio-sidebar {
     flex-direction: row;
     overflow-x: auto;
     border-right: 0;
     border-bottom: 1px solid var(--gray-150);
+
+    .studio-template-pick {
+      display: none;
+    }
   }
-}
-
-:global(.agent-edit-modal .ant-modal-content) {
-  overflow: hidden;
-  padding: 0;
-  border-radius: 12px;
-}
-
-:global(.agent-edit-modal .ant-modal-header) {
-  margin: 0;
-  padding: 18px 24px;
-  border-bottom: 1px solid var(--gray-150);
-  background: var(--gray-0);
-}
-
-:global(.agent-edit-modal .ant-modal-title) {
-  width: 100%;
-}
-
-:global(.agent-edit-modal .ant-modal-body) {
-  padding: 0;
 }
 </style>
