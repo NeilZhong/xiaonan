@@ -93,7 +93,8 @@ async def test_task_full_flow(test_client, admin_headers):
         assert task["status"] == "pending"
 
         # 分配给民警(用 admin 自身 id 作为 human 演示)
-        me = (await test_client.get("/api/auth/me", headers=admin_headers)).json()["data"]
+        # /api/auth/me 直接返回 UserResponse，无 data 包装层
+        me = (await test_client.get("/api/auth/me", headers=admin_headers)).json()
         assign = await test_client.post(
             f"{API}/tasks/{task_id}/assign",
             json={"assignee_type": "human", "assignee_id": me["id"], "assignee_name": me.get("real_name") or me["uid"]},
