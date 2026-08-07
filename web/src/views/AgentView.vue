@@ -11,16 +11,7 @@
               <h1 class="chat-hero-title">{{ heroTitle }}</h1>
             </template>
             <div class="chat-tab-group">
-              <button
-                v-for="tab in tabOptions"
-                :key="tab.value"
-                type="button"
-                class="chat-tab"
-                :class="{ 'chat-tab--active': activeTab === tab.value }"
-                @click="activeTab = tab.value"
-              >
-                {{ tab.label }}
-              </button>
+              <SlidingTabs v-model="activeTab" :options="tabOptions" />
             </div>
           </div>
         </div>
@@ -188,6 +179,7 @@ import AgentEditModal from '@/components/model-management/AgentEditModal.vue'
 import { isBuiltinAgent, useAgentStore } from '@/stores/agent'
 import { handleChatError } from '@/utils/errorHandler'
 import FallbackAvatar from '@/components/common/FallbackAvatar.vue'
+import SlidingTabs from '@/components/common/SlidingTabs.vue'
 import { getOfficerAvatar } from '@/utils/policeAvatar'
 
 import { storeToRefs } from 'pinia'
@@ -504,35 +496,7 @@ useOutsidePointerdown(agentDropdownOpen, [agentDropdownTriggerRef, agentDropdown
   letter-spacing: -0.02em;
 }
 .chat-tab-group {
-  display: inline-flex;
-  align-items: stretch;
-  padding: 3px;
-  border-radius: 12px;
-  background: var(--gray-100, #edf2f7);
-  border: 1px solid var(--gray-200, #e2e8f0);
-}
-.chat-tab {
-  padding: 7px 20px;
-  font-size: 13px;
-  line-height: 1.4;
-  border-radius: 9px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--gray-500, #718096);
-  font-weight: 400;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.22s, font-weight 0.22s, background 0.18s;
-}
-.chat-tab:hover {
-  color: var(--gray-700, #4a5568);
-}
-.chat-tab--active {
-  background: var(--gray-0, #fff);
-  border: 1px solid var(--gray-200, #e2e8f0);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-  color: var(--gray-800, #2d3748);
-  font-weight: 500;
+  margin-top: 20px;
 }
 
 /* ═══════ 能力演进子切换条（对齐悟帆：技能/连接器/协助伙伴 + 打造/诊断优化） ═══════ */
