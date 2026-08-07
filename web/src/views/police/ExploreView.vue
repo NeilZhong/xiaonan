@@ -1,41 +1,20 @@
 <template>
   <div class="xn-explore">
-    <!-- 顶部 Hero（悟帆式发现区） -->
-    <section class="xe-hero">
-      <div class="xe-hero-glow" />
-      <div class="xe-hero-inner">
-        <div class="xe-hero-head">
-          <h1 class="xe-hero-title">探索市场</h1>
-          <p class="xe-hero-tagline">连接一切能力 · 协同每一次办案</p>
-        </div>
-        <p class="xe-hero-sub">
-          浏览并申请数字民警、协助伙伴与侦查模板，把经过验证的能力一键装进你的工作流。
-        </p>
-        <div class="xe-chips">
-          <button
-            v-for="u in useCases"
-            :key="u"
-            type="button"
-            class="xe-chip"
-            :title="u"
-            @click="startChat(u)"
-          >
-            <span class="xe-chip-text">{{ u }}</span>
-            <span class="xe-chip-icon"><ArrowUpRight :size="13" /></span>
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- 工具条：分类 Tab + 搜索 + 发布 -->
+    <!-- ===== 1. 顶部分类与搜索栏 ===== -->
     <div class="xe-toolbar">
-      <a-segmented
-        v-model:value="activeType"
-        :options="typeOptions"
-        class="xe-tabs"
-        @change="onTypeChange"
-      />
-      <div class="xe-toolbar-right">
+      <div class="xe-pills">
+        <button
+          v-for="p in pills"
+          :key="p.value"
+          type="button"
+          class="xe-pill"
+          :class="{ active: activeType === p.value }"
+          @click="onPill(p.value)"
+        >
+          {{ p.label }}
+        </button>
+      </div>
+      <div class="xe-right">
         <a-input-search
           v-model:value="keyword"
           placeholder="搜索数字民警、技能、工具..."
@@ -43,76 +22,120 @@
           class="xe-search"
           @search="onSearch"
         />
-        <a-button type="primary" class="xe-publish" @click="openPublish">
-          <template #icon><Plus :size="14" /></template>
-          发布
-        </a-button>
+        <button type="button" class="xe-publish" @click="openPublish">
+          <Plus :size="14" /> 发布
+        </button>
       </div>
     </div>
 
-    <!-- 资产卡片网格 -->
+    <!-- ===== 加载 / 空态 ===== -->
     <div v-if="loading" class="xe-loading">
       <a-spin tip="加载市场中..." />
     </div>
-
     <a-empty
-      v-else-if="!items.length"
-      description="暂无相关资产，去发布第一个数字民警吧"
+      v-else-if="!showHero && !officerItems.length && !skillRows.length && !comingSoon"
+      :description="activeType === 'all' ? '暂无相关资产，去发布第一个数字民警吧' : '该分类暂无内容'"
     />
 
-    <div v-else class="xe-grid">
-      <div v-for="item in items" :key="`${item.type}-${item.id}`" class="xe-card xe-clickable" @click="openDetail(item)">
-        <div class="xe-card-top">
-          <div class="xe-avatar" :class="`bg-${avatarTheme(item)}`">
-            <img :src="assetAvatar(item)" :alt="item.name" loading="lazy" />
+    <!-- ===== 2. 本周 / 本月 · 最受欢迎（Hero 展位） ===== -->
+    <section v-if="showHero && featured.length" class="xe-feature">
+      <div class="xe-eyebrow">🔥 本周 / 本月 · 最受欢迎</div>
+      <div class="xe-banner">
+        <div
+          v-for="(f, i) in featured"
+          :key="`feat-${f.type}-${f.id}`"
+          class="xe-hero-card"
+          :class="gradientClass(i)"
+          @click="openDetail(f)"
+        >
+          <span class="xe-crown">👑</span>
+          <div class="xe-hero-shade" />
+          <div class="xe-hero-content">
+            <h3 class="xe-hero-title">{{ f.name }}</h3>
+            <p class="xe-hero-desc">{{ f.description || '经过实战验证的高质效能力，点击查看详情' }}</p>
+            <div class="xe-hero-author">
+              <span class="xe-author-av">{{ initial(f.author) }}</span>
+              <span class="xe-author-name">{{ f.author }}</span>
+              <span class="xe-author-meta">★ {{ ratingText(f) }} · ↓ {{ f.stats?.usage ?? 0 }}</span>
+            </div>
           </div>
-          <div class="xe-card-head">
-            <div class="xe-name" :title="item.name">{{ item.name }}</div>
-            <div class="xe-author">{{ item.author || item.badge_number || '小南官方' }}</div>
-          </div>
-          <a-tag class="xe-type" :color="typeColor(item.type)">{{ typeLabel(item.type) }}</a-tag>
-        </div>
-
-        <div class="xe-desc">{{ item.description || '暂无简介' }}</div>
-
-        <div v-if="(item.tags && item.tags.length) || item.category" class="xe-tags">
-          <a-tag v-for="tag in (item.tags || []).slice(0, 3)" :key="tag" class="xe-tag">{{ tag }}</a-tag>
-          <span v-if="item.category" class="xe-cat">{{ item.category }}</span>
-        </div>
-
-        <div class="xe-foot">
-          <div class="xe-stats">
-            <span>使用 {{ item.stats?.usage ?? 0 }}</span>
-            <span class="xe-rate">★ {{ item.stats?.rating ?? 0 }}</span>
-          </div>
-          <a-button
-            size="small"
-            :type="appliedSet.has(markKey(item)) ? 'default' : 'primary'"
-            :disabled="appliedSet.has(markKey(item))"
-            @click.stop="handleApply(item)"
-          >
-            {{ actionLabel(item) }}
-          </a-button>
         </div>
       </div>
-    </div>
+    </section>
 
-    <!-- 分页 -->
-    <div v-if="total > pageSize && !loading" class="xe-pager">
-      <a-pagination
-        v-model:current="page"
-        :total="total"
-        :page-size="pageSize"
-        :show-size-changer="false"
-        size="small"
-        @change="load"
-      />
-    </div>
+    <!-- ===== 3. 数字警员模块（横向 Swipe 滑动） ===== -->
+    <section v-if="officerItems.length" class="xe-section">
+      <header class="xe-sec-head">
+        <h2 class="xe-sec-title">{{ officerSectionTitle }}</h2>
+        <a class="xe-sec-more" @click="onPill('agent')">查看全部 →</a>
+      </header>
+      <div
+        ref="swipeRef"
+        class="swipe-container"
+        @pointerdown="onSwipeDown"
+        @pointermove="onSwipeMove"
+        @pointerup="onSwipeUp"
+        @pointerleave="onSwipeUp"
+      >
+        <div
+          v-for="(item, i) in officerItems"
+          :key="`${item.type}-${item.id}`"
+          class="swipe-item xe-officer-card"
+          :class="gradientClass(i)"
+          @click="onOfficerClick(item)"
+        >
+          <span class="xe-officer-badge">{{ typeLabel(item.type) }}</span>
+          <div class="xe-officer-main">
+            <div class="xe-officer-avatar">{{ initial(item.name) }}</div>
+            <div class="xe-officer-name" :title="item.name">{{ item.name }}</div>
+            <div class="xe-officer-desc" :title="item.description">{{ item.description || '暂无简介' }}</div>
+          </div>
+          <div class="xe-officer-foot">
+            <span class="xe-meta"><Download :size="12" /> {{ item.stats?.usage ?? 0 }}</span>
+            <span class="xe-meta xe-star">★ {{ ratingText(item) }}</span>
+            <span class="xe-meta xe-time">{{ relativeTime(item.created_at) }}</span>
+          </div>
+        </div>
+      </div>
+    </section>
 
-    <!-- 发布抽屉 -->
+    <!-- ===== 4. 技能 / 工具 / MCP / 卡片 · 开箱即用模块 ===== -->
+    <section v-if="showSkills" class="xe-section">
+      <header class="xe-sec-head">
+        <h2 class="xe-sec-title">{{ skillSectionTitle }}</h2>
+        <a class="xe-sec-more" @click="onPill('skill')">查看全部 →</a>
+      </header>
+      <div v-if="skillRows.length" class="xe-list">
+        <div v-for="row in skillRows" :key="row.key" class="xe-row">
+          <div class="xe-row-icon">
+            <span v-if="isEmoji(row.icon)">{{ row.icon }}</span>
+            <component :is="row.iconComp" v-else :size="18" />
+          </div>
+          <div class="xe-row-main">
+            <div class="xe-row-title">{{ row.name }}</div>
+            <div class="xe-row-desc">{{ row.description || '暂无描述' }}</div>
+          </div>
+          <div class="xe-row-action">
+            <span v-if="row.installed" class="xe-installed">当前空间已安装</span>
+            <button
+              v-else
+              type="button"
+              class="xe-add"
+              :disabled="row.pending"
+              @click="toggleRow(row)"
+            >
+              <Plus :size="13" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <a-empty v-else description="该分类市场内容建设中，敬请期待" />
+    </section>
+
+    <!-- ===== 发布抽屉 ===== -->
     <MarketPublishDrawer v-model:open="publishOpen" @published="onPublished" />
 
-    <!-- 资产详情弹窗（悟帆式结构，适配小南浅色品牌） -->
+    <!-- ===== 资产详情弹窗（Hero 区为深色玻璃，跟随系统浅色主题） ===== -->
     <transition name="xe-fade">
       <div v-if="detailOpen" class="xe-overlay" @click.self="closeDetail">
         <div class="xe-modal" role="dialog" aria-modal="true">
@@ -120,14 +143,10 @@
             <X :size="14" />
           </button>
 
-          <!-- 顶部 Hero（品牌色渐变） -->
-          <div class="xe-modal-hero">
+          <div class="xe-modal-hero gradient-card-blue">
             <div class="xe-hero-row">
               <span class="xe-creator">
-                <span class="xe-creator-avatar">
-                  <img v-if="detailView.icon" :src="detailView.icon" :alt="detailView.author" />
-                  <span v-else>{{ (detailView.author || '?').slice(0, 1) }}</span>
-                </span>
+                <span class="xe-creator-avatar">{{ initial(detailView.author) }}</span>
                 <span class="xe-creator-name">{{ detailView.author }}</span>
               </span>
               <span class="xe-type-pill">{{ typeLabel(detailView.type) }}</span>
@@ -136,7 +155,6 @@
             <p class="xe-hero-desc">{{ detailView.description || '暂无简介' }}</p>
           </div>
 
-          <!-- 操作栏 -->
           <div class="xe-modal-actions">
             <div class="xe-modal-actions-left">
               <a-button
@@ -164,7 +182,6 @@
 
           <div class="xe-divider" />
 
-          <!-- 介绍 -->
           <div class="xe-modal-body" v-if="detailData || selectedItem">
             <h4 class="xe-section-title">介绍</h4>
             <div class="xe-intro">
@@ -173,10 +190,9 @@
               <p v-else class="xe-muted">该资产暂未填写详细介绍。</p>
             </div>
             <div v-if="detailView.tags && detailView.tags.length" class="xe-tags">
-              <a-tag v-for="t in detailView.tags" :key="t" class="xe-tag">{{ t }}</a-tag>
+              <span v-for="t in detailView.tags" :key="t" class="xe-tag">{{ t }}</span>
             </div>
 
-            <!-- 评价 -->
             <h4 class="xe-section-title xe-review-title">
               评价 <span class="xe-review-count">({{ reviewTotal }})</span>
               <span v-if="detailView.stats && detailView.stats.rating" class="xe-review-stats">
@@ -188,7 +204,7 @@
             <template v-if="detailView.type === 'agent'">
               <div v-if="reviews.length" class="xe-review-list">
                 <div v-for="r in reviews" :key="r.id" class="xe-review">
-                  <div class="xe-review-avatar">{{ (r.user_name || '?').slice(0, 1) }}</div>
+                  <div class="xe-review-avatar">{{ initial(r.user_name) }}</div>
                   <div class="xe-review-main">
                     <div class="xe-review-head">
                       <span class="xe-review-name">{{ r.user_name || '匿名用户' }}</span>
@@ -250,12 +266,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { ArrowUpRight, Plus, Eye, Share2, X, Star } from 'lucide-vue-next'
+import {
+  Plus, Eye, Share2, X, Star, Download, Box, Bot,
+} from 'lucide-vue-next'
 import { policeMarketApi, policeAgentApi, policeConnectionApi } from '@/apis/police_api'
-import { resolveAgentAvatar, getOfficerAvatar } from '@/utils/policeAvatar'
+import { skillApi } from '@/apis/skill_api'
 import MarketPublishDrawer from '@/components/police/MarketPublishDrawer.vue'
 
 const router = useRouter()
@@ -264,11 +282,13 @@ const items = ref([])
 const loading = ref(false)
 const keyword = ref('')
 const activeType = ref('all')
-const page = ref(1)
-const pageSize = 50
-const total = ref(0)
 const publishOpen = ref(false)
 const appliedSet = ref(new Set())
+
+// 技能横向列表（真实数据源）
+const skills = ref([])
+const officersLoaded = ref(false)
+const skillsLoaded = ref(false)
 
 // 资产详情弹窗
 const detailOpen = ref(false)
@@ -281,28 +301,82 @@ const reviewText = ref('')
 const reviewRating = ref(0)
 const submittingReview = ref(false)
 
-// 悟帆式推荐用例：点击进入对话（/agent），把用例作为初始提示词
-const useCases = [
-  '笔录结构化分析，提取关键要素与矛盾点',
-  '根据案情生成初查提纲与取证清单',
-  '梳理证据链，标注缺失与薄弱环节',
-  '起草询问 / 讯问提纲',
-  '生成案件复盘报告要点',
-  '对比类案裁判要点',
-]
+// 横向滑动容器与拖拽状态
+const swipeRef = ref(null)
+const drag = reactive({ active: false, startX: 0, startScroll: 0, moved: false })
 
-const typeOptions = [
+const pills = [
   { label: '全部', value: 'all' },
   { label: '数字民警', value: 'agent' },
+  { label: '技能', value: 'skill' },
+  { label: '工具', value: 'tool' },
+  { label: 'MCP', value: 'mcp' },
+  { label: '卡片', value: 'card' },
   { label: '协助伙伴', value: 'partner' },
-  { label: '技能模板', value: 'template' },
 ]
+
+const GRADIENTS = ['gradient-card-blue', 'gradient-card-purple', 'gradient-card-emerald', 'gradient-card-dark']
+const gradientClass = (i) => GRADIENTS[((i % 4) + 4) % 4]
+
+// 区块可见性
+const showHero = computed(() => activeType.value === 'all')
+const showOfficers = computed(() => ['all', 'agent', 'partner'].includes(activeType.value))
+const showSkills = computed(() => ['all', 'skill', 'tool', 'mcp', 'card'].includes(activeType.value))
+
+// 数字警员卡片（全部=数字民警+协助伙伴；单类=对应类型）
+const officerItems = computed(() => {
+  const want = activeType.value
+  return items.value.filter((it) => {
+    if (want === 'partner') return it.type === 'partner'
+    if (want === 'agent') return it.type === 'agent'
+    return it.type === 'agent' || it.type === 'partner'
+  })
+})
+
+const officerSectionTitle = computed(() => {
+  if (activeType.value === 'partner') return '协助伙伴'
+  if (activeType.value === 'agent') return '数字警员'
+  return '数字警员'
+})
+
+// 最受欢迎：按评分 + 使用量取前 2
+const featured = computed(() => {
+  if (!showHero.value) return []
+  return [...officerItems.value]
+    .sort((a, b) => (b.stats?.rating ?? 0) - (a.stats?.rating ?? 0) || (b.stats?.usage ?? 0) - (a.stats?.usage ?? 0))
+    .slice(0, 2)
+})
+
+// 开箱即用列表项（仅 技能 / 全部 展示真实技能数据）
+const skillRows = computed(() => {
+  if (activeType.value !== 'skill' && activeType.value !== 'all') return []
+  return skills.value.map((s) => ({
+    key: s.slug || s.name,
+    name: s.name,
+    description: s.description,
+    icon: s.icon,
+    iconComp: s.icon && !isEmoji(s.icon) ? Box : Bot,
+    installed: !!s.enabled,
+    pending: false,
+    slug: s.slug,
+    source: s.source_type,
+  }))
+})
+
+const comingSoon = computed(
+  () => showSkills.value && activeType.value !== 'skill' && activeType.value !== 'all' && skillRows.value.length === 0,
+)
+
+const skillSectionTitle = computed(() => {
+  if (activeType.value === 'skill') return '技能市场'
+  if (activeType.value === 'tool') return '工具市场'
+  if (activeType.value === 'mcp') return 'MCP 连接器'
+  if (activeType.value === 'card') return '卡片市场'
+  return '技能 / 工具 / MCP / 卡片 · 开箱即用'
+})
 
 const typeLabel = (t) =>
   ({ agent: '数字民警', partner: '协助伙伴', template: '技能模板' }[t] || t)
-const typeColor = (t) =>
-  ({ agent: 'blue', partner: 'purple', template: 'green' }[t] || 'default')
-
 const markKey = (item) => `${item.type}-${item.id}`
 
 const actionLabel = (item) => {
@@ -311,38 +385,45 @@ const actionLabel = (item) => {
   if (item.apply_mode === 'equip_guided') return '关注使用'
   return '选用模板'
 }
-
-const avatarTheme = (item) =>
-  ({ agent: 'blue', partner: 'purple', template: 'green' }[item.type] || 'blue')
-
-const assetAvatar = (item) => {
-  if (item.type === 'template') return getOfficerAvatar(item.id)
-  return resolveAgentAvatar({ id: item.id, name: item.name, icon: item.avatar })
+const appliedText = (item) => {
+  if (item.type === 'agent') return '已申请'
+  if (item.type === 'partner') return '已关注'
+  return '已选用'
 }
+const metaLine = (item) => item.category || item.badge_number || item.author || '小南官方'
+const ratingText = (item) => (item.stats?.rating ? Number(item.stats.rating).toFixed(1) : '0.0')
+const initial = (s) => (s || '?').toString().slice(0, 1)
+const isEmoji = (s) => typeof s === 'string' && s.length <= 2 && /\p{Emoji}/u.test(s)
 
 function startChat(useCase) {
-  // 进入对话页，把用例作为初始提示词（best-effort：依赖 AgentView 读取 query.prompt）
   router.push({ path: '/agent', query: { prompt: useCase } })
+}
+
+async function fetchOfficers() {
+  const res = await policeMarketApi.explore({
+    type: 'all',
+    keyword: keyword.value || undefined,
+    page: 1,
+    page_size: 50,
+  })
+  items.value = res.items || []
+  const conns = await policeConnectionApi.list()
+  appliedSet.value = new Set(
+    (conns.items || []).filter((c) => c.agent).map((c) => `agent-${c.agent.id}`),
+  )
 }
 
 async function load() {
   loading.value = true
   try {
-    const res = await policeMarketApi.explore({
-      type: activeType.value,
-      keyword: keyword.value || undefined,
-      page: page.value,
-      page_size: pageSize,
-    })
-    items.value = res.items || []
-    total.value = res.total || 0
-    // 已申请标记：数字民警来自连接列表
-    if (activeType.value === 'all' || activeType.value === 'agent') {
-      const conns = await policeConnectionApi.list()
-      appliedSet.value = new Set(
-        (conns.items || []).filter((c) => c.agent).map((c) => `agent-${c.agent.id}`)
-      )
+    const tasks = []
+    if (showOfficers.value && !officersLoaded.value) {
+      tasks.push(fetchOfficers().then(() => { officersLoaded.value = true }))
     }
+    if (showSkills.value && (activeType.value === 'skill' || activeType.value === 'all') && !skillsLoaded.value) {
+      tasks.push(skillApi.listSkills().then((s) => { skills.value = s; skillsLoaded.value = true }))
+    }
+    await Promise.all(tasks)
   } catch (e) {
     message.error('加载市场失败: ' + (e.message || e))
   } finally {
@@ -350,14 +431,56 @@ async function load() {
   }
 }
 
-function onTypeChange() {
-  page.value = 1
+function onPill(val) {
+  activeType.value = val
   load()
 }
 
 function onSearch() {
-  page.value = 1
+  officersLoaded.value = false
+  skillsLoaded.value = false
   load()
+}
+
+// ===== 横向滑动：鼠标拖拽 =====
+function onSwipeDown(e) {
+  if (!swipeRef.value) return
+  drag.active = true
+  drag.moved = false
+  drag.startX = e.pageX - swipeRef.value.getBoundingClientRect().left
+  drag.startScroll = swipeRef.value.scrollLeft
+}
+function onSwipeMove(e) {
+  if (!drag.active || !swipeRef.value) return
+  const x = e.pageX - swipeRef.value.getBoundingClientRect().left
+  const walk = x - drag.startX
+  if (Math.abs(walk) > 4) drag.moved = true
+  swipeRef.value.scrollLeft = drag.startScroll - walk
+}
+function onSwipeUp() {
+  drag.active = false
+}
+function onOfficerClick(item) {
+  if (drag.moved) {
+    drag.moved = false
+    return
+  }
+  openDetail(item)
+}
+
+async function toggleRow(row) {
+  if (row.pending) return
+  row.pending = true
+  const next = !row.installed
+  try {
+    await skillApi.updateSkillEnabled(row.slug, next)
+    row.installed = next
+    message.success(next ? '已启用该技能' : '已关闭该技能')
+  } catch (e) {
+    message.error('操作失败: ' + (e.message || e))
+  } finally {
+    row.pending = false
+  }
 }
 
 async function handleApply(item) {
@@ -374,13 +497,6 @@ async function handleApply(item) {
   }
 }
 
-const appliedText = (item) => {
-  if (item.type === 'agent') return '已申请'
-  if (item.type === 'partner') return '已关注'
-  return '已选用'
-}
-
-// 弹窗视图：以卡片(item) 为基础，叠加详情(detail) 的真实字段
 const detailView = computed(() => {
   const base = selectedItem.value || {}
   const d = detailData.value || {}
@@ -393,7 +509,7 @@ const detailView = computed(() => {
     name: base.name || d.name || '',
     description: base.description || d.description || '',
     systemPrompt: d.system_prompt || '',
-    category: base.category || d.category || (type === 'partner' ? '协助伙伴' : type === 'template' ? '任务模板' : '数字民警'),
+    category: base.category || d.category || (type === 'partner' ? '协助伙伴' : '数字民警'),
     author: base.author || d.badge_number || d.author || '小南官方',
     icon: base.icon || base.avatar || d.icon || '',
     tags: dCaps.length ? dCaps : baseTags,
@@ -414,7 +530,6 @@ async function openDetail(item) {
   try {
     detailData.value = await policeMarketApi.detail(item.type, item.id)
   } catch (e) {
-    // 详情拉取失败时仍用卡片基础字段渲染
     console.warn('加载资产详情失败', e)
   }
   if (item.type === 'agent') loadReviews()
@@ -425,7 +540,6 @@ function closeDetail() {
 }
 
 function enterChat(item) {
-  // best-effort：进入对话页并带上智能体标识（依赖 AgentView 读取 query.agent）
   router.push({ path: '/agent', query: { agent: item.slug || item.id } })
 }
 
@@ -446,7 +560,7 @@ async function loadReviews() {
     const res = await policeAgentApi.listComments(id)
     reviews.value = res?.items || []
     reviewTotal.value = res?.total || 0
-  } catch (e) {
+  } catch {
     reviews.value = []
   }
 }
@@ -476,12 +590,27 @@ function formatDate(s) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
 }
 
+function relativeTime(s) {
+  if (!s) return '未知'
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return '未知'
+  const diff = (Date.now() - d.getTime()) / 1000
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前'
+  if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前'
+  const days = Math.floor(diff / 86400)
+  if (days < 30) return days + ' 天前'
+  if (days < 365) return Math.floor(days / 30) + ' 月前'
+  return Math.floor(days / 365) + ' 年前'
+}
+
 function openPublish() {
   publishOpen.value = true
 }
 
 function onPublished() {
   message.success('已进入审核，通过后将在市场可见')
+  officersLoaded.value = false
   load()
 }
 
@@ -492,260 +621,423 @@ onMounted(() => {
 
 <style scoped lang="less">
 .xn-explore {
-  padding: var(--page-padding);
+  padding: 28px 28px 56px;
   max-width: 1280px;
   margin: 0 auto;
-}
-
-/* ===== Hero（悟帆式发现区） ===== */
-.xe-hero {
-  position: relative;
-  overflow: hidden;
+  min-height: 100vh;
+  color: var(--gray-1000);
+  // 页面跟随系统浅色背景，不再强制深色；仅卡片使用深色 Mesh 渐变作为高级感点缀
+  background: transparent;
   border-radius: 18px;
-  padding: 28px 30px;
-  margin-bottom: 20px;
-  background: linear-gradient(120deg, rgba(46, 109, 206, 0.10), rgba(46, 109, 206, 0.03));
-  border: 1px solid var(--gray-150);
-}
-.xe-hero-glow {
-  position: absolute;
-  top: -120px;
-  right: -80px;
-  width: 320px;
-  height: 320px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(46, 109, 206, 0.18) 0%, transparent 70%);
-  pointer-events: none;
-}
-.xe-hero-inner {
-  position: relative;
-}
-.xe-hero-head {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  flex-wrap: wrap;
-}
-.xe-hero-title {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 800;
-  color: var(--color-accent-700, #174591);
-  letter-spacing: 0.5px;
-}
-.xe-hero-tagline {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-accent-500, #2e6dce);
-}
-.xe-hero-sub {
-  margin: 10px 0 16px;
-  max-width: 640px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--gray-600);
-}
-.xe-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-.xe-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  max-width: 320px;
-  padding: 8px 12px 8px 14px;
-  font-size: 12.5px;
-  line-height: 1.4;
-  color: var(--gray-800);
-  background: var(--gray-0, #fff);
-  border: 1px solid var(--gray-200);
-  border-radius: 999px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s, transform 0.12s;
-}
-.xe-chip:hover {
-  color: var(--color-accent-700, #174591);
-  border-color: var(--color-accent-500, #2e6dce);
-  background: rgba(46, 109, 206, 0.04);
-  transform: translateY(-1px);
-}
-.xe-chip-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.xe-chip-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--gray-100);
-  color: var(--gray-600);
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
-}
-.xe-chip:hover .xe-chip-icon {
-  background: var(--color-accent-500, #2e6dce);
-  color: #fff;
 }
 
-/* ===== 工具条 ===== */
+/* ===== 1. 顶部分类与搜索栏 ===== */
 .xe-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 18px;
+  gap: 14px;
+  margin-bottom: 26px;
 }
-.xe-tabs {
+.xe-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.xe-pill {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-700);
   background: var(--gray-100);
-  border-radius: 8px;
+  border: 1px solid var(--gray-200);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.16s ease;
 }
-.xe-toolbar-right {
+.xe-pill:hover {
+  color: var(--gray-1000);
+  background: var(--main-20);
+  border-color: var(--main-200);
+}
+.xe-pill.active {
+  color: var(--main-900);
+  background: var(--main-20);
+  border-color: var(--main-300);
+  box-shadow: 0 2px 10px rgba(46, 109, 206, 0.18);
+}
+.xe-right {
   display: flex;
   gap: 10px;
   align-items: center;
 }
 .xe-search {
   width: 260px;
+  :deep(.ant-input),
+  :deep(.ant-input-search-button) {
+    background: #fff;
+    border-color: var(--gray-200);
+    color: var(--gray-1000);
+  }
+  :deep(.ant-input::placeholder) {
+    color: var(--gray-500);
+  }
 }
+// 黑底高亮发布按钮
 .xe-publish {
-  background: var(--color-accent-700, #174591);
-  border-color: var(--color-accent-700, #174591);
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: #0f172a;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.32);
+}
+.xe-publish:hover {
+  background: #1e293b;
+  transform: translateY(-1px);
 }
 
-/* ===== 卡片网格 ===== */
+/* ===== 加载 / 空态 ===== */
 .xe-loading {
   display: flex;
   justify-content: center;
   padding: 80px 0;
 }
-.xe-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
+
+/* ===== 2. Hero 最受欢迎（深色微光 + 遮罩） ===== */
+.xe-feature {
+  margin-bottom: 30px;
 }
-.xe-card {
-  background: #fff;
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 4px 16px rgba(16, 30, 54, 0.06);
-  border: 1px solid var(--gray-150);
+.xe-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--gray-600);
+  margin-bottom: 12px;
+}
+.xe-banner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.xe-hero-card {
+  position: relative;
+  min-height: 200px;
+  border-radius: 18px;
+  overflow: hidden;
+  padding: 22px 24px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  justify-content: flex-end;
+  cursor: pointer;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.28);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
-.xe-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 10px 28px rgba(16, 30, 54, 0.12);
+.xe-hero-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.4);
+  border-color: rgba(255, 255, 255, 0.28);
 }
-.xe-card-top {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+.xe-crown {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  font-size: 22px;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+  z-index: 3;
 }
-.xe-avatar {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  overflow: hidden;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #fff;
+.xe-hero-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 32%, rgba(0, 0, 0, 0.5) 100%);
+  pointer-events: none;
+  z-index: 1;
 }
-.bg-blue { background: linear-gradient(135deg, #2b6cb0, #3182ce); }
-.bg-purple { background: linear-gradient(135deg, #6b46c1, #805ad5); }
-.bg-green { background: linear-gradient(135deg, #2f855a, #38a169); }
-.xe-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.xe-hero-content {
+  position: relative;
+  z-index: 2;
 }
-.xe-card-head {
-  flex: 1;
-  min-width: 0;
-}
-.xe-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: #1a202c;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.xe-author {
-  font-size: 11px;
-  color: var(--gray-500);
-  margin-top: 2px;
-}
-.xe-type {
+.xe-hero-title {
   margin: 0;
-  flex-shrink: 0;
+  font-size: 21px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.4px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
 }
-.xe-desc {
+.xe-hero-desc {
+  margin: 8px 0 14px;
+  max-width: 460px;
   font-size: 13px;
-  color: var(--gray-700);
-  line-height: 1.5;
-  min-height: 38px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.82);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.xe-tags {
+.xe-hero-author {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
   align-items: center;
-  min-height: 24px;
+  gap: 9px;
 }
-.xe-tag {
-  font-size: 11px;
-  border-radius: 8px;
-  background: var(--gray-100);
-  color: var(--gray-700);
-  border: none;
-  margin: 0;
+.xe-author-av {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.3);
 }
-.xe-cat {
-  font-size: 11px;
-  color: var(--gray-500);
+.xe-author-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
 }
-.xe-foot {
+.xe-author-meta {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* ===== 通用区块 ===== */
+.xe-section {
+  margin-bottom: 30px;
+}
+.xe-sec-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-top: 1px dashed var(--gray-200);
-  padding-top: 10px;
+  margin-bottom: 14px;
 }
-.xe-stats {
-  display: flex;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--gray-500);
+.xe-sec-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--gray-1000);
+  letter-spacing: 0.3px;
 }
-.xe-rate {
-  color: #b7791f;
+.xe-sec-more {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--main-700);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
 }
-.xe-pager {
-  display: flex;
-  justify-content: center;
-  margin-top: 22px;
+.xe-sec-more:hover {
+  color: var(--main-900);
 }
 
-/* ===== 详情弹窗（悟帆式，浅色品牌） ===== */
+/* ===== 3. 横向 Swipe 滑动容器 ===== */
+.swipe-container {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding-bottom: 12px;
+  cursor: grab;
+  user-select: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
+.swipe-container:active { cursor: grabbing; }
+.swipe-item {
+  flex: 0 0 calc(25% - 12px);
+  min-width: 280px;
+  scroll-snap-align: start;
+}
+
+/* 数字警员暗色 Glassmorphism + Mesh 渐变卡片 */
+.xe-officer-card {
+  position: relative;
+  min-height: 248px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.25);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.xe-officer-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.42);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.xe-officer-badge {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 999px;
+  backdrop-filter: blur(2px);
+}
+.xe-officer-main {
+  flex: 1;
+  min-height: 0;
+}
+.xe-officer-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  margin-bottom: 14px;
+}
+.xe-officer-name {
+  font-size: 16px;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.3);
+}
+.xe-officer-desc {
+  margin-top: 6px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.8);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.xe-officer-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  padding-top: 12px;
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.78);
+}
+.xe-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.xe-star {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+/* ===== 4. 开箱即用：2 列网格（每栏 4 行，共 8 项） ===== */
+.xe-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.xe-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--gray-200);
+  box-shadow: 0 6px 18px var(--shadow-1);
+  background: #fff;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.xe-row:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px var(--shadow-3);
+  border-color: var(--main-300);
+}
+.xe-row-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--main-500), var(--color-accent-700));
+  border: 1px solid var(--main-300);
+}
+.xe-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.xe-row-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gray-1000);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.xe-row-desc {
+  margin-top: 3px;
+  font-size: 12px;
+  color: var(--gray-600);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.xe-row-action {
+  flex-shrink: 0;
+}
+.xe-installed {
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-success-700);
+  background: var(--color-success-50);
+  border: 1px solid var(--color-success-100);
+  border-radius: 999px;
+}
+.xe-add {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  color: #fff;
+  background: var(--color-primary-500);
+  border: 1px solid var(--color-primary-700);
+  transition: all 0.15s ease;
+}
+.xe-add:hover {
+  background: var(--color-primary-700);
+}
+
+/* ===== 详情弹窗（Hero 区深色，正文跟随系统浅色） ===== */
 .xe-overlay {
   position: fixed;
   inset: 0;
@@ -753,50 +1045,51 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(15, 23, 42, 0.44);
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(4px);
   padding: 20px;
 }
 .xe-modal {
   position: relative;
   width: 880px;
   max-width: 94vw;
-  max-height: 820px;
+  max-height: 84vh;
   border-radius: 20px;
-  background: var(--gray-0, #fff);
+  background: #fff;
   border: 1px solid var(--gray-200);
-  box-shadow: 0 8px 40px rgba(16, 30, 54, 0.25);
+  box-shadow: 0 24px 70px var(--shadow-4);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  color: var(--gray-1000);
 }
 .xe-modal-close {
   position: absolute;
   top: 14px;
   right: 14px;
   z-index: 20;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   border-radius: 8px;
   cursor: pointer;
-  color: #fff;
-  background: rgba(15, 23, 42, 0.42);
+  color: var(--gray-700);
+  background: rgba(255, 255, 255, 0.72);
   transition: background 0.15s;
 }
 .xe-modal-close:hover {
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--gray-100);
 }
 .xe-modal-hero {
   position: relative;
-  min-height: 200px;
+  min-height: 188px;
   padding: 22px 28px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  background: linear-gradient(135deg, #174591 0%, #2e6dce 55%, #4f8fe0 100%);
   color: #fff;
 }
 .xe-hero-row {
@@ -811,10 +1104,10 @@ onMounted(() => {
   gap: 8px;
   padding: 4px 10px 4px 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  backdrop-filter: blur(6px);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   font-size: 12px;
-  color: #fff;
+  color: var(--gray-900);
 }
 .xe-creator-avatar {
   width: 22px;
@@ -823,15 +1116,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--main-100);
+  color: var(--main-900);
   font-size: 11px;
-  font-weight: 600;
-}
-.xe-creator-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  font-weight: 700;
 }
 .xe-creator-name {
   white-space: nowrap;
@@ -839,23 +1127,24 @@ onMounted(() => {
 .xe-type-pill {
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(6px);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   font-size: 11px;
-  color: #fff;
+  color: var(--gray-900);
 }
-.xe-hero-title {
-  font-size: 26px;
+.xe-modal-hero .xe-hero-title {
+  font-size: 25px;
   font-weight: 800;
   letter-spacing: 0.3px;
   line-height: 1.25;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
-.xe-hero-desc {
+.xe-modal-hero .xe-hero-desc {
   margin: 8px 0 0;
   font-size: 13.5px;
   line-height: 1.55;
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.82);
   max-width: 560px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -888,7 +1177,7 @@ onMounted(() => {
 }
 .xe-divider {
   height: 1px;
-  background: var(--gray-150);
+  background: var(--gray-200);
   margin: 0 28px;
 }
 .xe-modal-body {
@@ -911,7 +1200,7 @@ onMounted(() => {
 .xe-intro-text {
   font-size: 13px;
   line-height: 1.7;
-  color: var(--gray-700);
+  color: var(--gray-800);
   white-space: pre-wrap;
   margin: 0 0 12px;
 }
@@ -930,8 +1219,8 @@ onMounted(() => {
   border-radius: 8px;
   background: var(--gray-100);
   color: var(--gray-700);
-  border: none;
-  margin: 0;
+  border: 1px solid var(--gray-200);
+  padding: 2px 9px;
 }
 .xe-review-title {
   margin-top: 22px;
@@ -945,7 +1234,7 @@ onMounted(() => {
 }
 .xe-review-stats {
   font-size: 12px;
-  color: var(--gray-600);
+  color: var(--gray-700);
   font-weight: 600;
 }
 .xe-review-list {
@@ -957,8 +1246,8 @@ onMounted(() => {
 .xe-review {
   display: flex;
   gap: 10px;
-  background: var(--gray-50, #f7f9fc);
-  border: 1px solid var(--gray-150);
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
   border-radius: 10px;
   padding: 12px;
 }
@@ -970,10 +1259,10 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #6b7280, #4b5563);
-  color: #fff;
+  background: var(--main-100);
+  color: var(--main-900);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
 }
 .xe-review-main {
   flex: 1;
@@ -987,21 +1276,21 @@ onMounted(() => {
 .xe-review-name {
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--gray-800);
+  color: var(--gray-1000);
 }
 .xe-review-stars {
   display: inline-flex;
   gap: 1px;
 }
 .xe-star-on {
-  color: #f5a623;
-  fill: #f5a623;
+  color: var(--color-warning-500);
+  fill: var(--color-warning-500);
 }
 .xe-review-content {
   margin: 6px 0 4px;
   font-size: 12.5px;
   line-height: 1.6;
-  color: var(--gray-700);
+  color: var(--gray-800);
 }
 .xe-review-date {
   font-size: 10.5px;
@@ -1012,12 +1301,12 @@ onMounted(() => {
   color: var(--gray-400);
   padding: 14px 0;
   text-align: center;
-  background: var(--gray-50, #f7f9fc);
+  background: var(--gray-50);
   border-radius: 10px;
 }
 .xe-review-form {
-  background: var(--gray-50, #f7f9fc);
-  border: 1px solid var(--gray-150);
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
   border-radius: 10px;
   padding: 12px;
 }
@@ -1031,17 +1320,17 @@ onMounted(() => {
   border: none;
   background: transparent;
   cursor: pointer;
-  color: var(--gray-300);
+  color: var(--gray-400);
   padding: 2px;
   line-height: 0;
   transition: color 0.12s;
 }
 .xe-star-btn.on {
-  color: #f5a623;
-  fill: #f5a623;
+  color: var(--color-warning-500);
+  fill: var(--color-warning-500);
 }
 .xe-star-btn:hover {
-  color: #f5a623;
+  color: var(--color-warning-500);
 }
 .xe-review-hint {
   margin-left: 6px;
@@ -1063,15 +1352,39 @@ onMounted(() => {
   gap: 8px;
   font-size: 11px;
   color: var(--gray-500);
-  border-top: 1px solid var(--gray-150);
+  border-top: 1px solid var(--gray-200);
   padding-top: 12px;
 }
 .xe-dot {
   opacity: 0.5;
 }
-.xe-clickable {
-  cursor: pointer;
+
+/* ===== 4 套深色 Mesh 渐变预设（纯 CSS，离线可用） ===== */
+.gradient-card-blue {
+  background:
+    radial-gradient(120% 120% at 10% 10%, rgba(0, 240, 255, 0.34) 0%, rgba(0, 240, 255, 0) 55%),
+    radial-gradient(120% 120% at 90% 22%, rgba(59, 130, 246, 0.42) 0%, rgba(59, 130, 246, 0) 55%),
+    #0f172a;
 }
+.gradient-card-purple {
+  background:
+    radial-gradient(120% 120% at 10% 10%, rgba(139, 92, 246, 0.36) 0%, rgba(139, 92, 246, 0) 55%),
+    radial-gradient(120% 120% at 90% 22%, rgba(236, 72, 153, 0.40) 0%, rgba(236, 72, 153, 0) 55%),
+    #130f26;
+}
+.gradient-card-emerald {
+  background:
+    radial-gradient(120% 120% at 10% 10%, rgba(16, 185, 129, 0.34) 0%, rgba(16, 185, 129, 0) 55%),
+    radial-gradient(120% 120% at 90% 22%, rgba(6, 182, 212, 0.40) 0%, rgba(6, 182, 212, 0) 55%),
+    #06201b;
+}
+.gradient-card-dark {
+  background:
+    radial-gradient(120% 120% at 10% 10%, rgba(245, 158, 11, 0.30) 0%, rgba(245, 158, 11, 0) 55%),
+    radial-gradient(120% 120% at 90% 22%, rgba(99, 102, 241, 0.40) 0%, rgba(99, 102, 241, 0) 55%),
+    #18181b;
+}
+
 .xe-fade-enter-active,
 .xe-fade-leave-active {
   transition: opacity 0.18s ease;
@@ -1079,5 +1392,14 @@ onMounted(() => {
 .xe-fade-enter-from,
 .xe-fade-leave-to {
   opacity: 0;
+}
+
+@media (max-width: 1080px) {
+  .xe-banner { grid-template-columns: 1fr; }
+  .swipe-item { flex: 0 0 calc(50% - 8px); }
+  .xe-list { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .swipe-item { flex: 0 0 84%; }
 }
 </style>
