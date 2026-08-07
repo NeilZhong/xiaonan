@@ -922,19 +922,10 @@ provide('settingsModal', {
   line-height: 18px;
   letter-spacing: 0.01em;
   box-shadow: 0 1px 3px rgba(229, 72, 77, 0.45);
-  animation: xn-badge-pop 0.3s ease;
+  animation: t-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);
 }
 
-@keyframes xn-badge-pop {
-  from {
-    transform: scale(0.5);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
+/* xn-badge-pop 已弃用：工作台红点改用 transitions.css 的 t-badge-slide-in 入场动画 */
 
 .xn-divider {
   margin: 0 12px;
@@ -1276,7 +1267,7 @@ provide('settingsModal', {
   background: linear-gradient(180deg, #ff6b6b, #e54848);
   box-shadow: 0 0 0 1.5px var(--xn-sidebar-bg);
   pointer-events: none;
-  animation: xn-badge-pop 0.3s ease;
+  animation: t-badge-slide-in var(--badge-slide-dur) var(--badge-slide-ease);
 }
 
 .xn-narrow-avatar {
@@ -1294,5 +1285,11 @@ provide('settingsModal', {
   background: var(--xn-user-avatar-bg);
   color: var(--xn-user-avatar-text);
   box-shadow: inset 0 0 0 1px var(--xn-user-avatar-ring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .xn-nav-badge,
+  .xn-narrow-nav-dot {
+    animation: none !important;
+  }
 }
 </style>

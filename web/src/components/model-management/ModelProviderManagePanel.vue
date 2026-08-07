@@ -38,6 +38,8 @@ const remoteLoading = ref(false)
 const saving = ref(false)
 const togglingProviderId = ref(null)
 const providers = ref([])
+// 高级配置手风琴展开状态（accordion）
+const providerAdvancedOpen = ref(false)
 const searchQuery = ref('')
 const modelTestLoadingBySpec = ref({})
 const modelTestResultBySpec = ref({})
@@ -921,19 +923,27 @@ defineExpose({
           />
         </div>
 
-        <a-collapse expand-icon-position="end" :ghost="true" class="advanced-collapse">
-          <a-collapse-panel key="advanced" header="高级配置">
-            <label class="form-label full-width">
-              <span>请求头 JSON</span>
-              <a-textarea v-model:value="providerForm.headers_text" :rows="4" placeholder="{}" />
-            </label>
+        <div class="advanced-collapse t-acc" :data-open="providerAdvancedOpen ? 'true' : 'false'">
+          <button type="button" class="adv-acc-head" @click="providerAdvancedOpen = !providerAdvancedOpen" :aria-expanded="providerAdvancedOpen">
+            <span>高级配置</span>
+            <svg class="t-acc-chevron" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <div class="t-acc-panel">
+            <div class="t-acc-panel-inner">
+              <label class="form-label full-width">
+                <span>请求头 JSON</span>
+                <a-textarea v-model:value="providerForm.headers_text" :rows="4" placeholder="{}" />
+              </label>
 
-            <label class="form-label full-width">
-              <span>扩展配置 JSON</span>
-              <a-textarea v-model:value="providerForm.extra_text" :rows="4" placeholder="{}" />
-            </label>
-          </a-collapse-panel>
-        </a-collapse>
+              <label class="form-label full-width">
+                <span>扩展配置 JSON</span>
+                <a-textarea v-model:value="providerForm.extra_text" :rows="4" placeholder="{}" />
+              </label>
+            </div>
+          </div>
+        </div>
       </div>
     </a-modal>
     <!-- Models Management Modal -->

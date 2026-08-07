@@ -25,6 +25,8 @@ import { skillApi } from '@/apis/skill_api'
 import { getMcpServers } from '@/apis/mcp_api'
 import { getWorkspaceFileContent, saveWorkspaceFileContent } from '@/apis/workspace_api'
 import { resolveAgentAvatar } from '@/utils/policeAvatar'
+import SuccessCheck from '@/components/common/SuccessCheck.vue'
+import ClearableInput from '@/components/common/ClearableInput.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -59,6 +61,23 @@ const statusText = computed(() => {
 const statusColor = computed(() => {
   if (isOfficer.value) return { active: 'green', training: 'orange', offline: 'red' }[officer.value?.status] || 'red'
   return 'green'
+})
+
+// 状态文案原地切换（text-states-swap）
+const displayStatus = ref(statusText.value)
+const statusSwapPhase = ref('idle')
+watch(statusText, (nv) => {
+  if (nv === displayStatus.value) return
+  statusSwapPhase.value = 'exit'
+  window.setTimeout(() => {
+    displayStatus.value = nv
+    statusSwapPhase.value = 'enter'
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        statusSwapPhase.value = 'idle'
+      })
+    })
+  }, 180)
 })
 
 // 连接器与工具（装备控制台，直接读写 config_json.context.mcps / tools）
@@ -177,6 +196,9 @@ const memoryText = ref('')
 const memoryMissing = ref(false)
 const memoryLoading = ref(false)
 const memoryEditing = ref(false)
+// 记忆保存成功对勾（SuccessCheck）：保存成功后播放一次，重复保存可重播
+const memorySaved = ref(false)
+const memorySaveReplay = ref(0)
 const memoryDraft = ref('')
 const memorySearch = ref('')
 const memoryTypeFilter = ref('all') // all | fact | context | procedure | 其他标题
@@ -254,6 +276,8 @@ async function saveMemory() {
     memoryText.value = memoryDraft.value
     memoryEditing.value = false
     message.success('记忆已保存')
+    memorySaved.value = true
+    memorySaveReplay.value += 1
   } catch (e) {
     message.error('保存失败: ' + (e.message || e))
   } finally {
@@ -486,7 +510,8 @@ onMounted(load)
         </div>
         <div class="sec-aside-name">{{ agent?.name || '智能体' }}</div>
         <span class="sec-aside-status" :class="`s-${statusColor}`">
-          <span class="s-dot" /><span>{{ statusText }}</span>
+          <span class="s-dot" />
+          <span class="t-text-swap" :class="{ 'is-exit': statusSwapPhase === 'exit', 'is-enter-start': statusSwapPhase === 'enter' }">{{ displayStatus }}</span>
         </span>
         <p class="sec-aside-desc">{{ agent?.description || officer?.description || '暂无介绍' }}</p>
       </aside>
@@ -763,10 +788,11 @@ onMounted(load)
                 <span class="mem-title">记忆管理</span>
                 <span class="mem-count">{{ memoryEntries.length }} 条记忆</span>
                 <div class="mem-spacer" />
-                <label class="mem-search">
-                  <Search :size="15" />
-                  <input v-model="memorySearch" placeholder="搜索记忆..." />
-                </label>
+                <div class="mem-search">
+                  <Search :size="15" class="mem-search-icon" />
+                  <ClearableInput v-model="memorySearch" placeholder="搜索记忆..." />
+                </div>
+                <SuccessCheck :show="memorySaved" :size="20" :replay-key="memorySaveReplay" class="mem-save-check" />
                 <template v-if="memoryEditing">
                   <button class="mem-edit-btn" :disabled="savingMemory" @click="saveMemory">保存</button>
                   <button class="mem-edit-btn mem-ghost" :disabled="savingMemory" @click="cancelEditMemory">取消</button>
@@ -1144,15 +1170,10 @@ onMounted(load)
 }
 .mem-search {
   display: inline-flex; align-items: center; gap: 6px;
-  width: 280px; max-width: 32vw;
-  background: var(--gray-50, #f5f7f7);
-  border: 1px solid var(--gray-200, #e4e6e6);
-  border-radius: 10px; padding: 0 10px; height: 36px;
+}
+.mem-search-icon {
   color: var(--gray-400, #bdbfbf);
-  input {
-    border: none; outline: none; background: transparent;
-    flex: 1; font-size: 13px; color: var(--gray-800, #323333); min-width: 0;
-  }
+  flex-shrink: 0;
 }
 .mem-edit-btn {
   display: inline-flex; align-items: center; gap: 5px;
@@ -1320,5 +1341,10 @@ onMounted(load)
 @media (max-width: 640px) {
   .sec-active-sub { display: none; }
   .sec-aside { flex-direction: column; text-align: center; }
+}
+.mem-save-check {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
 }
 </style>

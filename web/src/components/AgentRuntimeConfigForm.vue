@@ -3,7 +3,7 @@
     <div class="runtime-config-content">
       <div class="agent-info" v-if="selectedAgent">
         <div class="config-segment" v-if="props.showSegmented && !isEmptyConfig">
-          <a-segmented v-model:value="currentSegment" :options="segmentOptions" block />
+          <SlidingTabs v-model="currentSegment" :options="segmentOptions" />
         </div>
 
         <div
@@ -21,7 +21,15 @@
               class="config-alert"
             />
             <!-- 统一显示所有配置项 -->
-            <a-empty v-if="isCurrentSegmentEmpty" description="暂无配置项" class="config-empty" />
+            <div
+              v-if="isCurrentSegmentEmpty"
+              class="t-stagger config-empty-stagger"
+              :class="{ 'is-shown': segmentEmptyShown }"
+            >
+              <span class="t-stagger-line">
+                <a-empty description="暂无配置项" class="config-empty" />
+              </span>
+            </div>
             <template v-for="(value, key) in filteredConfigurableItems" :key="key">
               <a-form-item :label="getConfigLabel(key, value)" :name="key" class="config-item">
                 <p v-if="value.description" class="config-description">{{ value.description }}</p>
@@ -384,11 +392,12 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { AlertTriangle, Check, Plus, Search, RotateCw, RotateCcw, Settings } from 'lucide-vue-next'
 import ModelSelectorComponent from '@/components/ModelSelectorComponent.vue'
+import SlidingTabs from '@/components/common/SlidingTabs.vue'
 import { useAgentStore } from '@/stores/agent'
 import {
   getAgentConfigOptionDescription as getOptionDescription,
@@ -433,6 +442,22 @@ const segmentOptions = [
   { label: '其他', value: 'other' }
 ]
 const activeSegment = computed(() => (props.showSegmented ? currentSegment.value : props.segment))
+// 空配置项文案错落上浮（TextsReveal）：出现时播放一次
+const segmentEmptyShown = ref(false)
+watch(
+  isCurrentSegmentEmpty,
+  (v) => {
+    if (v) {
+      segmentEmptyShown.value = false
+      nextTick(() => {
+        segmentEmptyShown.value = true
+      })
+    } else {
+      segmentEmptyShown.value = false
+    }
+  },
+  { immediate: true }
+)
 const isToolResourceKind = (kind) => isDefaultAllAgentResourceKind(kind)
 const KNOWLEDGE_BASE_SKILL_SLUG = 'knowledge-base'
 

@@ -168,11 +168,18 @@
                     name="loginId"
                     :rules="[{ required: true, message: '请输入UID或手机号' }]"
                   >
-                    <a-input v-model:value="loginForm.loginId" placeholder="UID或手机号">
-                      <template #prefix>
-                        <user-icon size="18" />
-                      </template>
-                    </a-input>
+                    <div class="t-input-wrap" v-shake="loginError">
+                      <a-input
+                        v-model:value="loginForm.loginId"
+                        class="t-input"
+                        placeholder="UID或手机号"
+                      >
+                        <template #prefix>
+                          <user-icon size="18" />
+                        </template>
+                      </a-input>
+                      <p class="t-error-msg">账号或密码错误</p>
+                    </div>
                   </a-form-item>
 
                   <a-form-item
@@ -274,7 +281,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useInfoStore } from '@/stores/info'
@@ -331,6 +338,8 @@ const showAgreementConsent = computed(() => {
 const isFirstRun = ref(false)
 const loading = ref(false)
 const errorMessage = ref('')
+// 登录失败时触发输入框错误抖动
+const loginError = ref(false)
 const agreementAccepted = ref(false)
 const serverStatus = ref('loading')
 const serverError = ref('')
@@ -364,6 +373,14 @@ const adminForm = reactive({
 const goHome = () => {
   router.push('/')
 }
+
+// 用户重新输入时清除错误抖动状态
+watch(
+  () => [loginForm.loginId, loginForm.password],
+  () => {
+    loginError.value = false
+  }
+)
 
 // 清理倒计时器
 const clearLockCountdown = () => {
@@ -451,6 +468,7 @@ const handleLogin = async () => {
     })
 
     message.success('登录成功')
+    loginError.value = false
 
     // 获取重定向路径
     const redirectPath = sessionStorage.getItem('redirect') || '/'
@@ -500,6 +518,7 @@ const handleLogin = async () => {
       }
     } else {
       errorMessage.value = error.message || '登录失败，请检查用户名和密码'
+      loginError.value = true
     }
   } finally {
     loading.value = false

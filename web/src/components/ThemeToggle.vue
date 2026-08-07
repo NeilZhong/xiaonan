@@ -2,7 +2,10 @@
   <a-tooltip :title="themeStore.isDark ? '切换到浅色模式' : '切换到深色模式'">
     <a-button type="text" @click="themeStore.toggleTheme" class="theme-toggle-btn">
       <template #icon>
-        <component :is="themeStore.isDark ? SunIcon : MoonIcon" :size="18" />
+        <span class="t-icon-swap" :data-state="themeStore.isDark ? 'b' : 'a'">
+          <SunIcon class="t-icon" data-icon="a" :size="18" />
+          <MoonIcon class="t-icon" data-icon="b" :size="18" />
+        </span>
       </template>
     </a-button>
   </a-tooltip>
