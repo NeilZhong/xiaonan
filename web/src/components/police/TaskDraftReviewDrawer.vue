@@ -4,7 +4,6 @@
  * 主办民警审查推进智能体生成的任务草案：可编辑字段后「确认」，或填写原因「驳回」。
  */
 import { ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { usePoliceStore } from '@/stores/police'
 
@@ -12,10 +11,9 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   draft: { type: Object, default: null },
 })
-const emit = defineEmits(['update:open', 'confirmed', 'rejected'])
+const emit = defineEmits(['update:open', 'confirmed', 'rejected', 'view-source'])
 
 const policeStore = usePoliceStore()
-const router = useRouter()
 
 const typeOptions = [
   { value: 'transcript_analysis', label: '笔录分析' },
@@ -98,8 +96,9 @@ async function handleReject() {
 }
 
 function goSource() {
+  // 交给父组件打开任务详情弹窗（统一弹窗展示，不再整页路由跳转）
   if (props.draft?.parent_task_id) {
-    router.push(`/police/tasks/${props.draft.parent_task_id}`)
+    emit('view-source', props.draft.parent_task_id)
     emit('update:open', false)
   }
 }

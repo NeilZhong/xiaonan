@@ -346,6 +346,10 @@ onMounted(() => {
           <div class="task-title-row">
             <h1 class="task-title">{{ task.title }}</h1>
             <div class="task-badges">
+              <a-tag v-if="task.priority === 'urgent'" color="red" class="urgent-tag">
+                <AlertTriangle :size="11" style="margin-right: 2px" />
+                紧急
+              </a-tag>
               <a-tag :color="statusInfo.color">{{ statusInfo.text }}</a-tag>
               <a-tag :color="priorityInfo.color">
                 <Flag :size="11" style="margin-right: 2px" />
@@ -563,7 +567,19 @@ onMounted(() => {
             </div>
             <div class="info-row" v-if="task.due_date">
               <span class="info-key">截止时间</span>
-              <span class="info-val">{{ formatDateTime(task.due_date) }}</span>
+              <span class="info-val" :class="{ 'is-overdue': task.due_date && !['completed','cancelled','terminated'].includes(task.status) && new Date(task.due_date) < new Date() }">{{ formatDateTime(task.due_date) }}</span>
+            </div>
+            <div class="info-row" v-if="task.assigned_at">
+              <span class="info-key">分配时间</span>
+              <span class="info-val">{{ formatDateTime(task.assigned_at) }}</span>
+            </div>
+            <div class="info-row" v-if="task.started_at">
+              <span class="info-key">开始时间</span>
+              <span class="info-val">{{ formatDateTime(task.started_at) }}</span>
+            </div>
+            <div class="info-row" v-if="task.completed_at">
+              <span class="info-key">完成时间</span>
+              <span class="info-val">{{ formatDateTime(task.completed_at) }}</span>
             </div>
           </div>
         </div>
@@ -758,6 +774,10 @@ onMounted(() => {
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+
+    .urgent-tag {
+      font-weight: 600;
+    }
   }
 
   .task-meta-row {
@@ -1007,6 +1027,11 @@ onMounted(() => {
     color: @police-text;
     text-align: right;
     word-break: break-word;
+
+    &.is-overdue {
+      color: var(--color-error-500, #e53e3e);
+      font-weight: 600;
+    }
   }
 }
 

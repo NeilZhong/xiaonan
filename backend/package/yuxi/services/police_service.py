@@ -307,6 +307,14 @@ class PoliceTaskService:
                     data["completed_at"] = datetime.utcnow()
             else:
                 data["completed_at"] = None
+        # 截止日期：字符串 → datetime（前端传 YYYY-MM-DD 或 ISO 字符串）
+        if "due_date" in data and data["due_date"] is not None:
+            due = data["due_date"]
+            if isinstance(due, str):
+                try:
+                    data["due_date"] = datetime.fromisoformat(due.replace("Z", "+00:00")).replace(tzinfo=None)
+                except ValueError:
+                    data["due_date"] = datetime.strptime(due, "%Y-%m-%d")
         task = await task_repository.update(task_id, data)
         return task.to_dict() if task else None
 
@@ -327,6 +335,9 @@ class PoliceTaskService:
             return None
         # 写入多执行人关联表
         await task_repository.set_assignees(task_id, assignees)
+        # 记录首次分配时间（任务时间链；重新分配不覆盖首次 assigned_at）
+        if not task.assigned_at:
+            await task_repository.update(task_id, {"assigned_at": datetime.utcnow()})
         # 重新解算并落审核人（v2.1 §4.3）
         await self._resolve_and_store_reviewer(task_id)
         # 同步冗余字段（取第一个执行人作为主显示）
@@ -363,6 +374,29 @@ class PoliceTaskService:
         summary = await task_repository.get_assignee_summary(task_id)
         if summary["has_agent"]:
             # 异步触发智能体执行，不阻塞响应
+            asyncio.create_task(self._execute_agents(task_id, summary["agents"], user_id))
+
+        full = await task_repository.get_task_with_assignees(task_id)
+        return full.to_dict() if full else task.to_dict()
+
+    async def rerun_task(self, task_id: int, user_id: int) -> dict[str, Any] | None:
+        """重跑任务：重置为进行中并重新触发执行（含智能体自动执行）。
+
+        允许从 blocked/completed/review 等任意状态一键重跑；
+        与 start_task 的区别：会清空上次结果与审核痕迹（由 repository.rerun 完成）。
+        """
+        task = await task_repository.rerun(task_id)
+        if not task:
+            return None
+        await task_repository.create_event({
+            "case_id": task.case_id, "task_id": task_id, "event_type": "rerun",
+            "event_data": {}, "created_by": user_id,
+        })
+        await self._audit("rerun", task_id, user_id, task.case_id, {})
+
+        # ★ 与 start 一致：有 agent 执行人则异步触发智能体执行
+        summary = await task_repository.get_assignee_summary(task_id)
+        if summary["has_agent"]:
             asyncio.create_task(self._execute_agents(task_id, summary["agents"], user_id))
 
         full = await task_repository.get_task_with_assignees(task_id)

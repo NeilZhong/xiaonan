@@ -18,6 +18,7 @@ import { useUserStore } from '@/stores/user'
 import { useRealtime } from '@/composables/useRealtime'
 import { policeAgentApi, policeCaseApi } from '@/apis/police_api'
 import TaskCard from '@/components/police/TaskCard.vue'
+import TaskDetailModal from '@/components/police/TaskDetailModal.vue'
 import {
   InboxOutlined, ClockCircleOutlined, FileSearchOutlined,
   ExclamationCircleOutlined, CheckCircleOutlined, PlusOutlined, UploadOutlined, BellOutlined,
@@ -140,13 +141,28 @@ const notifications = computed(() => {
   }))
 })
 
-// 任务详情路由保留（/police/tasks/:taskId）；全局任务看板已移除，
-// “查看看板/查看全部”统一跳转到案件详情（案件内自带该案件的任务看板）。
+// 任务详情统一用弹窗展示（废弃整页 TaskDetailView 路由）：
+// “待处理/待审查/待审核”点击任务 → 弹窗详情，弹窗内含完整操作（分配/执行/审核/重跑）。
+const detailModalVisible = ref(false)
+const detailTaskId = ref(null)
+
 function goTask(task) {
-  router.push(`/police/tasks/${task.id}`)
+  detailTaskId.value = task.id
+  detailModalVisible.value = true
 }
 function goDraft(task) {
-  router.push(`/police/tasks/${task.id}`)
+  detailTaskId.value = task.id
+  detailModalVisible.value = true
+}
+function closeTaskDetail() {
+  detailModalVisible.value = false
+  detailTaskId.value = null
+  // 关闭弹窗后刷新工作台列表（可能有状态变更）
+  Promise.all([
+    policeStore.loadMyDrafts(true),
+    policeStore.loadReviewTasks(1, 6, true),
+    policeStore.loadMyTasks(1, 10, true),
+  ]).catch(() => {})
 }
 function goCaseTasks(caseId) {
   router.push(`/police/cases/${caseId}`)
@@ -538,6 +554,14 @@ onMounted(() => {
       </div>
       <div v-else style="padding: 24px; text-align: center; color: #999;">加载中...</div>
     </a-modal>
+
+    <!-- 任务详情弹窗（统一弹窗展示，替代整页路由） -->
+    <TaskDetailModal
+      :visible="detailModalVisible"
+      :task-id="detailTaskId"
+      @close="closeTaskDetail"
+      @refresh="closeTaskDetail"
+    />
   </div>
 </template>
 

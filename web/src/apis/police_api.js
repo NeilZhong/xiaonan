@@ -63,9 +63,12 @@ export const policeTaskApi = {
   update: (taskId, data) => apiPut(`/api/police/tasks/${taskId}`, data),
   assign: (taskId, data) => apiPost(`/api/police/tasks/${taskId}/assign`, data),
   start: (taskId) => apiPost(`/api/police/tasks/${taskId}/start`),
+  rerun: (taskId) => apiPost(`/api/police/tasks/${taskId}/rerun`),
   complete: (taskId, result) => apiPost(`/api/police/tasks/${taskId}/complete`, { result }),
   review: (taskId, approved, comment) => apiPost(`/api/police/tasks/${taskId}/review`, { approved, comment }),
   events: (taskId) => apiGet(`/api/police/tasks/${taskId}/events`),
+  comments: (taskId) => apiGet(`/api/police/tasks/${taskId}/comments`),
+  addComment: (taskId, content) => apiPost(`/api/police/tasks/${taskId}/comments`, { content }),
 }
 
 // ── 证据管理 ────────────────────────────────────────────────

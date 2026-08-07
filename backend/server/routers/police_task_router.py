@@ -46,6 +46,7 @@ class TaskUpdate(BaseModel):
     instructions: str | None = None
     due_date: str | None = None
     status: str | None = None  # 看板拖拽改状态（需为 TASK_STATUS 合法值）
+    extra: dict | None = None  # 扩展元数据（如标签 extra.tags）
 
 
 class TaskAssign(BaseModel):
@@ -203,6 +204,19 @@ async def start_task(
     return {"code": 0, "message": "success", "data": result}
 
 
+@task_router.post("/{task_id}/rerun")
+async def rerun_task(
+    task_id: int,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """重跑任务（驳回/已完成/待审核 → 重置执行态并重新触发，含 AI 自动执行）"""
+    result = await police_task_service.rerun_task(task_id, current_user.id)
+    if not result:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return {"code": 0, "message": "success", "data": result}
+
+
 @task_router.post("/{task_id}/complete")
 async def complete_task(
     task_id: int,
@@ -245,6 +259,44 @@ async def task_events(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     return {"code": 0, "message": "success", "data": task.get("events", [])}
+
+
+class CommentCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2000)
+
+
+@task_router.get("/{task_id}/comments")
+async def list_task_comments(
+    task_id: int,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """任务评论列表"""
+    task = await police_task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    comments = await task_repository.list_comments(task_id)
+    return {"code": 0, "message": "success", "data": [c.to_dict() for c in comments]}
+
+
+@task_router.post("/{task_id}/comments")
+async def create_task_comment(
+    task_id: int,
+    data: CommentCreate,
+    current_user: User = Depends(get_required_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """添加任务评论"""
+    task = await police_task_service.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    comment = await task_repository.create_comment(
+        task_id=task_id,
+        content=data.content,
+        user_id=current_user.id,
+        user_name=getattr(current_user, "username", None) or getattr(current_user, "nickname", None),
+    )
+    return {"code": 0, "message": "success", "data": comment.to_dict()}
 
 
 # ── 任务流转规则管理 (POLICE_REQUIREMENTS §3.4 / §6 自动流转) ──

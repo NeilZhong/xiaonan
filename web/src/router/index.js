@@ -186,10 +186,11 @@ const router = createRouter({
           meta: { keepAlive: false, requiresAuth: true }
         },
         {
+          // 任务详情已统一为弹窗展示（TaskDetailModal），废弃整页路由：
+          // 历史书签/直接访问重定向到案件列表，避免落到废弃页面。
           path: 'tasks/:taskId',
           name: 'PoliceTaskDetail',
-          component: () => import('../views/police/TaskDetailView.vue'),
-          meta: { keepAlive: false, requiresAuth: true }
+          redirect: '/police/cases',
         },
         {
           path: 'officers',

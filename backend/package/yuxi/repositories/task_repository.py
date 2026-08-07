@@ -7,7 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from yuxi.storage.postgres.manager import pg_manager
-from yuxi.storage.postgres.models_police import PoliceTask, TaskAssignee, TaskEvent, TaskFlowRule
+from yuxi.storage.postgres.models_police import (
+    PoliceTask,
+    PoliceTaskComment,
+    TaskAssignee,
+    TaskEvent,
+    TaskFlowRule,
+)
 from yuxi.utils.datetime_utils import utc_now_naive
 
 
@@ -171,6 +177,27 @@ class TaskRepository:
             await session.refresh(task)
             return task
 
+    async def rerun(self, task_id: int) -> PoliceTask | None:
+        """重跑任务：重置为进行中，清空上次结果与审核痕迹。
+
+        用于「重跑」——任务被驳回(blocked)、已完成(completed)或待审核(review)时
+        一键回到执行态重新运行；历史事件保留，便于追溯。
+        """
+        async with pg_manager.get_async_session_context() as session:
+            task = await session.get(PoliceTask, task_id)
+            if not task:
+                return None
+            task.status = "in_progress"
+            task.started_at = utc_now_naive()
+            task.completed_at = None
+            task.result = None
+            task.reviewed_by = None
+            task.reviewed_at = None
+            task.signed_hash = None
+            await session.commit()
+            await session.refresh(task)
+            return task
+
     async def complete(self, task_id: int, result: dict | None = None) -> PoliceTask | None:
         async with pg_manager.get_async_session_context() as session:
             task = await session.get(PoliceTask, task_id)
@@ -219,6 +246,30 @@ class TaskRepository:
                 select(TaskEvent).where(TaskEvent.task_id == task_id).order_by(TaskEvent.created_at)
             )
             return list(result.scalars().all())
+
+    # ── 任务评论 ──────────────────────────────────────────────
+
+    async def list_comments(self, task_id: int, limit: int = 100) -> list[PoliceTaskComment]:
+        async with pg_manager.get_async_session_context() as session:
+            result = await session.execute(
+                select(PoliceTaskComment)
+                .where(PoliceTaskComment.task_id == task_id)
+                .order_by(PoliceTaskComment.created_at)
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def create_comment(
+        self, task_id: int, content: str, user_id: int | None, user_name: str | None
+    ) -> PoliceTaskComment:
+        async with pg_manager.get_async_session_context() as session:
+            comment = PoliceTaskComment(
+                task_id=task_id, content=content, user_id=user_id, user_name=user_name,
+            )
+            session.add(comment)
+            await session.commit()
+            await session.refresh(comment)
+            return comment
 
     # ── 流转规则 ──────────────────────────────────────────────
 
