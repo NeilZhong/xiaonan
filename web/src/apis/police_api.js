@@ -307,3 +307,25 @@ export const policeReflectionApi = {
   review: (recordId, action) =>
     apiPost(`/api/police/reflections/${recordId}/review`, { action }),
 }
+
+// ── 治理后台（P3：审核台 + 运行中心，仅超级管理员）────────
+export const policeGovernanceApi = {
+  // 待审列表（新建待审 + 全局共享申请）：{ items, total, page, page_size }
+  reviewPending: ({ page = 1, page_size = 50 } = {}) =>
+    apiGet(`/api/police/admin/review/pending?page=${page}&page_size=${page_size}`),
+  // 待审详情：全量配置 + 关联伙伴 + 版本基线
+  reviewDetail: (agentId) => apiGet(`/api/police/admin/review/${agentId}`),
+  // 以草稿配置试跑单轮对话（真实调 LLM，可能耗时）：{ reply, config_source, model, warning }
+  preview: (agentId, { message, use_draft = true } = {}) =>
+    apiPost(`/api/police/admin/review/${agentId}/preview`, { message, use_draft }),
+  // 通过 / 驳回（request_type: agent|partner）：{ ok, status, reason }
+  decide: (requestType, requestId, { approved, reason = null } = {}) =>
+    apiPost(`/api/police/admin/review/${requestType}/${requestId}/decide`, { approved, reason }),
+  // 平台默认运行模式
+  getRuntimeConfig: () => apiGet('/api/police/admin/runtime-config'),
+  setRuntimeConfig: (default_release_mode) =>
+    apiPut('/api/police/admin/runtime-config', { default_release_mode }),
+  // 状态总览：在线/模式/草稿/绑定数
+  runtimeOverview: ({ page = 1, page_size = 50 } = {}) =>
+    apiGet(`/api/police/admin/runtime-overview?page=${page}&page_size=${page_size}`),
+}

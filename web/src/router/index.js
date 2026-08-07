@@ -231,6 +231,18 @@ const router = createRouter({
           name: 'PoliceRuntimeConsole',
           component: () => import('../views/police/RuntimeConsoleView.vue'),
           meta: { keepAlive: false, requiresAuth: true, requiresAdmin: true }
+        },
+        {
+          path: 'governance/review',
+          name: 'PoliceGovernanceReview',
+          component: () => import('../views/police/GovernanceReviewView.vue'),
+          meta: { keepAlive: false, requiresAuth: true, requiresSuperAdmin: true }
+        },
+        {
+          path: 'governance/runtime',
+          name: 'PoliceGovernanceRuntime',
+          component: () => import('../views/police/GovernanceRuntimeView.vue'),
+          meta: { keepAlive: false, requiresAuth: true, requiresSuperAdmin: true }
         }
       ]
     },

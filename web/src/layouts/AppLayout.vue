@@ -17,7 +17,9 @@ import {
   Briefcase,
   SlidersHorizontal,
   Handshake,
-  Store
+  Store,
+  ShieldCheck,
+  Gauge
 } from 'lucide-vue-next'
 import { CheckSquareOutlined } from '@ant-design/icons-vue'
 
@@ -267,6 +269,20 @@ const mainList = computed(() => {
       path: '/dashboard',
       icon: BarChart3,
       activeIcon: BarChart3
+    })
+    items.push({
+      name: '审核台',
+      path: '/police/governance/review',
+      icon: ShieldCheck,
+      activeIcon: ShieldCheck,
+      activePaths: ['/police/governance/review']
+    })
+    items.push({
+      name: '运行中心',
+      path: '/police/governance/runtime',
+      icon: Gauge,
+      activeIcon: Gauge,
+      activePaths: ['/police/governance/runtime']
     })
   }
 
