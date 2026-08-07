@@ -39,18 +39,6 @@ const agentStore = useAgentStore()
 
 const DEFAULT_AGENT_BACKEND_ID = 'ChatbotAgent'
 
-/** 9 大功能分类（新增数字警员时下拉选择，对应 agents.category） */
-const AGENT_CATEGORIES = [
-  { value: 'case_analysis', label: '案件分析' },
-  { value: 'fund_tracking', label: '资金追踪' },
-  { value: 'intelligence', label: '情报研判' },
-  { value: 'evidence_mgmt', label: '调证取证' },
-  { value: 'legal_review', label: '法制审核' },
-  { value: 'interrogation', label: '审讯辅助' },
-  { value: 'image_recon', label: '图像侦查' },
-  { value: 'anti_fraud', label: '反诈劝阻' },
-  { value: 'command', label: '指挥调度' }
-]
 const runtimeAgentModalTabs = ['model', 'tools', 'other']
 
 const showAgentModal = ref(false)
@@ -69,8 +57,7 @@ const agentForm = reactive({
   name: '',
   backend_id: DEFAULT_AGENT_BACKEND_ID,
   description: '',
-  icon: '',
-  category: ''
+  icon: ''
 })
 
 const normalizeAgent = (agent) => {
@@ -120,8 +107,7 @@ const resetAgentForm = () => {
     name: '',
     backend_id: getDefaultBackendId(),
     description: '',
-    icon: '',
-    category: ''
+    icon: ''
   })
   currentAvatarId.value = ''
 }
@@ -201,8 +187,7 @@ const openEdit = async (agent) => {
     name: detail.name || '',
     backend_id: detail.backend_id || DEFAULT_AGENT_BACKEND_ID,
     description: detail.description || '',
-    icon: detail.icon || '',
-    category: detail.category || ''
+    icon: detail.icon || ''
   })
   await agentStore.selectAgent(detail.id, { allowSubagent: true })
   await agentStore.fetchMentionResources()
@@ -265,9 +250,7 @@ const buildAgentPayload = () => {
     name: agentForm.name.trim(),
     description: agentForm.description.trim() || null,
     icon: agentForm.icon.trim() || null,
-    is_subagent: false,
-    // 单表化：功能分类写入 agents.category，使其归入数字警员列表
-    category: agentForm.category || null
+    is_subagent: false
   }
 
   if (!editingAgentId.value) {
@@ -469,16 +452,6 @@ defineExpose({
                 class="agent-description-textarea"
                 :rows="3"
                 placeholder="可选"
-              />
-            </label>
-            <label class="form-label full-width">
-              <span>功能分类</span>
-              <a-select
-                v-model:value="agentForm.category"
-                class="agent-category-select"
-                placeholder="选择该数字警员的功能分类"
-                :options="AGENT_CATEGORIES"
-                allow-clear
               />
             </label>
           </div>

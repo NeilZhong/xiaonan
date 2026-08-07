@@ -214,6 +214,9 @@ class Agent(Base):
 
     is_default = Column(Boolean, nullable=False, default=False, index=True)
     is_subagent = Column(Boolean, nullable=False, default=False, index=True)
+    # 平台内置智能体（小南助手 / 深度研究）：定义由系统维护，禁止删除，
+    # 且不属于数字警员，不进入数字警员管理面板。
+    is_system = Column(Boolean, nullable=False, default=False, index=True)
 
     # ── 数字警员身份档案 ──────────────────────────────────────
     # badge_number 为警号，仅在全局共享审核通过时授予（类比警察授予警号），
@@ -273,6 +276,7 @@ class Agent(Base):
             "share_config": self.share_config or {},
             "is_default": bool(self.is_default),
             "is_subagent": bool(self.is_subagent),
+            "is_system": bool(self.is_system),
             # ── 数字警员档案 ──
             "badge_number": self.badge_number,
             "rank": self.rank,

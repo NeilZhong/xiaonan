@@ -8,11 +8,14 @@ import pytest
 from yuxi.repositories.agent_repository import (
     AgentRepository,
     DEFAULT_AGENT_DESCRIPTION,
+    DEFAULT_AGENT_NAME,
+    DEFAULT_AGENT_SLUG,
     DEFAULT_SHARE_CONFIG,
     GENERAL_PURPOSE_AGENT_DESCRIPTION,
     GENERAL_PURPOSE_AGENT_NAME,
     GENERAL_PURPOSE_AGENT_SLUG,
     SUB_AGENT_BACKEND_ID,
+    is_builtin_agent,
     user_can_access_agent,
     user_can_manage_agent,
 )
@@ -53,8 +56,11 @@ async def test_ensure_default_agent_backfills_missing_description(monkeypatch):
     db = FakeDb()
     repo = AgentRepository(db)
     agent = SimpleNamespace(
+        name=DEFAULT_AGENT_NAME,
         share_config=DEFAULT_SHARE_CONFIG.copy(),
         is_default=True,
+        is_subagent=False,
+        is_system=True,
         description=None,
         updated_by=None,
         updated_at=None,
@@ -92,12 +98,28 @@ async def test_ensure_general_purpose_subagent_creates_empty_config_subagent(mon
     assert agent.backend_id == SUB_AGENT_BACKEND_ID
     assert agent.is_subagent is True
     assert agent.is_default is False
+    assert agent.is_system is True
     assert agent.config_json == {"context": {}}
     assert agent.share_config == DEFAULT_SHARE_CONFIG
     assert agent.created_by == "system"
     assert db.added is agent
     db.commit.assert_awaited_once()
     db.refresh.assert_awaited_once_with(agent)
+
+
+def test_is_builtin_agent_protects_system_agents_only():
+    """内置智能体（含深度研究、预置协助伙伴）禁止删除，用户自建实体不受限。"""
+    default_agent = SimpleNamespace(slug=DEFAULT_AGENT_SLUG, is_system=False)
+    deep_research = SimpleNamespace(slug="deep-research", is_system=True)
+    preset_partner = SimpleNamespace(slug="fact-verifier", is_system=True)
+    user_officer = SimpleNamespace(slug="officer-42", is_system=False)
+    user_partner = SimpleNamespace(slug="partner-7", is_system=False)
+
+    assert is_builtin_agent(default_agent) is True
+    assert is_builtin_agent(deep_research) is True
+    assert is_builtin_agent(preset_partner) is True
+    assert is_builtin_agent(user_officer) is False
+    assert is_builtin_agent(user_partner) is False
 
 
 @pytest.mark.asyncio

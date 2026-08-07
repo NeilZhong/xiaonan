@@ -534,6 +534,16 @@ class PostgresManager(metaclass=SingletonMeta):
             "ALTER TABLE IF EXISTS agents ADD COLUMN IF NOT EXISTS backend_id VARCHAR(64)",
             "ALTER TABLE IF EXISTS agents ADD COLUMN IF NOT EXISTS share_config JSONB NOT NULL DEFAULT '{}'::jsonb",
             "ALTER TABLE IF EXISTS agents ADD COLUMN IF NOT EXISTS is_subagent BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE IF EXISTS agents ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE",
+            # 存量回填：yuxi 原生预置智能体与协助伙伴标记为系统内置，
+            # 使其脱离数字警员管理面板并受删除保护（用户自建的同类实体不带该标记）。
+            """
+            UPDATE agents SET is_system = TRUE
+            WHERE slug IN (
+                'default-chatbot', 'deep-research',
+                'general-purpose', 'web-search', 'research-explorer', 'fact-verifier'
+            )
+            """,
             "ALTER TABLE IF EXISTS user_config ADD COLUMN IF NOT EXISTS enable_memory BOOLEAN NOT NULL DEFAULT FALSE",
             """
             UPDATE cli_auth_sessions
@@ -547,6 +557,7 @@ class PostgresManager(metaclass=SingletonMeta):
             "CREATE UNIQUE INDEX IF NOT EXISTS ix_agents_slug ON agents(slug)",
             "CREATE INDEX IF NOT EXISTS ix_agents_backend_id ON agents(backend_id)",
             "CREATE INDEX IF NOT EXISTS ix_agents_is_subagent ON agents(is_subagent)",
+            "CREATE INDEX IF NOT EXISTS ix_agents_is_system ON agents(is_system)",
             "CREATE INDEX IF NOT EXISTS ix_agents_created_by ON agents(created_by)",
             """
             CREATE UNIQUE INDEX IF NOT EXISTS uq_agents_default

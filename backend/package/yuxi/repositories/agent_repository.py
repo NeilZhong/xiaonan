@@ -12,7 +12,7 @@ from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils.share_config import SHARE_ACCESS_LEVELS, normalize_share_config
 
 DEFAULT_AGENT_SLUG = "default-chatbot"
-DEFAULT_AGENT_NAME = "智能助手"
+DEFAULT_AGENT_NAME = "小南助手"
 DEFAULT_AGENT_BACKEND_ID = "ChatbotAgent"
 SUB_AGENT_BACKEND_ID = "SubAgentBackend"
 DEFAULT_AGENT_DESCRIPTION = "基础的对话机器人，可以回答问题，可在配置中启用需要的工具。"
@@ -104,7 +104,12 @@ ADMIN_ROLES = {"admin", "superadmin"}
 
 
 def is_builtin_agent(agent: Agent) -> bool:
-    return agent.slug == DEFAULT_AGENT_SLUG
+    """是否为平台内置智能体（定义由系统维护，任何角色都不得删除）。
+
+    除默认对话智能体外，`is_system` 标记的内置智能体（深度研究、预置协助伙伴）
+    同样受保护；用户自建的协助伙伴不带该标记，仍可正常删除。
+    """
+    return agent.slug == DEFAULT_AGENT_SLUG or bool(agent.is_system)
 
 
 def resolve_agent_is_subagent(backend_id: str, is_subagent: bool | None = None) -> bool:
@@ -182,6 +187,9 @@ class AgentRepository:
         agent = await self.get_by_slug(DEFAULT_AGENT_SLUG)
         if agent:
             needs_update = False
+            if agent.name != DEFAULT_AGENT_NAME:
+                agent.name = DEFAULT_AGENT_NAME
+                needs_update = True
             if agent.share_config != DEFAULT_SHARE_CONFIG:
                 agent.share_config = DEFAULT_SHARE_CONFIG.copy()
                 needs_update = True
@@ -190,6 +198,9 @@ class AgentRepository:
                 needs_update = True
             if getattr(agent, "is_subagent", False):
                 agent.is_subagent = False
+                needs_update = True
+            if not getattr(agent, "is_system", False):
+                agent.is_system = True
                 needs_update = True
             if not agent.is_default:
                 return await self.set_default(agent=agent, updated_by=created_by)
@@ -211,6 +222,7 @@ class AgentRepository:
             share_config=DEFAULT_SHARE_CONFIG.copy(),
             is_default=True,
             is_subagent=False,
+            is_system=True,
             created_by=created_by,
             updated_by=created_by,
             created_at=utc_now_naive(),
@@ -237,6 +249,7 @@ class AgentRepository:
             share_config=DEFAULT_SHARE_CONFIG.copy(),
             is_default=False,
             is_subagent=True,
+            is_system=True,
             created_by=created_by,
             updated_by=created_by,
             created_at=utc_now_naive(),
@@ -285,6 +298,7 @@ class AgentRepository:
             share_config=DEFAULT_SHARE_CONFIG.copy(),
             is_default=False,
             is_subagent=is_subagent,
+            is_system=True,
             created_by=created_by,
             updated_by=created_by,
             created_at=utc_now_naive(),

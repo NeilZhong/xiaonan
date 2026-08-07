@@ -73,9 +73,9 @@ class PoliceAgentRepository:
         page: int = 1, page_size: int = 50, current_user: Any = None,
     ) -> tuple[list[Agent], int]:
         async with pg_manager.get_async_session_context() as session:
-            stmt = select(Agent).where(Agent.is_subagent.is_(False))
-            # 数字警员（含预设/自建）均带功能分类 category；无 category 的通用智能体不进管理面板
-            stmt = stmt.where(Agent.category.isnot(None))
+            # 数字警员 = 非协助伙伴（is_subagent）且非平台内置智能体（is_system）。
+            # 早期以 category 是否为空充当该判据，导致「功能分类」被迫成为必填项，现改为显式标记。
+            stmt = select(Agent).where(Agent.is_subagent.is_(False), Agent.is_system.is_(False))
             if type:
                 stmt = stmt.where(Agent.agent_type == type)
             if status:
