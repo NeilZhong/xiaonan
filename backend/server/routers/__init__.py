@@ -24,6 +24,7 @@ from server.routers.police_case_router import case_router as police_case_router
 from server.routers.police_task_router import task_router as police_task_router
 from server.routers.police_evidence_router import evidence_router as police_evidence_router
 from server.routers.police_dashboard_router import dashboard_router as police_dashboard_router
+from server.routers.police_stats_router import stats_router as police_stats_router
 from server.routers.police_agent_router import agent_router as police_agent_router
 from server.routers.police_workspace_router import workspace_router as police_workspace_router
 from server.routers.police_import_router import import_router as police_import_router
@@ -67,6 +68,7 @@ router.include_router(mention_router)  # /api/mention/* 提及文件搜索接口
 
 # ★ 公安业务接口：案件、任务、证据、工作台
 router.include_router(police_case_router)       # /api/police/cases/*
+router.include_router(police_stats_router)      # /api/police/cases/*/stats
 router.include_router(police_task_router)       # /api/police/tasks/*
 router.include_router(police_evidence_router)   # /api/police/evidence/*
 router.include_router(police_dashboard_router)  # /api/police/dashboard/*

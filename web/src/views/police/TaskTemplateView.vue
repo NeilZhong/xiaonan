@@ -300,7 +300,20 @@ onMounted(loadAll)
         @search="loadAll"
         @change="(e) => { if (!e.target.value) loadAll() }"
       />
-      <a-checkbox v-model:checked="enabledOnly" @change="loadAll">仅看启用</a-checkbox>
+      <label class="tpl-check" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+        <span
+          class="t-check"
+          role="checkbox"
+          :aria-checked="enabledOnly"
+          tabindex="0"
+          style="--check-len: 16"
+          @click="enabledOnly = !enabledOnly; loadAll()"
+          @keydown.space.prevent="enabledOnly = !enabledOnly; loadAll()"
+        >
+          <svg viewBox="0 0 18 18" width="12" height="12" aria-hidden="true"><path d="M4 9 L8 13 L14 5" /></svg>
+        </span>
+        <span class="tpl-check-label" style="font-size:13px;color:var(--gray-700,#374151);" @click="enabledOnly = !enabledOnly; loadAll()">仅看启用</span>
+      </label>
       <span class="tpl-count">共 {{ filteredRows.length }} 条模板</span>
     </div>
 

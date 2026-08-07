@@ -1,12 +1,18 @@
 <template>
   <div class="stats-overview-container">
-    <div class="stats-grid">
+    <SkeletonReveal :loading="!statsReady" class="stats-skel">
+      <template #skeleton>
+        <div class="sk-grid">
+          <div v-for="n in 6" :key="n" class="sk-card" />
+        </div>
+      </template>
+      <div class="stats-grid">
       <div class="stat-card primary">
         <div class="stat-icon">
           <MessageCircle class="icon" />
         </div>
         <div class="stat-content">
-          <div class="stat-value">{{ basicStats?.total_conversations || 0 }}</div>
+          <div class="stat-value"><AnimatedNumber :value="basicStats?.total_conversations || 0" mode="reel" /></div>
           <div class="stat-label">累计会话</div>
           <div class="stat-trend" v-if="basicStats?.conversation_trend">
             <TrendingUp v-if="basicStats.conversation_trend > 0" class="trend-icon up" />
@@ -31,7 +37,7 @@
           <Mail class="icon" />
         </div>
         <div class="stat-content">
-          <div class="stat-value">{{ basicStats?.total_messages || 0 }}</div>
+          <div class="stat-value"><AnimatedNumber :value="basicStats?.total_messages || 0" mode="reel" /></div>
           <div class="stat-label">总消息数</div>
         </div>
       </div>
@@ -66,10 +72,12 @@
         </div>
       </div>
     </div>
+    </SkeletonReveal>
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import {
   MessageCircle,
   Activity,
@@ -80,6 +88,8 @@ import {
   TrendingUp,
   TrendingDown
 } from 'lucide-vue-next'
+import AnimatedNumber from '@/components/common/AnimatedNumber.vue'
+import SkeletonReveal from '@/components/common/SkeletonReveal.vue'
 
 // Props
 const props = defineProps({
@@ -91,6 +101,9 @@ const props = defineProps({
 
 // Emits
 const emit = defineEmits(['open-feedback'])
+
+// 统计未就绪时显示骨架屏（skeleton-reveal）
+const statsReady = computed(() => props.basicStats && Object.keys(props.basicStats).length > 0)
 
 // Methods
 const handleFeedbackClick = () => {
@@ -136,6 +149,7 @@ const getSatisfactionClass = () => {
       &:hover {
         border-color: var(--gray-200);
         box-shadow: 0 1px 3px 0 var(--shadow-1);
+        transform: translateY(-3px);
       }
 
       &.primary {
@@ -263,6 +277,25 @@ const getSatisfactionClass = () => {
       }
     }
   }
+}
+
+/* skeleton-reveal 骨架占位（与真实卡片同尺寸） */
+.stats-skel {
+  width: 100%;
+}
+.sk-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 16px;
+  padding: 0 var(--page-padding);
+}
+.sk-card {
+  height: 80px;
+  border-radius: 8px;
+  background: var(--gray-100, #eef0f3);
+}
+:root.dark .sk-card {
+  background: var(--gray-800, #2a2f3a);
 }
 
 /* Stats Overview 响应式设计 */

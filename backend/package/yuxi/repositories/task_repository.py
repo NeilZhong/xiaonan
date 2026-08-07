@@ -121,7 +121,10 @@ class TaskRepository:
             if not task:
                 return None
             for key, value in data.items():
-                if hasattr(task, key) and value is not None:
+                if hasattr(task, key):
+                    # completed_at 允许显式置空（看板拖出「已完成」时需清空）
+                    if value is None and key != "completed_at":
+                        continue
                     setattr(task, key, value)
             await session.commit()
             await session.refresh(task)

@@ -22,7 +22,7 @@ from yuxi.utils.datetime_utils import format_utc_datetime, utc_now_naive
 
 Base = declarative_base()
 
-MAX_LOGIN_FAILED_ATTEMPTS = 5
+MAX_LOGIN_FAILED_ATTEMPTS = 20
 LOGIN_LOCK_DURATION_SECONDS = 300
 AGENT_RUN_TERMINAL_STATUSES = ("completed", "failed", "cancelled", "interrupted")
 

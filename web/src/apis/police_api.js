@@ -38,6 +38,8 @@ export const policeCaseApi = {
   delete: (caseId) => apiDelete(`/api/police/cases/${caseId}`),
   addMember: (caseId, data) => apiPost(`/api/police/cases/${caseId}/members`, data),
   updatePhase: (caseId, phase) => apiPut(`/api/police/cases/${caseId}/phase`, { phase }),
+  // 案件内统计 Tab 数据（概览 / 人机占比 / 燃尽 / 风险）
+  getStats: (caseId) => apiGet(`/api/police/cases/${caseId}/stats`),
   timeline: (caseId) => apiGet(`/api/police/cases/${caseId}/timeline`),
 }
 

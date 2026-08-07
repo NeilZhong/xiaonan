@@ -7,6 +7,11 @@ import { onMounted, ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { usePoliceStore } from '@/stores/police'
 import { policeAgentApi } from '@/apis/police_api'
+import TaskViewSwitcher from '@/components/police/TaskViewSwitcher.vue'
+import TaskTreeView from '@/components/police/TaskTreeView.vue'
+import TaskCalendarView from '@/components/police/TaskCalendarView.vue'
+import TaskKanbanView from '@/components/police/TaskKanbanView.vue'
+import CaseStatsTab from '@/components/police/CaseStatsTab.vue'
 import { message } from 'ant-design-vue'
 import {
   ArrowLeftOutlined, UserOutlined, ClockCircleOutlined,
@@ -22,7 +27,11 @@ const activeTab = ref('overview')
 const loading = ref(false)
 const showCreateTaskModal = ref(false)
 const showPhaseModal = ref(false)
-const taskViewMode = ref('table') // table / kanban — 任务 tab 内双视图切换
+// 任务视图偏好持久化（借鉴 Plane 的 displayFilters.layout 持久化，先存 localStorage）
+const TASK_VIEW_KEY = 'xiaonan.taskViewMode'
+const taskLayouts = ['table', 'kanban', 'tree', 'gantt', 'calendar']
+const taskViewMode = ref(localStorage.getItem(TASK_VIEW_KEY) || 'table')
+watch(taskViewMode, (v) => localStorage.setItem(TASK_VIEW_KEY, v))
 
 const caseId = computed(() => parseInt(route.params.caseId))
 const caseData = computed(() => policeStore.currentCase)
@@ -42,15 +51,6 @@ const taskColumns = [
 const taskStatusText = { pending: '待处理', in_progress: '进行中', review: '待审核', completed: '已完成', blocked: '已驳回' }
 const taskStatusColor = { pending: 'default', in_progress: 'processing', review: 'warning', completed: 'success', blocked: 'error' }
 
-// ── 看板视图常量（案件内看板）─────
-const statusColumns = [
-  { key: 'pending', title: '待处理', color: '#718096' },
-  { key: 'in_progress', title: '进行中', color: '#3182CE' },
-  { key: 'review', title: '待审核', color: '#D69E2E' },
-  { key: 'completed', title: '已完成', color: '#38A169' },
-  { key: 'blocked', title: '已驳回', color: '#E53E3E' },
-]
-
 const typeText = {
   transcript_analysis: '笔录分析', fund_analysis: '资金分析', evidence_collection: '调证生成',
   evidence_submission: '证据提交', legal_review: '法制审核', document_generation: '文书生成',
@@ -59,15 +59,6 @@ const typeText = {
 }
 
 const priorityColor = { urgent: 'red', high: 'orange', medium: 'blue', low: 'default' }
-
-/** 按状态分组的任务（仅含当前案件） */
-const tasksByStatus = computed(() => {
-  const map = {}
-  for (const col of statusColumns) {
-    map[col.key] = policeStore.tasks.filter(t => t.status === col.key)
-  }
-  return map
-})
 
 const phaseSteps = [
   { key: 'research', title: '前期研判' },
@@ -267,6 +258,10 @@ function goTask(taskId) {
   router.push(`/police/tasks/${taskId}`)
 }
 
+function reloadTasks() {
+  policeStore.loadTasks({ case_id: caseId.value, page_size: 100 })
+}
+
 onMounted(() => { loadCase(); loadAgents() })
 watch(caseId, loadCase)
 </script>
@@ -361,14 +356,16 @@ watch(caseId, loadCase)
         </div>
       </a-tab-pane>
 
+      <!-- 统计 -->
+      <a-tab-pane key="stats" tab="统计">
+        <CaseStatsTab :case-id="caseId" />
+      </a-tab-pane>
+
       <!-- 任务（整合看板/表格双视图） -->
       <a-tab-pane key="tasks" tab="任务">
         <div class="tab-toolbar">
           <div class="toolbar-left">
-            <a-radio-group v-model:value="taskViewMode" button-style="solid" size="small">
-              <a-radio-button value="table"><UnorderedListOutlined /> 表格</a-radio-button>
-              <a-radio-button value="kanban"><AppstoreOutlined /> 看板</a-radio-button>
-            </a-radio-group>
+            <TaskViewSwitcher v-model="taskViewMode" :layouts="taskLayouts" />
           </div>
           <a-button type="primary" size="small" @click="showCreateTaskModal = true">创建任务</a-button>
         </div>
@@ -411,38 +408,37 @@ watch(caseId, loadCase)
           </a-table>
         </div>
 
-        <!-- 看板视图 -->
-        <div v-else class="kanban-board">
-          <div v-for="col in statusColumns" :key="col.key" class="kanban-column">
-            <div class="kanban-column-header" :style="{ borderTopColor: col.color }">
-              <span class="column-title">{{ col.title }}</span>
-              <span class="column-count">{{ tasksByStatus[col.key]?.length || 0 }}</span>
-            </div>
-            <div class="kanban-column-body">
-              <div
-                v-for="task in (tasksByStatus[col.key] || [])"
-                :key="task.id"
-                class="kanban-card"
-                @click="goTask(task.id)"
-              >
-                <div class="card-title">{{ task.title }}</div>
-                <div class="card-meta">
-                  <a-tag size="small">{{ typeText[task.type] || task.type }}</a-tag>
-                  <a-tag :color="priorityColor[task.priority]" size="small">{{ task.priority }}</a-tag>
-                </div>
-                <div class="card-footer">
-                  <span class="card-assignee">
-                    <a-avatar size="small" style="background: var(--main-color, #24839b)">
-                      {{ (task.assignee_name || '?')[0] }}
-                    </a-avatar>
-                    <span>{{ task.assignee_name || '未分配' }}</span>
-                  </span>
-                  <a-button type="link" size="small" @click.stop="showAssignModalFor(task)">分配</a-button>
-                </div>
-              </div>
-              <div v-if="!tasksByStatus[col.key]?.length" class="kanban-empty">暂无任务</div>
-            </div>
-          </div>
+        <!-- 看板视图（Plane 风格拖拽） -->
+        <div v-else-if="taskViewMode === 'kanban'">
+          <TaskKanbanView
+            :tasks="policeStore.tasks"
+            @open-task="goTask"
+            @assign-task="showAssignModalFor"
+            @refresh="reloadTasks"
+          />
+        </div>
+
+        <!-- 树状视图（基于任务父子层级 parent_task_id） -->
+        <div v-else-if="taskViewMode === 'tree'" class="task-placeholder">
+          <TaskTreeView
+            :tasks="policeStore.tasks"
+            @open-task="goTask"
+            @assign-task="showAssignModalFor"
+          />
+        </div>
+
+        <!-- 甘特视图（基于任务起止 / 时限） -->
+        <div v-else-if="taskViewMode === 'gantt'" class="task-placeholder">
+          <a-empty description="甘特视图开发中（基于任务起止 / 法定时限）" />
+        </div>
+
+        <!-- 日历视图（基于任务时限 due_date） -->
+        <div v-else-if="taskViewMode === 'calendar'" class="task-placeholder">
+          <TaskCalendarView
+            :tasks="policeStore.tasks"
+            @open-task="goTask"
+            @assign-task="showAssignModalFor"
+          />
         </div>
       </a-tab-pane>
 
@@ -463,9 +459,9 @@ watch(caseId, loadCase)
 
       <!-- 成员 -->
       <a-tab-pane key="members" tab="成员">
-        <div class="members-list">
+        <div class="members-list t-avatar-group">
           <div v-for="m in (caseData.members || [])" :key="m.id" class="member-item">
-            <a-avatar size="small"><template #icon><UserOutlined /></template></a-avatar>
+            <a-avatar size="small" class="t-avatar"><template #icon><UserOutlined /></template></a-avatar>
             <span class="member-name">用户 #{{ m.user_id }}</span>
             <a-tag>{{ { commander: '指挥员', handler: '办案人', reviewer: '审核员', observer: '观察员' }[m.role] || m.role }}</a-tag>
           </div>
@@ -728,102 +724,6 @@ export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
   gap: 8px;
 }
 
-/* ── 看板视图（任务 tab 内） ── */
-.kanban-board {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 8px;
-}
-
-.kanban-column {
-  min-width: 240px;
-  flex: 1;
-  max-width: 280px;
-  background: var(--gray-10, #f7fafc);
-  border: 1px solid var(--gray-50, #e2e8f0);
-  border-radius: 10px;
-  display: flex;
-  flex-direction: column;
-}
-
-.kanban-column-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 14px;
-  border-top: 3px solid;
-  border-radius: 10px 10px 0 0;
-}
-
-.column-title {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.column-count {
-  font-size: 11px;
-  background: var(--gray-50, #e2e8f0);
-  padding: 2px 8px;
-  border-radius: 10px;
-  color: var(--gray-600, #4a5568);
-}
-
-.kanban-column-body {
-  padding: 8px;
-  flex: 1;
-  min-height: 80px;
-}
-
-.kanban-card {
-  background: var(--gray-0, #fff);
-  border: 1px solid var(--gray-50, #e2e8f0);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  cursor: pointer;
-  transition: box-shadow 0.15s;
-}
-
-.kanban-card:hover {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-}
-
-.card-title {
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 6px;
-  line-height: 1.4;
-}
-
-.card-meta {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 6px;
-  flex-wrap: wrap;
-}
-
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-  color: var(--gray-500, #718096);
-}
-
-.card-assignee {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.kanban-empty {
-  text-align: center;
-  color: var(--gray-400, #a0aec0);
-  padding: 20px 0;
-  font-size: 12px;
-}
-
 /* 概览 */
 .overview-grid {
   display: grid;
@@ -890,6 +790,15 @@ export default { components: { EvidenceTab, CaseTimeline, WorkspaceTab } }
 .member-name {
   flex: 1;
   font-size: 14px;
+}
+
+/* avatar-group-hover：悬停头像上浮放大，其余下沉 */
+.members-list.t-avatar-group:hover .t-avatar {
+  --shift: 6px;
+}
+.members-list.t-avatar-group .t-avatar:hover {
+  --shift: -6px;
+  --scale-active: 1.12;
 }
 
 .empty-text {

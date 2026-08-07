@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -296,6 +297,16 @@ class PoliceTaskService:
         return result
 
     async def update_task(self, task_id: int, data: dict[str, Any], user_id: int) -> dict[str, Any] | None:
+        # 看板拖拽改状态时同步 completed_at 语义：拖入「已完成」补齐完成时间，
+        # 拖出「已完成」清空完成时间（用于燃尽图 / 逾期完成统计）。
+        status = data.get("status")
+        if status is not None:
+            if status == "completed":
+                current = await task_repository.get_by_id(task_id)
+                if current and current.completed_at is None:
+                    data["completed_at"] = datetime.utcnow()
+            else:
+                data["completed_at"] = None
         task = await task_repository.update(task_id, data)
         return task.to_dict() if task else None
 

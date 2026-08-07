@@ -45,6 +45,7 @@ class TaskUpdate(BaseModel):
     phase: str | None = None
     instructions: str | None = None
     due_date: str | None = None
+    status: str | None = None  # 看板拖拽改状态（需为 TASK_STATUS 合法值）
 
 
 class TaskAssign(BaseModel):

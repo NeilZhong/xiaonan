@@ -18,7 +18,8 @@ for import_path in (APP_ROOT, APP_ROOT / "package"):
 SUPERADMIN_UID = "zwj"
 SUPERADMIN_NAME = "张文杰"
 SUPERADMIN_PHONE_NUMBER = "15251638888"
-SUPERADMIN_PASSWORD = "zwj12138"
+SUPERADMIN_PASSWORD = "admin@123"
+ADMIN_PASSWORD = "admin@123"
 DEFAULT_USER_PASSWORD = "yuxi123456"
 
 
@@ -102,7 +103,7 @@ async def seed_initial_users() -> None:
                         User(
                             username=f"{department_seed['name']}管理员{index}",
                             uid=f"{department_seed['prefix']}_admin_{index}",
-                            password_hash=AuthUtils.hash_password(DEFAULT_USER_PASSWORD),
+                            password_hash=AuthUtils.hash_password(ADMIN_PASSWORD),
                             role="admin",
                             department_id=department.id,
                         )
@@ -138,8 +139,9 @@ def main() -> int:
         f"初始化完成：已创建超级管理员 {SUPERADMIN_NAME}（{SUPERADMIN_UID}）、"
         "3 个部门、6 个部门管理员和 14 个普通用户。"
     )
-    print("超级管理员密码：zwj12138")
-    print("部门管理员和普通用户默认密码：yuxi123456")
+    print("超级管理员密码：admin@123")
+    print("部门管理员密码：admin@123")
+    print("普通用户默认密码：yuxi123456")
     return 0
 
 

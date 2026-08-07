@@ -4,28 +4,28 @@
     <div class="stats-overview">
       <a-row :gutter="16">
         <a-col :span="8">
-          <a-statistic
-            title="智能体总数"
-            :value="agentStats?.total_agents || 0"
-            :value-style="{ color: 'var(--color-info-500)' }"
-            suffix="个"
-          />
+          <div class="stat-item">
+            <div class="stat-title">智能体总数</div>
+            <div class="stat-value" :style="{ color: 'var(--color-info-500)' }">
+              <AnimatedNumber :value="agentStats?.total_agents || 0" /> 个
+            </div>
+          </div>
         </a-col>
         <a-col :span="8">
-          <a-statistic
-            title="总对话数"
-            :value="totalConversations"
-            :value-style="{ color: 'var(--color-accent-500)' }"
-            suffix="次"
-          />
+          <div class="stat-item">
+            <div class="stat-title">总对话数</div>
+            <div class="stat-value" :style="{ color: 'var(--color-accent-500)' }">
+              <AnimatedNumber :value="totalConversations" /> 次
+            </div>
+          </div>
         </a-col>
         <a-col :span="8">
-          <a-statistic
-            title="工具调用总数"
-            :value="totalToolUsage"
-            :value-style="{ color: 'var(--color-warning-500)' }"
-            suffix="次"
-          />
+          <div class="stat-item">
+            <div class="stat-title">工具调用总数</div>
+            <div class="stat-value" :style="{ color: 'var(--color-warning-500)' }">
+              <AnimatedNumber :value="totalToolUsage" /> 次
+            </div>
+          </div>
         </a-col>
       </a-row>
     </div>
@@ -91,6 +91,7 @@
 <script setup>
 import { ref, onMounted, watch, nextTick, computed } from 'vue'
 import * as echarts from 'echarts'
+import AnimatedNumber from '@/components/common/AnimatedNumber.vue'
 import { getColorByIndex } from '@/utils/chartColors'
 import { useThemeStore } from '@/stores/theme'
 
@@ -370,6 +371,21 @@ defineExpose({
   font-weight: 500;
   color: var(--gray-1000);
   font-size: 14px;
+}
+
+/* 概览统计项（AnimatedNumber 数字翻滚） */
+.stat-item {
+  .stat-title {
+    font-size: 13px;
+    color: var(--gray-600);
+    margin-bottom: 8px;
+  }
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* 排名显示样式 */
