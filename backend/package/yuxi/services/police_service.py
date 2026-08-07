@@ -807,7 +807,8 @@ class PoliceAgentService:
         # 单表化：数字警员即一等智能体，直接写入 agents 表（无独立 police 表）。
         # 警号(badge_number)仅全局审核通过后才授予，创建时不自动生成。
         # 新建默认私有（仅创建者可见），需显式分享（部门/指定人）或走全局审批后才对他人可见。
-        created_by = str(data.get("author_id") or "system-police")
+        # author_id 仅用于推导 created_by，必须从 payload 剔除，否则会作为非法列名传入 Agent(**fields)。
+        created_by = str(data.pop("author_id", None) or "system-police")
         fields = _normalize_agent_fields(data)
         fields["created_by"] = created_by
         fields.setdefault("backend_id", DEFAULT_AGENT_BACKEND_ID)
