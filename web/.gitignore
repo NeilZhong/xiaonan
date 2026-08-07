@@ -31,3 +31,6 @@ coverage
 
 # Generated vendored assets (PDF.js / PPTX viewers, copied during build)
 /public/vendor/
+
+# Transient probe/lock files
+pnpm-lock-probe.yaml
