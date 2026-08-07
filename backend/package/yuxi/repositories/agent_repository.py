@@ -7,6 +7,7 @@ from typing import Any, Literal
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from yuxi.repositories.police_binding_repository import agent_binding_repository
 from yuxi.storage.postgres.models_business import Agent, User
 from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils.share_config import SHARE_ACCESS_LEVELS, normalize_share_config
@@ -344,7 +345,11 @@ class AgentRepository:
         )
 
     async def list_visible(self, *, user: User, include_subagent_definitions: bool = False) -> list[Agent]:
-        """列出用户可见的主智能体，只有显式请求时才包含子智能体定义。"""
+        """列出用户可见的主智能体，只有显式请求时才包含子智能体定义。
+
+        P2c：用户通过「添加/申请使用」建立的 active 连接（police_agent_connections）
+        也视为可访问——绑定是授权而非复制，故连接覆盖的私有/部门智能体对他人可见。
+        """
         stmt = select(Agent)
         if not include_subagent_definitions:
             stmt = stmt.where(Agent.is_subagent.is_(False))
@@ -352,7 +357,12 @@ class AgentRepository:
         agents = list(result.scalars().all())
         if user.role == "superadmin":
             return agents
-        return [agent for agent in agents if user_can_access_agent(user, agent)]
+        connected_ids = await agent_binding_repository.list_connected_agent_ids(user.id)
+        return [
+            agent
+            for agent in agents
+            if user_can_access_agent(user, agent) or agent.id in connected_ids
+        ]
 
     async def list_visible_subagents(self, *, user: User) -> list[Agent]:
         result = await self.db.execute(
@@ -361,7 +371,13 @@ class AgentRepository:
         agents = list(result.scalars().all())
         if user.role == "superadmin":
             return agents
-        return [agent for agent in agents if user_can_access_agent(user, agent)]
+        # P2c：用户已连接（添加）的协助伙伴同样可见。
+        connected_ids = await agent_binding_repository.list_connected_agent_ids(user.id)
+        return [
+            agent
+            for agent in agents
+            if user_can_access_agent(user, agent) or agent.id in connected_ids
+        ]
 
     async def get_by_slug(self, slug: str) -> Agent | None:
         result = await self.db.execute(select(Agent).where(Agent.slug == slug))
@@ -374,11 +390,15 @@ class AgentRepository:
     async def get_visible_by_slug(
         self, *, slug: str, user: User, kind: Literal["main", "subagent", "any"] = "main"
     ) -> Agent | None:
-        """按 slug 读取用户可见智能体，并按入口语义过滤主/子智能体。"""
+        """按 slug 读取用户可见智能体，并按入口语义过滤主/子智能体。
+
+        P2c：用户已建立 active 连接的智能体（即便未共享）也视为可见。
+        """
         agent = await self.get_by_slug(slug)
         if not agent:
             return None
-        if not user_can_access_agent(user, agent):
+        connected_ids = await agent_binding_repository.list_connected_agent_ids(user.id)
+        if not (user_can_access_agent(user, agent) or agent.id in connected_ids):
             return None
         if kind == "any":
             return agent

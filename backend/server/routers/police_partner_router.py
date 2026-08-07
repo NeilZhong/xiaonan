@@ -15,6 +15,7 @@ from typing import Optional
 
 from yuxi.services.police_partner_service import police_partner_service
 from yuxi.repositories.police_agent_repository import police_agent_repository
+from yuxi.services.police_binding_service import agent_binding_service
 from server.utils.auth_middleware import get_required_user, get_superadmin_user
 from yuxi.storage.postgres.models_business import User
 
@@ -65,6 +66,19 @@ class ApproveBody(BaseModel):
 
 class ApplyConnectionBody(BaseModel):
     agent_id: int
+
+
+class PinBody(BaseModel):
+    version_id: int
+
+
+class PrefsBody(BaseModel):
+    nickname: Optional[str] = None
+    notify_new_version: Optional[bool] = None
+
+
+class AssociatePartnersBody(BaseModel):
+    partner_ids: list[int]
 
 
 # ── 协助伙伴 CRUD ──────────────────────────────────────────
@@ -248,14 +262,20 @@ async def list_connections(
     )
 
 
+@connection_router.get("/mine")
+async def list_my_bindings(current_user: User = Depends(get_required_user)):
+    """当前用户全部绑定（含源智能体摘要、钉住的版本、关联伙伴）。P2c 富视图。"""
+    return await agent_binding_service.list_mine(current_user=current_user)
+
+
 @connection_router.post("")
 async def apply_connection(
     body: ApplyConnectionBody,
     current_user: User = Depends(get_required_user),
 ):
-    """申请连接数字警员（市场「申请使用」；建立连接不复制警员）。"""
+    """申请连接数字警员（市场「申请使用」；建立连接不复制警员，并级联添加其关联伙伴）。"""
     try:
-        result = await police_partner_service.apply_connection(
+        result = await agent_binding_service.apply(
             agent_id=body.agent_id, current_user=current_user,
         )
     except ValueError as e:
@@ -263,18 +283,98 @@ async def apply_connection(
     return result
 
 
+@connection_router.post("/{connection_id}/pin")
+async def pin_version(
+    connection_id: int,
+    body: PinBody,
+    current_user: User = Depends(get_required_user),
+):
+    """钉住某版本（version_id 须属于该智能体）。"""
+    try:
+        return await agent_binding_service.pin(
+            connection_id=connection_id, version_id=body.version_id, current_user=current_user,
+        )
+    except (ValueError, PermissionError) as e:
+        code = 400 if isinstance(e, ValueError) else 403
+        return JSONResponse(status_code=code, content={"error": str(e)})
+
+
+@connection_router.delete("/{connection_id}/pin")
+async def unpin_version(
+    connection_id: int,
+    current_user: User = Depends(get_required_user),
+):
+    """取消钉版本（恢复跟随源智能体当前版本）。"""
+    try:
+        return await agent_binding_service.unpin(
+            connection_id=connection_id, current_user=current_user,
+        )
+    except (ValueError, PermissionError) as e:
+        code = 400 if isinstance(e, ValueError) else 403
+        return JSONResponse(status_code=code, content={"error": str(e)})
+
+
+@connection_router.patch("/{connection_id}")
+async def update_prefs(
+    connection_id: int,
+    body: PrefsBody,
+    current_user: User = Depends(get_required_user),
+):
+    """修改绑定偏好：昵称 / 新版通知。不影响源智能体定义。"""
+    try:
+        return await agent_binding_service.set_prefs(
+            connection_id=connection_id, current_user=current_user,
+            nickname=body.nickname, notify_new_version=body.notify_new_version,
+        )
+    except (ValueError, PermissionError) as e:
+        code = 400 if isinstance(e, ValueError) else 403
+        return JSONResponse(status_code=code, content={"error": str(e)})
+
+
 @connection_router.delete("/{connection_id}")
 async def delete_connection(
     connection_id: int,
     current_user: User = Depends(get_required_user),
 ):
-    """解除连接（不影响数字警员本身）。"""
+    """解除绑定（仅本人或超管；级联添加的伙伴连接独立生命周期，保留不删）。"""
     try:
-        ok = await police_partner_service.delete_connection(
+        await agent_binding_service.remove(
             connection_id=connection_id, current_user=current_user,
         )
-    except PermissionError as e:
-        return JSONResponse(status_code=403, content={"error": str(e)})
-    if not ok:
-        return JSONResponse(status_code=404, content={"error": "连接不存在"})
+    except (ValueError, PermissionError) as e:
+        code = 404 if isinstance(e, ValueError) else 403
+        return JSONResponse(status_code=code, content={"error": str(e)})
     return {"ok": True}
+
+
+# ── 数字警察 ↔ 协助伙伴 关联（创建者侧，P2c）─────────────────
+
+@equip_router.get("/{agent_id}/associate-partners")
+async def list_associate_partners(
+    agent_id: int,
+    current_user: User = Depends(get_required_user),
+):
+    """列出某数字警员关联的协助伙伴（创建者/超管可见）。"""
+    try:
+        return await agent_binding_service.list_partners(
+            agent_id=agent_id, current_user=current_user,
+        )
+    except (ValueError, PermissionError) as e:
+        code = 404 if isinstance(e, ValueError) else 403
+        return JSONResponse(status_code=code, content={"error": str(e)})
+
+
+@equip_router.put("/{agent_id}/associate-partners")
+async def set_associate_partners(
+    agent_id: int,
+    body: AssociatePartnersBody,
+    current_user: User = Depends(get_required_user),
+):
+    """设置某数字警员的关联协助伙伴（全量替换；仅创建者/超管）。用于添加时级联。"""
+    try:
+        return await agent_binding_service.set_partners(
+            agent_id=agent_id, partner_ids=body.partner_ids, current_user=current_user,
+        )
+    except (ValueError, PermissionError) as e:
+        code = 404 if isinstance(e, ValueError) else 403
+        return JSONResponse(status_code=code, content={"error": str(e)})

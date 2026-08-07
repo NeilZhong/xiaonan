@@ -22,6 +22,7 @@ from yuxi.repositories.agent_repository import (
     user_can_manage_agent,
 )
 from yuxi.repositories.police_agent_repository import police_agent_repository
+from yuxi.services.police_binding_service import agent_binding_service
 from yuxi.services.police_service import write_audit_log
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.storage.postgres.models_business import Agent, User
@@ -349,15 +350,21 @@ class PolicePartnerService:
             session.add(conn)
             await session.commit()
             await session.refresh(conn)
+        # P2c：级联添加该数字警员已上架的关联协助伙伴（幂等；不影响源伙伴生命周期）
+        cascaded_partner_ids = await agent_binding_service._cascade_partners(
+            agent_id=agent_id, user_id=current_user.id,
+        )
         await write_audit_log(
             action="connection.apply",
             resource_type="agent",
             resource_id=agent_id,
             user_id=current_user.id,
             user_name=getattr(current_user, "name", None),
-            details={"agent_slug": agent.slug},
+            details={"agent_slug": agent.slug, "cascaded_partner_ids": cascaded_partner_ids},
         )
-        return conn.to_dict()
+        result = conn.to_dict()
+        result["cascaded_partner_ids"] = cascaded_partner_ids
+        return result
 
     async def list_connections(
         self, *, current_user: User, status: str | None = None,

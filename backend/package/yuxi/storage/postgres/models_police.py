@@ -11,6 +11,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -590,6 +591,11 @@ class PoliceAgentConnection(Base):
     approved_at = Column(DateTime, nullable=True)
     approved_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=utc_now_naive)
+    # P2c：绑定的版本 pin 与个性化（不复制警员身份，仅记录「我跑哪个版本」与昵称/通知偏好）
+    pinned_version_id = Column(Integer, nullable=True, index=True)  # NULL=跟随源智能体当前版本
+    pinned_at = Column(DateTime, nullable=True)
+    nickname = Column(String(80), nullable=True)  # 用户在自己空间内的昵称
+    notify_new_version = Column(Boolean, default=True, nullable=False)  # 源出新版是否通知
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -600,6 +606,37 @@ class PoliceAgentConnection(Base):
             "applied_at": format_utc_datetime(self.applied_at),
             "approved_at": format_utc_datetime(self.approved_at),
             "approved_by": self.approved_by,
+            "created_at": format_utc_datetime(self.created_at),
+            "pinned_version_id": self.pinned_version_id,
+            "pinned_at": format_utc_datetime(self.pinned_at),
+            "nickname": self.nickname,
+            "notify_new_version": self.notify_new_version,
+        }
+
+
+class AgentAssociatedPartner(Base):
+    """★ 数字警察 ↔ 协助伙伴 关联表（创建者声明其装备的协助伙伴）。
+
+    与「用户↔智能体连接（police_agent_connections）」区分：本表是**定义侧**关联
+    （数字警察声明它由哪些已上架协助伙伴组成）；用户添加该警员时按本表**快照级联**
+    建立自己对这些伙伴的连接（agent_associated_partners 自身变化不影响已建连接）。
+    """
+
+    __tablename__ = "agent_associated_partners"
+    __table_args__ = (
+        UniqueConstraint("digital_police_id", "partner_id", name="uq_agent_associated_partners_pair"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    digital_police_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    partner_id = Column(Integer, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=utc_now_naive)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "digital_police_id": self.digital_police_id,
+            "partner_id": self.partner_id,
             "created_at": format_utc_datetime(self.created_at),
         }
 

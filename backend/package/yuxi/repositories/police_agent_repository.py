@@ -20,6 +20,7 @@ from yuxi.storage.postgres.models_police import (
     PoliceSOP,
 )
 from yuxi.repositories.agent_repository import user_can_access_agent
+from yuxi.repositories.police_binding_repository import agent_binding_repository
 from yuxi.storage.postgres.manager import pg_manager
 from yuxi.utils.datetime_utils import utc_now_naive
 from yuxi.utils import logger
@@ -89,7 +90,13 @@ class PoliceAgentRepository:
             all_agents = list(result.scalars().all())
         # 可见性过滤（复用 yuxi 共享/审批体系，无 SQL 层可见性列）
         if current_user is not None:
-            all_agents = [a for a in all_agents if user_can_access_agent(current_user, a)]
+            # P2c：用户通过「添加」建立的连接（active）也视为可访问（不复制警员，仅授权）。
+            # 批量取一次连接集合，避免在列表循环里逐条查库（N+1）。
+            connected_ids = await agent_binding_repository.list_connected_agent_ids(current_user.id)
+            all_agents = [
+                a for a in all_agents
+                if user_can_access_agent(current_user, a) or a.id in connected_ids
+            ]
         total = len(all_agents)
         start = (page - 1) * page_size
         return all_agents[start:start + page_size], total

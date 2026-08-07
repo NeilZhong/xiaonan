@@ -1156,12 +1156,33 @@ class PostgresManager(metaclass=SingletonMeta):
                 approved_at TIMESTAMPTZ,
                 approved_by INTEGER,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
+                pinned_version_id INTEGER,
+                pinned_at TIMESTAMPTZ,
+                nickname VARCHAR(80),
+                notify_new_version BOOLEAN NOT NULL DEFAULT TRUE,
                 CONSTRAINT uq_police_agent_connections_user_agent UNIQUE (user_id, agent_id)
             )
             """,
             "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_user ON police_agent_connections(user_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_agent ON police_agent_connections(agent_id)",
             "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_status ON police_agent_connections(status)",
+            "CREATE INDEX IF NOT EXISTS ix_police_agent_connections_pinned ON police_agent_connections(pinned_version_id)",
+            # 绑定表新增字段（P2c：版本 pin / 昵称 / 通知偏好）移至独立事务加列（见下方 guarded 块）
+            "ALTER TABLE IF NOT EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ",
+            "ALTER TABLE IF NOT EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS nickname VARCHAR(80)",
+            "ALTER TABLE IF NOT EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS notify_new_version BOOLEAN NOT NULL DEFAULT TRUE",
+            # 数字警察 ↔ 协助伙伴 关联表（定义侧关联，添加时级联；不复制警员身份）
+            """
+            CREATE TABLE IF NOT EXISTS agent_associated_partners (
+                id SERIAL PRIMARY KEY,
+                digital_police_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                partner_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                CONSTRAINT uq_agent_associated_partners_pair UNIQUE (digital_police_id, partner_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS ix_agent_associated_partners_police ON agent_associated_partners(digital_police_id)",
+            "CREATE INDEX IF NOT EXISTS ix_agent_associated_partners_partner ON agent_associated_partners(partner_id)",
             # 数字警员版本快照（运行中心：流动版本/受控发布/回滚）
             """
             CREATE TABLE IF NOT EXISTS police_agent_versions (
@@ -1342,6 +1363,16 @@ class PostgresManager(metaclass=SingletonMeta):
                 await conn.execute(text("ALTER TABLE IF EXISTS police_audit_logs ADD COLUMN IF NOT EXISTS record_hash VARCHAR(64)"))
         except Exception as e:
             logger.warning(f"加列 police_audit_logs.prev_hash/record_hash 失败（可安全重试）: {e}")
+
+        # P2c 绑定表新增字段（版本 pin / 昵称 / 通知偏好）：独立事务加列，确保不被共享 stmts 事务回滚影响
+        try:
+            async with self.async_engine.begin() as conn:
+                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS pinned_version_id INTEGER"))
+                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMPTZ"))
+                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS nickname VARCHAR(80)"))
+                await conn.execute(text("ALTER TABLE IF EXISTS police_agent_connections ADD COLUMN IF NOT EXISTS notify_new_version BOOLEAN NOT NULL DEFAULT TRUE"))
+        except Exception as e:
+            logger.warning(f"加列 police_agent_connections 绑定字段失败（可安全重试）: {e}")
 
         async with self.async_engine.begin() as conn:
             # 历史未绑定用户的 API Key 会在下方迁移语句里被静默删除，先计数告警
