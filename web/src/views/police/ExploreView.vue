@@ -42,13 +42,21 @@
       <a-spin tip="加载市场中..." />
     </div>
     <a-empty
-      v-else-if="!showHero && !officerItems.length && !skillRows.length && !comingSoon"
+      v-else-if="!showHero && !digitalOfficers.length && !partnerOfficers.length && !skillRows.length && !comingSoon"
       :description="activeType === 'all' ? '暂无相关资产，去发布第一个数字民警吧' : '该分类暂无内容'"
     />
 
     <!-- ===== 2. 本周 / 本月 · 最受欢迎（Hero 展位） ===== -->
     <section v-if="showHero && featured.length" class="xe-feature">
-      <div class="xe-eyebrow">🔥 本周 / 本月 · 最受欢迎</div>
+      <div class="xe-eyebrow-row">
+        <div class="xe-eyebrow">🔥 最受欢迎</div>
+        <a-segmented
+          v-model:value="trendPeriod"
+          :options="trendOptions"
+          size="small"
+          class="xe-trend-switch"
+        />
+      </div>
       <div class="xe-banner">
         <div
           v-for="(f, i) in featured"
@@ -57,7 +65,13 @@
           :class="gradientClass(i)"
           @click="openDetail(f)"
         >
-          <span class="xe-crown">👑</span>
+          <!-- 皇冠：仅排名第一 -->
+          <div v-if="i === 0" class="xe-crown-svg" aria-hidden="true">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: rgb(253, 230, 138); fill: rgb(251, 191, 36);">
+              <path d="M11.562 3.266a.5.5 0 0 1 .876 0L15.39 8.87a1 1 0 0 0 1.516.294L21.183 5.5a.5.5 0 0 1 .798.519l-2.834 10.246a1 1 0 0 1-.956.734H5.81a1 1 0 0 1-.957-.734L2.02 6.02a.5.5 0 0 1 .798-.519l4.276 3.664a1 1 0 0 0 1.516-.294z"></path>
+              <path d="M5 21h14"></path>
+            </svg>
+          </div>
           <div class="xe-hero-shade" />
           <div class="xe-hero-content">
             <h3 class="xe-hero-title">{{ f.name }}</h3>
@@ -72,14 +86,13 @@
       </div>
     </section>
 
-    <!-- ===== 3. 数字警员模块（横向 Swipe 滑动） ===== -->
-    <section v-if="officerItems.length" class="xe-section">
+    <!-- ===== 3a. 数字警员模块（横向 Swipe 滑动） ===== -->
+    <section v-if="showDigitalOfficers" class="xe-section">
       <header class="xe-sec-head">
-        <h2 class="xe-sec-title">{{ officerSectionTitle }}</h2>
+        <h2 class="xe-sec-title">{{ digitalSectionTitle }}</h2>
         <a class="xe-sec-more" @click="onPill('agent')">查看全部 →</a>
       </header>
       <div
-        ref="swipeRef"
         class="swipe-container"
         @pointerdown="onSwipeDown"
         @pointermove="onSwipeMove"
@@ -87,7 +100,7 @@
         @pointerleave="onSwipeUp"
       >
         <div
-          v-for="(item, i) in officerItems"
+          v-for="(item, i) in digitalOfficers"
           :key="`${item.type}-${item.id}`"
           class="swipe-item xe-officer-card"
           :class="gradientClass(i)"
@@ -115,22 +128,23 @@
         <a class="xe-sec-more" @click="onPill('skill')">查看全部 →</a>
       </header>
       <div v-if="skillRows.length" class="xe-list">
-        <div v-for="row in skillRows" :key="row.key" class="xe-row">
+        <div v-for="row in skillRows" :key="row.key" class="xe-row" @click="openSkillDetail(row)">
           <div class="xe-row-icon">
             <span v-if="isEmoji(row.icon)">{{ row.icon }}</span>
             <component :is="row.iconComp" v-else :size="18" />
           </div>
           <div class="xe-row-main">
-            <div class="xe-row-title">{{ row.name }}</div>
-            <div class="xe-row-desc">{{ row.description || '暂无描述' }}</div>
+            <div class="xe-row-title" :title="row.name">{{ row.name }}</div>
+            <div class="xe-row-desc" :title="row.description">{{ row.description || '暂无描述' }}</div>
           </div>
-          <div class="xe-row-action">
-            <span v-if="row.installed" class="xe-installed">当前空间已安装</span>
+          <div class="xe-row-action" @click.stop>
+            <span v-if="row.installed" class="xe-installed">已安装</span>
             <button
               v-else
               type="button"
               class="xe-add"
               :disabled="row.pending"
+              :title="'添加到当前空间'"
               @click="toggleRow(row)"
             >
               <Plus :size="13" />
@@ -139,6 +153,41 @@
         </div>
       </div>
       <a-empty v-else description="该分类市场内容建设中，敬请期待" />
+    </section>
+
+    <!-- ===== 5. 协助伙伴模块（样式与数字警员一致） ===== -->
+    <section v-if="showPartnerOfficers" class="xe-section">
+      <header class="xe-sec-head">
+        <h2 class="xe-sec-title">{{ partnerSectionTitle }}</h2>
+        <a class="xe-sec-more" @click="onPill('partner')">查看全部 →</a>
+      </header>
+      <div
+        class="swipe-container"
+        @pointerdown="onSwipeDown"
+        @pointermove="onSwipeMove"
+        @pointerup="onSwipeUp"
+        @pointerleave="onSwipeUp"
+      >
+        <div
+          v-for="(item, i) in partnerOfficers"
+          :key="`${item.type}-${item.id}`"
+          class="swipe-item xe-officer-card"
+          :class="gradientClass(i)"
+          @click="onOfficerClick(item)"
+        >
+          <span class="xe-officer-badge">{{ typeLabel(item.type) }}</span>
+          <div class="xe-officer-main">
+            <div class="xe-officer-avatar">{{ initial(item.name) }}</div>
+            <div class="xe-officer-name" :title="item.name">{{ item.name }}</div>
+            <div class="xe-officer-desc" :title="item.description">{{ item.description || '暂无简介' }}</div>
+          </div>
+          <div class="xe-officer-foot">
+            <span class="xe-meta"><Download :size="12" /> {{ item.stats?.usage ?? 0 }}</span>
+            <span class="xe-meta xe-star">★ {{ ratingText(item) }}</span>
+            <span class="xe-meta xe-time">{{ relativeTime(item.created_at) }}</span>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ===== 发布抽屉 ===== -->
@@ -271,6 +320,83 @@
         </div>
       </div>
     </transition>
+
+    <!-- ===== ★ 技能/工具/MCP/卡片 详情弹窗 ===== -->
+    <transition name="xe-fade">
+      <div v-if="skillDetailOpen && skillDetailItem" class="xe-overlay" @click.self="closeSkillDetail">
+        <div class="xe-modal" role="dialog" aria-modal="true">
+          <button class="xe-modal-close" aria-label="关闭" @click="closeSkillDetail">
+            <X :size="14" />
+          </button>
+
+          <div class="xe-modal-hero gradient-card-blue">
+            <div class="xe-hero-row">
+              <span class="xe-creator">
+                <span class="xe-creator-avatar">{{ initial(skillDetailItem.author || skillDetailItem.created_by || '小南') }}</span>
+                <span class="xe-creator-name">{{ skillDetailItem.author || skillDetailItem.created_by || '小南官方' }}</span>
+              </span>
+              <span class="xe-type-pill">{{ skillDetailItem.source || (skillDetailItem.source_type === 'builtin' ? '内置技能' : '通用技能') }}</span>
+            </div>
+            <div class="xe-hero-title">{{ skillDetailItem.name }}</div>
+            <p class="xe-hero-desc">{{ skillDetailItem.description || '暂无简介' }}</p>
+          </div>
+
+          <div class="xe-modal-actions">
+            <div class="xe-modal-actions-left">
+              <span class="xe-meta-line">
+                <span class="xe-dot-sep">版本</span> {{ skillDetailItem.version || '—' }}
+              </span>
+              <span v-if="skillDetailItem.installed" class="xe-installed xe-installed--lg">当前空间已安装</span>
+              <button
+                v-else
+                type="button"
+                class="xe-add xe-add--lg"
+                :disabled="skillDetailItem.pending"
+                @click="toggleRow(skillDetailItem)"
+              >
+                <Plus :size="14" /> 添加到当前空间
+              </button>
+            </div>
+          </div>
+
+          <div class="xe-divider" />
+
+          <div class="xe-modal-body">
+            <h4 class="xe-section-title">完整介绍</h4>
+            <p class="xe-intro-text">{{ skillDetailItem.description || '该技能暂未填写详细介绍。' }}</p>
+
+            <h4 class="xe-section-title xe-mt">依赖</h4>
+            <div class="xe-deps">
+              <span
+                v-if="!(skillDetailItem.tool_dependencies || []).length && !(skillDetailItem.mcp_dependencies || []).length && !(skillDetailItem.skill_dependencies || []).length"
+                class="xe-muted"
+              >无外部依赖</span>
+              <span
+                v-for="t in skillDetailItem.tool_dependencies || []"
+                :key="`tool-${t}`"
+                class="xe-dep-chip xe-dep-tool"
+              >工具 · {{ t }}</span>
+              <span
+                v-for="m in skillDetailItem.mcp_dependencies || []"
+                :key="`mcp-${m}`"
+                class="xe-dep-chip xe-dep-mcp"
+              >MCP · {{ m }}</span>
+              <span
+                v-for="s in skillDetailItem.skill_dependencies || []"
+                :key="`skill-${s}`"
+                class="xe-dep-chip xe-dep-skill"
+              >技能 · {{ s }}</span>
+            </div>
+
+            <div class="xe-meta">
+              <span>目录：{{ skillDetailItem.dir_path || '—' }}</span>
+              <span class="xe-dot">·</span>
+              <span>更新于 {{ formatDate(skillDetailItem.updated_at || skillDetailItem.created_at) }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -310,9 +436,12 @@ const reviewText = ref('')
 const reviewRating = ref(0)
 const submittingReview = ref(false)
 
+// ★ 技能/工具/MCP/卡片详情弹窗（独立状态，避免与数字警员弹窗耦合）
+const skillDetailOpen = ref(false)
+const skillDetailItem = ref(null)
+
 // 横向滑动容器与拖拽状态
-const swipeRef = ref(null)
-const drag = reactive({ active: false, startX: 0, startScroll: 0, moved: false })
+const drag = reactive({ active: false, startX: 0, startScroll: 0, moved: false, el: null })
 
 const pills = [
   { label: '全部', value: 'all' },
@@ -322,6 +451,13 @@ const pills = [
   { label: 'MCP', value: 'mcp' },
   { label: '卡片', value: 'card' },
   { label: '协助伙伴', value: 'partner' },
+]
+
+// P5：本周 / 本月 切换（默认本周）
+const trendPeriod = ref('week')
+const trendOptions = [
+  { label: '本周', value: 'week' },
+  { label: '本月', value: 'month' },
 ]
 
 // P5：协助伙伴按功能分类筛选（与数字警员管理页 AGENT_CATEGORIES 一致）
@@ -347,26 +483,44 @@ const showHero = computed(() => activeType.value === 'all')
 const showOfficers = computed(() => ['all', 'agent', 'partner'].includes(activeType.value))
 const showSkills = computed(() => ['all', 'skill', 'tool', 'mcp', 'card'].includes(activeType.value))
 
-// 数字警员卡片（全部=数字民警+协助伙伴；单类=对应类型）
-const officerItems = computed(() => {
+// 数字警员卡片（仅数字民警）
+const digitalOfficers = computed(() => {
   const want = activeType.value
-  return items.value.filter((it) => {
-    if (want === 'partner') return it.type === 'partner'
-    if (want === 'agent') return it.type === 'agent'
-    return it.type === 'agent' || it.type === 'partner'
-  })
+  if (want === 'partner') return []
+  return items.value.filter((it) => it.type === 'agent')
 })
 
-const officerSectionTitle = computed(() => {
-  if (activeType.value === 'partner') return '协助伙伴'
-  if (activeType.value === 'agent') return '数字警员'
-  return '数字警员'
+// 协助伙伴卡片（样式与数字警员一致）
+const partnerOfficers = computed(() => {
+  const want = activeType.value
+  if (want === 'agent') return []
+  return items.value.filter((it) => it.type === 'partner')
 })
 
-// 最受欢迎：按评分 + 使用量取前 2
+// 数字警员区块可见性
+const showDigitalOfficers = computed(() => ['all', 'agent'].includes(activeType.value) && digitalOfficers.value.length > 0)
+// 协助伙伴区块可见性
+const showPartnerOfficers = computed(() => ['all', 'partner'].includes(activeType.value) && partnerOfficers.value.length > 0)
+
+const digitalSectionTitle = computed(() => (activeType.value === 'agent' ? '数字警员' : '数字警员'))
+const partnerSectionTitle = computed(() => (activeType.value === 'partner' ? '协助伙伴' : '协助伙伴'))
+
+// 最受欢迎：按「本周 / 本月」时间窗过滤后，按评分 + 使用量取前 2
+const inPeriod = (item) => {
+  if (!item?.created_at) return true // 无时间戳不参与过滤（兜底展示）
+  const ts = new Date(item.created_at).getTime()
+  if (isNaN(ts)) return true
+  const days = trendPeriod.value === 'week' ? 7 : 30
+  return Date.now() - ts <= days * 86400_000
+}
 const featured = computed(() => {
   if (!showHero.value) return []
-  return [...officerItems.value]
+  const pool = [...digitalOfficers.value, ...partnerOfficers.value].filter(inPeriod)
+  const ranked = [...pool].sort(
+    (a, b) => (b.stats?.rating ?? 0) - (a.stats?.rating ?? 0) || (b.stats?.usage ?? 0) - (a.stats?.usage ?? 0)
+  )
+  // 时间窗内无数据时回退到全量最受欢迎，避免 Hero 空白
+  return (ranked.length ? ranked : [...digitalOfficers.value, ...partnerOfficers.value])
     .sort((a, b) => (b.stats?.rating ?? 0) - (a.stats?.rating ?? 0) || (b.stats?.usage ?? 0) - (a.stats?.usage ?? 0))
     .slice(0, 2)
 })
@@ -376,14 +530,24 @@ const skillRows = computed(() => {
   if (activeType.value !== 'skill' && activeType.value !== 'all') return []
   return skills.value.map((s) => ({
     key: s.slug || s.name,
+    slug: s.slug,
     name: s.name,
     description: s.description,
     icon: s.icon,
     iconComp: s.icon && !isEmoji(s.icon) ? Box : Bot,
     installed: !!s.enabled,
     pending: false,
-    slug: s.slug,
-    source: s.source_type,
+    source_type: s.source_type,
+    source: s.source_type === 'builtin' ? '内置技能' : (s.source_type || '通用技能'),
+    created_by: s.created_by,
+    author: s.created_by === 'system' ? '小南官方' : (s.created_by || '小南官方'),
+    version: s.version,
+    dir_path: s.dir_path,
+    tool_dependencies: s.tool_dependencies,
+    mcp_dependencies: s.mcp_dependencies,
+    skill_dependencies: s.skill_dependencies,
+    updated_at: s.updated_at,
+    created_at: s.created_at,
   }))
 })
 
@@ -449,7 +613,11 @@ async function load() {
       tasks.push(fetchOfficers().then(() => { officersLoaded.value = true }))
     }
     if (showSkills.value && (activeType.value === 'skill' || activeType.value === 'all') && !skillsLoaded.value) {
-      tasks.push(skillApi.listSkills().then((s) => { skills.value = s; skillsLoaded.value = true }))
+      tasks.push(skillApi.listSkills().then((s) => {
+        // 后端返回 { success, data: [...] } 包装，兼容直接数组
+        skills.value = Array.isArray(s) ? s : (s?.data || [])
+        skillsLoaded.value = true
+      }))
     }
     await Promise.all(tasks)
   } catch (e) {
@@ -477,23 +645,26 @@ function onSearch() {
   load()
 }
 
-// ===== 横向滑动：鼠标拖拽 =====
+// ===== 横向滑动：鼠标拖拽（数字警员 / 协助伙伴 各自容器独立） =====
 function onSwipeDown(e) {
-  if (!swipeRef.value) return
+  const el = e.currentTarget
+  if (!el) return
   drag.active = true
   drag.moved = false
-  drag.startX = e.pageX - swipeRef.value.getBoundingClientRect().left
-  drag.startScroll = swipeRef.value.scrollLeft
+  drag.el = el
+  drag.startX = e.pageX - el.getBoundingClientRect().left
+  drag.startScroll = el.scrollLeft
 }
 function onSwipeMove(e) {
-  if (!drag.active || !swipeRef.value) return
-  const x = e.pageX - swipeRef.value.getBoundingClientRect().left
+  if (!drag.active || !drag.el) return
+  const x = e.pageX - drag.el.getBoundingClientRect().left
   const walk = x - drag.startX
   if (Math.abs(walk) > 4) drag.moved = true
-  swipeRef.value.scrollLeft = drag.startScroll - walk
+  drag.el.scrollLeft = drag.startScroll - walk
 }
 function onSwipeUp() {
   drag.active = false
+  drag.el = null
 }
 function onOfficerClick(item) {
   if (drag.moved) {
@@ -510,12 +681,26 @@ async function toggleRow(row) {
   try {
     await skillApi.updateSkillEnabled(row.slug, next)
     row.installed = next
+    // 同步弹窗中显示的启用状态
+    if (skillDetailItem.value?.slug === row.slug) {
+      skillDetailItem.value = { ...skillDetailItem.value, installed: next }
+    }
     message.success(next ? '已启用该技能' : '已关闭该技能')
   } catch (e) {
     message.error('操作失败: ' + (e.message || e))
   } finally {
     row.pending = false
   }
+}
+
+// ★ 技能卡片点击 → 打开详情弹窗
+function openSkillDetail(row) {
+  skillDetailItem.value = { ...row }
+  skillDetailOpen.value = true
+}
+function closeSkillDetail() {
+  skillDetailOpen.value = false
+  skillDetailItem.value = null
 }
 
 async function handleApply(item) {
@@ -757,12 +942,21 @@ onMounted(() => {
 .xe-feature {
   margin-bottom: 30px;
 }
+.xe-eyebrow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
 .xe-eyebrow {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.6px;
   color: var(--gray-600);
-  margin-bottom: 12px;
+}
+.xe-trend-switch :deep(.ant-segmented-item) {
+  font-size: 12px;
 }
 .xe-banner {
   display: grid;
@@ -789,13 +983,20 @@ onMounted(() => {
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.4);
   border-color: rgba(255, 255, 255, 0.28);
 }
-.xe-crown {
+.xe-crown-svg {
   position: absolute;
-  top: 16px;
-  left: 18px;
-  font-size: 22px;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.3));
+  top: 12px;
+  right: 14px;
   z-index: 3;
+  pointer-events: none;
+  transform: rotate(14deg);
+  filter: drop-shadow(0 0 14px rgba(251, 191, 36, 0.75))
+          drop-shadow(0 4px 10px rgba(217, 119, 6, 0.55));
+  animation: explore-crown-float 3.4s ease-in-out infinite;
+}
+@keyframes explore-crown-float {
+  0%, 100% { transform: rotate(14deg) translateY(0); }
+  50%      { transform: rotate(14deg) translateY(-6px); }
 }
 .xe-hero-shade {
   position: absolute;
@@ -994,10 +1195,10 @@ onMounted(() => {
   font-weight: 700;
 }
 
-/* ===== 4. 开箱即用：2 列网格（每栏 4 行，共 8 项） ===== */
+/* ===== 4. 开箱即用：自适应多列网格（更紧凑） ===== */
 .xe-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px;
 }
 .xe-row {
@@ -1010,6 +1211,7 @@ onMounted(() => {
   box-shadow: 0 6px 18px var(--shadow-1);
   background: #fff;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  cursor: pointer;
 }
 .xe-row:hover {
   transform: translateY(-3px);
@@ -1061,6 +1263,10 @@ onMounted(() => {
   border: 1px solid var(--color-success-100);
   border-radius: 999px;
 }
+.xe-installed--lg {
+  padding: 7px 14px;
+  font-size: 13px;
+}
 .xe-add {
   width: 30px;
   height: 30px;
@@ -1076,6 +1282,61 @@ onMounted(() => {
 }
 .xe-add:hover {
   background: var(--color-primary-700);
+}
+.xe-add--lg {
+  width: auto;
+  height: auto;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 4px;
+}
+
+/* ===== 技能详情弹窗专属样式 ===== */
+.xe-meta-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--gray-700);
+}
+.xe-dot-sep {
+  font-size: 12px;
+  color: var(--gray-500);
+}
+.xe-deps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.xe-dep-chip {
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--gray-50);
+  color: var(--gray-800);
+  border: 1px solid var(--gray-200);
+}
+.xe-dep-tool {
+  background: color-mix(in srgb, #38a169 8%, transparent);
+  color: #22543d;
+  border-color: color-mix(in srgb, #38a169 20%, transparent);
+}
+.xe-dep-mcp {
+  background: color-mix(in srgb, #805ad5 8%, transparent);
+  color: #44337a;
+  border-color: color-mix(in srgb, #805ad5 20%, transparent);
+}
+.xe-dep-skill {
+  background: color-mix(in srgb, #3182ce 8%, transparent);
+  color: #2a4365;
+  border-color: color-mix(in srgb, #3182ce 20%, transparent);
+}
+.xe-mt {
+  margin-top: 22px;
 }
 
 /* ===== 详情弹窗（Hero 区深色，正文跟随系统浅色） ===== */
@@ -1438,7 +1699,7 @@ onMounted(() => {
 @media (max-width: 1080px) {
   .xe-banner { grid-template-columns: 1fr; }
   .swipe-item { flex: 0 0 calc(50% - 8px); }
-  .xe-list { grid-template-columns: 1fr; }
+  // .xe-list 用 auto-fill 自适应多列，小屏自动变单列，无需强制
 }
 @media (max-width: 640px) {
   .swipe-item { flex: 0 0 84%; }

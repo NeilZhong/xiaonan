@@ -1,22 +1,32 @@
 <script setup>
+/**
+ * ★ 数字警员（智能体统一管理入口）
+ *  - 智能体模块统一命名「数字警员」
+ *  - 内置 / 市场中添加 / 自建的数字警员全部在此看到（卡片样式）
+ *  - 协助伙伴以 tab 融合：数字警员 / 协助伙伴
+ */
 import { computed, ref, watch } from 'vue'
 
 import PageHeader from '@/components/shared/PageHeader.vue'
 import AgentManagePanel from '@/components/model-management/AgentManagePanel.vue'
+import PartnerManageView from '@/views/police/PartnerManageView.vue'
 
 const activeTab = ref('agents')
 const agentPanelRef = ref(null)
 
 const modelManageTabs = computed(() => [
-  { key: 'agents', label: '智能体' }
+  { key: 'agents', label: '数字警员' },
+  { key: 'partners', label: '协助伙伴' },
 ])
 
-const activeLoading = computed(() => agentPanelRef.value?.loading || false)
-const activeStats = computed(() => agentPanelRef.value?.stats || {})
+const activeLoading = computed(() => (activeTab.value === 'agents' ? agentPanelRef.value?.loading || false : false))
+const activeStats = computed(() => (activeTab.value === 'agents' ? agentPanelRef.value?.stats || {} : {}))
 
-// 切换到智能体面板时刷新数据
+// 切换到数字警员面板时刷新数据
 watch(activeTab, () => {
-  agentPanelRef.value?.refresh?.()
+  if (activeTab.value === 'agents') {
+    agentPanelRef.value?.refresh?.()
+  }
 })
 </script>
 
@@ -24,11 +34,11 @@ watch(activeTab, () => {
   <div class="agent-manage-view">
     <PageHeader
       v-model:active-key="activeTab"
-      title="智能体"
+      title="数字警员"
       :tabs="modelManageTabs"
       :loading="activeLoading"
       :show-border="true"
-      aria-label="智能体管理视图切换"
+      aria-label="数字警员管理视图切换"
     >
       <template #info>
         <div v-if="activeTab === 'agents'" class="summary-strip">
@@ -38,12 +48,18 @@ watch(activeTab, () => {
           <span>{{ activeStats.manageable || 0 }} 个可管理</span>
           <span>{{ activeStats.global || 0 }} 个全局</span>
         </div>
+        <div v-else class="summary-strip">
+          <span>协助伙伴 = 被数字警员挂载的专业能力（子智能体）</span>
+        </div>
       </template>
     </PageHeader>
 
     <div class="agent-manage-content">
       <div v-show="activeTab === 'agents'" class="tab-panel">
         <AgentManagePanel ref="agentPanelRef" />
+      </div>
+      <div v-show="activeTab === 'partners'" class="tab-panel">
+        <PartnerManageView />
       </div>
     </div>
   </div>

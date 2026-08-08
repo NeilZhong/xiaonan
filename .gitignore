@@ -108,3 +108,11 @@ backend/scripts/*_out.txt
 backend/scripts/_seed_out.txt
 backend/scripts/backup_police_agents_*.sql
 
+
+### 本地开发临时产物（不入库）
+web/.shots/
+web/.chrome-profile*/
+web/.npm-cache*/
+ct_prof.js
+ct_sec.js
+avatar_preview.html

@@ -16,10 +16,7 @@ import {
   Shield,
   Briefcase,
   SlidersHorizontal,
-  Handshake,
   Store,
-  UsersRound,
-  ShieldCheck,
   Gauge
 } from 'lucide-vue-next'
 import { CheckSquareOutlined } from '@ant-design/icons-vue'
@@ -217,28 +214,15 @@ const mainList = computed(() => {
     })
   }
 
+  // ★ 智能体模块统一命名为「数字警员」：入口即 agent-manage，
+  //   内置 / 市场中添加 / 自建的数字警员全部在此看到；协助伙伴以 tab 融合。
+  //   兼容旧路由 activePaths，保证 /agent-manage、/police/my-agents、/police/partners 均高亮。
   items.push({
-    name: '智能体',
+    name: '数字警员',
     path: '/agent-manage',
     icon: Box,
     activeIcon: Box,
-    activePaths: ['/agent-manage']
-  })
-
-  items.push({
-    name: '协助伙伴',
-    path: '/police/partners',
-    icon: Handshake,
-    activeIcon: Handshake,
-    activePaths: ['/police/partners']
-  })
-
-  items.push({
-    name: '我的数字警员',
-    path: '/police/my-agents',
-    icon: UsersRound,
-    activeIcon: UsersRound,
-    activePaths: ['/police/my-agents']
+    activePaths: ['/agent-manage', '/police/my-agents', '/police/partners']
   })
 
   items.push({
@@ -279,13 +263,7 @@ const mainList = computed(() => {
       icon: BarChart3,
       activeIcon: BarChart3
     })
-    items.push({
-      name: '审核台',
-      path: '/police/governance/review',
-      icon: ShieldCheck,
-      activeIcon: ShieldCheck,
-      activePaths: ['/police/governance/review']
-    })
+    // ★ 审核台已合并进「工作台」待处理面板（待审核 tab 内含智能体上架审批），不再单独占侧边栏
     items.push({
       name: '运行中心',
       path: '/police/governance/runtime',
