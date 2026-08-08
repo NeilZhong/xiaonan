@@ -79,6 +79,58 @@
       </div>
     </template>
 
+    <!-- 协助伙伴发布表单（P5） -->
+    <template v-else-if="selectedType === 'partner'">
+      <a-divider style="margin: 12px 0" />
+      <div class="mp-form">
+        <div class="mp-field">
+          <div class="mp-label">选择要发布的协助伙伴</div>
+          <a-input-search
+            v-model:value="partnerKeyword"
+            placeholder="搜索协助伙伴"
+            allow-clear
+            size="small"
+            @search="loadMyPartners"
+          />
+        </div>
+        <div v-if="myPartners.length" class="mp-agent-list">
+          <div
+            v-for="p in myPartners"
+            :key="p.id"
+            class="mp-agent-item"
+            :class="{ selected: selectedPartnerId === p.id }"
+            @click="selectedPartnerId = p.id"
+          >
+            <span class="mp-agent-name">{{ p.name }}</span>
+            <span class="mp-agent-meta">{{ categoryLabel(p.category) }}</span>
+          </div>
+        </div>
+        <div v-else class="mp-empty">暂无可选协助伙伴（仅创建者或超管可发布）</div>
+
+        <div class="mp-field" style="margin-top: 12px">
+          <div class="mp-label">发布说明</div>
+          <a-textarea
+            v-model:value="reason"
+            :rows="3"
+            maxlength="200"
+            show-count
+            placeholder="说明这个协助伙伴的用途与亮点（提交审核时可见）"
+          />
+        </div>
+
+        <a-button
+          type="primary"
+          block
+          class="mp-submit"
+          :disabled="!selectedPartnerId"
+          :loading="submitting"
+          @click="submit"
+        >
+          提交审核
+        </a-button>
+      </div>
+    </template>
+
     <!-- 其它类型占位 -->
     <div v-else-if="selectedType && selectedType !== 'agent'" class="mp-coming">
       「{{ currentTypeName }}」发布即将支持，敬请期待。
@@ -89,12 +141,26 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { policeMarketApi, policeAgentApi } from '@/apis/police_api'
+import { policeMarketApi, policeAgentApi, policePartnerApi } from '@/apis/police_api'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
 })
 const emit = defineEmits(['update:open', 'published'])
+
+const CATEGORY_LABELS = {
+  case_analysis: '案件分析',
+  fund_tracking: '资金追踪',
+  intelligence: '情报研判',
+  evidence_mgmt: '调证取证',
+  legal_review: '法制审核',
+  interrogation: '审讯辅助',
+  image_recon: '图像侦查',
+  anti_fraud: '反诈劝阻',
+  command: '指挥调度',
+  partner_generic: '通用协助',
+}
+const categoryLabel = (c) => CATEGORY_LABELS[c] || c || '未分类'
 
 const publishTypes = [
   { key: 'agent', icon: '🧑‍✈️', name: '数字民警', desc: '发布完整数字民警配置', available: true },
@@ -102,7 +168,7 @@ const publishTypes = [
   { key: 'tool', icon: '🛠️', name: '工具', desc: '发布自定义工具', available: false, soon: true },
   { key: 'mcp', icon: '🔌', name: 'MCP 服务', desc: '发布 MCP 服务连接', available: false, soon: true },
   { key: 'card', icon: '🃏', name: '卡片', desc: '发布交互卡片', available: false, soon: true },
-  { key: 'partner', icon: '🤝', name: '协助伙伴', desc: '发布子智能体', available: false, soon: true },
+  { key: 'partner', icon: '🤝', name: '协助伙伴', desc: '发布子智能体', available: true },
 ]
 
 const selectedType = ref('')
@@ -113,16 +179,16 @@ const currentTypeName = computed(
 const agentKeyword = ref('')
 const myAgents = ref([])
 const selectedAgentId = ref(null)
+const partnerKeyword = ref('')
+const myPartners = ref([])
+const selectedPartnerId = ref(null)
 const reason = ref('')
 const submitting = ref(false)
 
 function selectType(t) {
-  if (t.key === 'agent') {
-    selectedType.value = t.key
-    loadMyAgents()
-  } else {
-    selectedType.value = t.key // 展示「即将支持」占位
-  }
+  selectedType.value = t.key
+  if (t.key === 'agent') loadMyAgents()
+  if (t.key === 'partner') loadMyPartners()
 }
 
 async function loadMyAgents() {
@@ -134,13 +200,28 @@ async function loadMyAgents() {
   }
 }
 
+async function loadMyPartners() {
+  try {
+    const res = await policePartnerApi.list({
+      keyword: partnerKeyword.value || undefined,
+      status: 'mine',
+      page_size: 100,
+    })
+    myPartners.value = res.items || []
+  } catch (e) {
+    message.error('加载协助伙伴失败: ' + (e.message || e))
+  }
+}
+
 async function submit() {
-  if (!selectedAgentId.value) return
+  if (selectedType.value === 'agent' && !selectedAgentId.value) return
+  if (selectedType.value === 'partner' && !selectedPartnerId.value) return
   submitting.value = true
   try {
+    const asset_id = selectedType.value === 'partner' ? selectedPartnerId.value : selectedAgentId.value
     const res = await policeMarketApi.publish({
-      type: 'agent',
-      asset_id: selectedAgentId.value,
+      type: selectedType.value,
+      asset_id,
       reason: reason.value || null,
     })
     message.success(res?.message || '已提交审核')
@@ -157,9 +238,12 @@ async function submit() {
 function resetForm() {
   selectedType.value = ''
   selectedAgentId.value = null
+  selectedPartnerId.value = null
   reason.value = ''
   agentKeyword.value = ''
+  partnerKeyword.value = ''
   myAgents.value = []
+  myPartners.value = []
 }
 
 watch(

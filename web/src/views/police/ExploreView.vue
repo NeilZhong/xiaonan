@@ -15,6 +15,15 @@
         </button>
       </div>
       <div class="xe-right">
+        <a-select
+          v-if="activeType === 'partner'"
+          v-model:value="categoryFilter"
+          placeholder="按功能分类筛选"
+          allow-clear
+          class="xe-category-filter"
+          :options="CATEGORY_OPTIONS"
+          @change="onCategoryChange"
+        />
         <a-input-search
           v-model:value="keyword"
           placeholder="搜索数字民警、技能、工具..."
@@ -315,6 +324,21 @@ const pills = [
   { label: '协助伙伴', value: 'partner' },
 ]
 
+// P5：协助伙伴按功能分类筛选（与数字警员管理页 AGENT_CATEGORIES 一致）
+const CATEGORY_OPTIONS = [
+  { value: 'case_analysis', label: '案件分析' },
+  { value: 'fund_tracking', label: '资金追踪' },
+  { value: 'intelligence', label: '情报研判' },
+  { value: 'evidence_mgmt', label: '调证取证' },
+  { value: 'legal_review', label: '法制审核' },
+  { value: 'interrogation', label: '审讯辅助' },
+  { value: 'image_recon', label: '图像侦查' },
+  { value: 'anti_fraud', label: '反诈劝阻' },
+  { value: 'command', label: '指挥调度' },
+  { value: 'partner_generic', label: '通用协助' },
+]
+const categoryFilter = ref('')
+
 const GRADIENTS = ['gradient-card-blue', 'gradient-card-purple', 'gradient-card-emerald', 'gradient-card-dark']
 const gradientClass = (i) => GRADIENTS[((i % 4) + 4) % 4]
 
@@ -381,6 +405,7 @@ const markKey = (item) => `${item.type}-${item.id}`
 
 const actionLabel = (item) => {
   if (appliedSet.value.has(markKey(item))) return '已申请'
+  if (item.type === 'partner') return '添加'
   if (item.apply_mode === 'connect') return '申请使用'
   if (item.apply_mode === 'equip_guided') return '关注使用'
   return '选用模板'
@@ -403,13 +428,16 @@ async function fetchOfficers() {
   const res = await policeMarketApi.explore({
     type: 'all',
     keyword: keyword.value || undefined,
+    category: categoryFilter.value || undefined,
     page: 1,
     page_size: 50,
   })
   items.value = res.items || []
   const conns = await policeConnectionApi.list()
   appliedSet.value = new Set(
-    (conns.items || []).filter((c) => c.agent).map((c) => `agent-${c.agent.id}`),
+    (conns.items || [])
+      .filter((c) => c.agent)
+      .map((c) => (c.agent.is_subagent ? `partner-${c.agent.id}` : `agent-${c.agent.id}`)),
   )
 }
 
@@ -433,6 +461,13 @@ async function load() {
 
 function onPill(val) {
   activeType.value = val
+  // 切出协助伙伴 tab 时清空分类筛选，避免残留过滤影响其它 tab
+  if (val !== 'partner') categoryFilter.value = ''
+  load()
+}
+
+function onCategoryChange() {
+  officersLoaded.value = false
   load()
 }
 
@@ -489,7 +524,13 @@ async function handleApply(item) {
   try {
     const res = await policeMarketApi.apply(item.type, item.id)
     appliedSet.value.add(markKey(item))
-    message.success(res?.message || '操作成功')
+    // P5：添加数字警员时若级联关联了协助伙伴，须明确提示一并添加
+    const cascaded = res?.cascaded_partner_ids
+    if (cascaded?.length) {
+      message.success(`已添加「${item.name}」，并一并添加 ${cascaded.length} 个关联协助伙伴`)
+    } else {
+      message.success(res?.message || '操作成功')
+    }
   } catch (e) {
     message.error('申请失败: ' + (e.message || e))
   } finally {

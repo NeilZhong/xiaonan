@@ -6,6 +6,8 @@
 
 ## v0.7.2 (current)
 
+- P5 协助伙伴一等实体（前端补齐 + 市场绑定语义修正）：市场发布抽屉 `MarketPublishDrawer.vue` 的「协助伙伴」由「即将支持」占位改为可用（选择本人创建的协助伙伴 + 发布说明 + 提交审核，复用 partner 共享审批链）；协助伙伴创建/编辑抽屉 `PartnerEditDrawer.vue` 功能分类改为**必填**（协助伙伴按功能分类在市场检索与筛选）；探索市场 `ExploreView.vue` 的「协助伙伴」tab 新增功能分类筛选维度（复用 9 大类 + 通用协助）；市场单独添加协助伙伴由「关注使用（仅引导）」改为**幂等建立 binding**（后端 `police_market_service.apply` partner 分支复用 `ensure_connection`，与级联添加同语义，满足「单独添加=绑定」产品模型；apply_mode 由 equip_guided 改 connect，前端按钮文案「添加」）；添加数字警员时若级联关联协助伙伴，前端明确提示「一并添加 N 个关联协助伙伴」；appliedSet 同时标记 partner 连接（已添加置灰）。新增集成测试 `test_police_market_partner.py`（市场 partner apply 建绑定 + mine 可见 + 幂等 + explore apply_mode=connect，容器内全绿，回归 7 项全绿）。
+
 - P4 前端重构：新增全屏 `AgentStudioView.vue`（`/agent-manage/studio`）收拢智能体编辑，替代原 `AgentEditModal` 弹窗（智能体管理/档案页/对话页三处入口均改跳转，删除旧组件）；新建模式支持「参考已有智能体」复制配置草稿另存新智能体。新增「我的数字警员」页 `MyAgentsView.vue`（`/police/my-agents`，侧边栏菜单）：绑定列表 + 新版角标（对比 current_version_id 与 pinned_version_id）+ 套用最新/回退到某版本/跟随最新 + 昵称与新版通知偏好；档案页同步展示绑定感知版本区块。`policeConnectionApi` 补齐 mine/pin/unpin/setPrefs（`base.js` 新增 `apiPatch`）。市场卡片保持单「添加」按钮（回归确认无「以此创建」）。
 
 - 工作台升级为三 Tab（模块 G 日常办公/能力演进/智能孵化 + 模块 F 智能孵化）：`PoliceDashboardView.vue` 顶部新增分段切换，默认「日常办公」保留原 v2 数据驾驶舱全部内容；「能力演进」展示技能诊断（模板数/成功率/待优化）、连接器、协助伙伴高频协作 Top3 三张渐变卡片（点击跳任务模板/运行控制台/伙伴管理）；「智能孵化」提供对话式生成入口 + 从零孵化/继续打磨双模式 + 我的数字民警完成度进度条（灵魂20+技能30+连接器20+审批30，附推荐下一步）。后端新增 `police_evolution_service.py`（GET /police/dashboard/evolution 与 /incubation，基于现有表统计不引新表）与 `police_incubation_service.py` + `police_incubation_router.py`（POST /police/incubation/create 规则化草案生成不落库、GET /drafts、POST /{id}/refine、GET /{id}/completeness；名称从描述正则抽取、技能按关键词匹配模板 Top3，LLM 深度生成预留）。容器冒烟验证 evolution/create 真实跑通。

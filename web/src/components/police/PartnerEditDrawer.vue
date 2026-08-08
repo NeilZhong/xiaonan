@@ -64,6 +64,10 @@ async function handleSave() {
     message.error('请填写协助伙伴名称')
     return
   }
+  if (!form.category) {
+    message.error('请选择功能分类（协助伙伴按功能分类在市场检索与筛选）')
+    return
+  }
   saving.value = true
   try {
     const payload = {
@@ -108,12 +112,11 @@ async function handleSave() {
         <a-form-item label="名称" required>
           <a-input v-model:value="form.name" placeholder="如：笔录要素抽取助手" />
         </a-form-item>
-        <a-form-item label="功能分类">
+        <a-form-item label="功能分类" required>
           <a-select
             v-model:value="form.category"
             :options="AGENT_CATEGORIES"
-            placeholder="选择分类"
-            allow-clear
+            placeholder="选择分类（必填）"
           />
         </a-form-item>
         <a-form-item label="描述">

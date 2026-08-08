@@ -22,6 +22,7 @@ from sqlalchemy import select
 
 from yuxi.repositories.agent_repository import user_can_access_agent, user_can_manage_agent
 from yuxi.repositories.police_agent_repository import police_agent_repository
+from yuxi.repositories.police_binding_repository import agent_binding_repository
 from yuxi.services.police_partner_service import police_partner_service
 from yuxi.services.police_service import police_agent_service, write_audit_log
 from yuxi.services.police_task_template_service import police_task_template_service
@@ -122,7 +123,7 @@ class PoliceMarketService:
                 "author": it.get("badge_number") or it.get("author") or "社区伙伴",
                 "avatar": it.get("icon") or "",
                 "tags": it.get("capabilities") or [],
-                "apply_mode": "equip_guided",
+                "apply_mode": "connect",
                 "stats": {"usage": 0, "rating": 0, "review_count": 0},
                 "created_at": it.get("created_at") or "",
             })
@@ -180,7 +181,7 @@ class PoliceMarketService:
         """按 apply_mode 处理申请：
 
         - agent → connect：建立 police_agent_connections（不复制警员身份）
-        - partner → equip_guided：仅返回引导信息，前端跳转档案页装备区
+        - partner → bind：单独添加建立 binding（幂等，与级联添加同语义，P5）
         - template → install：MVP 仅确认解锁，不复制
         """
         if type == "agent":
@@ -191,11 +192,24 @@ class PoliceMarketService:
             partner = await police_partner_service.get_partner(asset_id)
             if not partner:
                 raise ValueError("协助伙伴不存在")
-            return {
-                "ok": True,
-                "mode": "equip_guided",
-                "message": "已关注该协助伙伴，请前往数字警员档案页「装备伙伴」区挂载使用",
-            }
+            # P5：单独添加 = 建立 binding（与数字警员「添加」一致：绑定共享实例不复制）
+            conn, _created = await agent_binding_repository.ensure_connection(
+                user_id=current_user.id, agent_id=asset_id, status="active",
+            )
+            await write_audit_log(
+                action="connection.apply",
+                resource_type="partner",
+                resource_id=asset_id,
+                user_id=current_user.id,
+                user_name=getattr(current_user, "name", None),
+                details={"partner_name": partner.get("name")},
+            )
+            result = conn.to_dict()
+            result["agent"] = {"id": asset_id, "name": partner.get("name"),
+                               "is_subagent": True}
+            result["mode"] = "bind"
+            result["message"] = "已添加该协助伙伴，可在「我的数字警员」中管理"
+            return result
         template = await police_task_template_service.get(asset_id)
         if not template:
             raise ValueError("任务模板不存在")
